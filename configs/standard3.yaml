@@ -1,0 +1,133 @@
+enemy_color: "red"
+# enemy_color: "blue"
+
+#####-----神经网络参数-----#####
+yolo_name: yolov5
+classify_model: assets/tiny_resnet.onnx
+yolo11_model_path: assets/yolo11.xml
+yolov8_model_path: assets/yolov8.xml
+yolov5_model_path: assets/yolov5.xml
+device: CPU
+min_confidence: 0.8
+use_traditional: false
+
+#####-----ROI-----#####
+roi: 
+  x: 420
+  y: 50
+  width: 600
+  height: 600
+
+use_roi: false
+
+#####-----传统方法参数-----#####
+threshold: 150
+max_angle_error: 45 # degree
+min_lightbar_ratio: 1.5
+max_lightbar_ratio: 20
+min_lightbar_length: 8
+min_armor_ratio: 1
+max_armor_ratio: 5
+max_side_ratio: 1.5
+max_rectangular_error: 25 # degree
+
+#####-----tracker参数-----#####
+min_detect_count: 5 # 最小确认帧数
+max_temp_lost_count: 15 #最大暂存丢失帧数
+outpost_max_temp_lost_count: 75
+
+#####-----aimer数-----#####
+yaw_offset: 2.5 # degree -2.5
+pitch_offset: 2.4 # degree 2
+comming_angle: 60 # degree 切入角
+leaving_angle: 20 # degree 切出角
+decision_speed: 7 # rad/s 决策速度
+high_speed_delay_time: 0.05 # s
+low_speed_delay_time: 0.05 # s planner use this value
+
+#####-----shooter参数-----#####
+first_tolerance: 3 # 近距离射击容差，degree
+second_tolerance: 2 # 远距离射击容差，degree
+judge_distance: 2 #距离判断阈值
+auto_fire: true # 是否由自瞄控制射击
+
+camera_name: "hikrobot"
+exposure_ms: 3.0
+gain: 16.0
+vid_pid: "2bdf:0001"
+
+#  1  0  0
+#  0  1  0
+#  0  0  1
+# 重投影误差: 0.2306px
+camera_matrix: [2442.5304749177199, 0, 731.17452249534051, 0, 2371.5149834039908, 596.64702898586643, 0, 0, 1]
+distort_coeffs: [-0.11653686548721244, 0.24551521188463793, 0.0039319221499908904, 0.0017333678296863461, 0]
+
+R_gimbal2imubody: [1, 0, 0, 0, 1, 0, 0, 0, 1]
+
+# 相机同理想情况的偏角: yaw1.16 pitch-0.31 roll5.71 degree
+# 标定板到世界坐标系原点的水平距离: 2.68 m
+# 标定板同竖直摆放时的偏角: yaw-88.61 pitch7.16 roll3.81 degree
+R_camera2gimbal: [-0.020636912731324751, -0.0032975320717751294, 0.99978159820790646, -0.99483189289435459, 0.09950477445739446, -0.020206551918082242, -0.099416410683321188, -0.99503162067464879, -0.0053339614196713245]
+t_camera2gimbal: [-0.017505578613869227, -0.023555207264750914, 0.052398191946165622]
+
+
+# R_gimbal2imubody: [1, 0, 0, 0, 1, 0, 0, 0, 1]
+
+# R_camera2gimbal: [0, 0, 0, 0, 0, 0, 0, 0, 0]
+# t_camera2gimbal: [0, 0, 0]
+
+# camera_matrix: [2409.7152642683413, 0, 758.61329443255465, 0, 2414.7510959634988, 557.41602151513473, 0, 0, 1]
+# distort_coeffs: [-0.093823872229998218, 0.13241367520826761, -0.00049595091948403957, 0.0034239814170849577, 0]
+
+# R_gimbal2imubody: [1, 0, 0, 0, 1, 0, 0, 0, 1]
+
+# # 相机同理想情况的偏角: yaw1.84 pitch-0.52 roll-1.58 degree
+# # 标定板到世界坐标系原点的水平距离: 1.71 m
+# # 标定板同竖直摆放时的偏角: yaw64.56 pitch0.98 roll-1.65 degree
+# R_camera2gimbal: [-0.031761731832322448, -0.010002856264969641, 0.99944541384587571, -0.99911561718289577, -0.027247926944787584, -0.032023959443703467, 0.027553146685127684, -0.99957865790729727, -0.009128568562159857]
+# t_camera2gimbal: [0.18830961850764122, -0.06356702631312991, 0.047659856422023937]
+
+
+
+# Linux 接usb转ttl 设备名 ttyUSB0
+# 接cboard虚拟串口 设备名 ttyACM0
+#####-----cboard参数-----#####  
+serial_device: "/dev/gimbal"   # 串口设备
+serial_baudrate: 115200         # 波特率
+
+# sudo chmod 777 /dev/ttyACM0
+# cmake -B build
+# make -C build
+
+# #####-----cboard参数-----#####
+# quaternion_canid: 0x100
+# bullet_speed_canid: 0x101
+# send_canid: 0xff
+# can_interface: "can0"
+
+#####-----gimbal参数-----#####
+com_port: "/dev/gimbal"
+yaw_kp: 0
+yaw_kd: 0
+pitch_kp: 0
+pitch_kd: 0
+
+#####-----planner-----#####
+# fire_thresh: 0.0035
+fire_thresh: 0.0001
+
+max_yaw_acc: 10
+Q_yaw: [9e5, 0]
+R_yaw: [3]
+
+max_pitch_acc: 50
+Q_pitch: [9e6, 0]
+R_pitch: [1]
+
+#####-----buff_detector参数-----#####
+model: "assets/yolo11_buff_int8.xml"
+
+#####-----buff_aimer参数-----#####
+fire_gap_time: 0.700   # s
+predict_time: 0.120     # s
