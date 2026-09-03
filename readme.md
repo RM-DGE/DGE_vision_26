@@ -61,71 +61,97 @@ https://github.com/user-attachments/assets/606c2907-2f11-4392-b3fe-7ee4b7b6fd29
 IMU型号：使用C板内置BMI088作为IMU\
 通信方式：USB2CAN（旧）、MicroUSB虚拟串口（新）\
 辅助工具：NoMachine（远程桌面）、PlotJuggler（绘制曲线图）
-    ```bash
-    sudo snap install plotjuggler
-    ```
+注：使用有线连接小电脑需要将双方配置到同一网段下，将IPV4设为静态。
 
-    ```bash
-    sudo apt install ros-humble-plotjuggler-ros
-    ros2 run plotjuggler plotjuggler
-    ```
+ 本机使用 FishROS 安装 ROS 2 Humble，ROS 环境位于 `/opt/ros/humble`。检查 ROS 环境：
+ ```bash
+ ros2 --version
+ ```
+
+ PlotJuggler 使用 ROS 2 插件时可直接运行：
+ ```bash
+ source /opt/ros/humble/setup.bash
+ ros2 run plotjuggler plotjuggler
+ ```
+
+ 如果系统尚未安装 PlotJuggler，再安装对应的 ROS 2 Humble 软件包：
+ ```bash
+ sudo apt update
+ sudo apt install -y ros-humble-plotjuggler-ros
+ ```
 
 ### 3.2 编译方式
 1. 安装依赖项：
-   - [MindVision SDK](https://mindvision.com.cn/category/software/sdk-installation-package/)或[HikRobot SDK](https://www.hikrobotics.com/cn2/source/support/software/MVS_STD_GML_V2.1.2_231116.zip)
-   - [OpenVINO](https://docs.openvino.ai/2024/get-started/install-openvino/install-openvino-archive-linux.html)
+   - [MindVision SDK](https://mindvision.com.cn/category/software/sdk-installation-package/) 或 [HikRobot SDK](https://www.hikrobotics.com/cn/machinevision/service/download/?module=0)。本仓库已自带 HikRobot SDK 的头文件和 x86_64 库，位于 `io/hikrobot/`。
+   - [OpenVINO 2024.6 Linux archive](https://docs.openvino.ai/2024/get-started/install-openvino/install-openvino-archive-linux.html)
+   - [Ceres Solver](http://ceres-solver.org/installation.html)
 
-    ```bash
-    sudo apt update
-    sudo apt install -y wget gnupg
 
-    # 下载密钥并转换为 .gpg 格式（不再用 apt-key）
-    wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
-    | gpg --dearmor \
-    | sudo tee /etc/apt/trusted.gpg.d/intel-openvino-2024.gpg > /dev/null
+   - 其余
+   ```bash
+   sudo apt update
+   sudo apt install -y \
+       curl git g++ cmake make can-utils \
+       libopencv-dev libfmt-dev libeigen3-dev libspdlog-dev \
+       libyaml-cpp-dev libusb-1.0-0-dev libserial-dev \
+       nlohmann-json3-dev openssh-server screen
+   ```
 
-    echo "deb https://apt.repos.intel.com/openvino/2024 ubuntu22 main" \
-    | sudo tee /etc/apt/sources.list.d/intel-openvino-2024.list
+   **安装 OpenVINO C++ Runtime 2024.6**
 
-    sudo apt update
-    sudo apt install -y openvino
-    #  验证
-    ovc --version
-    ```
-    
-   - [Ceres](http://ceres-solver.org/installation.html)
+   按 [OpenVINO 官方 Linux archive 文档](https://docs.openvino.ai/2024/get-started/install-openvino/install-openvino-archive-linux.html) 下载 Ubuntu 22.04、x86_64 归档包。安装路径必须与项目 `CMakeLists.txt` 中的路径一致：
+   ```bash
+   cd /tmp
+   curl -fL --retry 5 --retry-delay 3 \
+     https://storage.openvinotoolkit.org/repositories/openvino/packages/2024.6/linux/l_openvino_toolkit_ubuntu22_2024.6.0.17404.4c0f47d2335_x86_64.tgz \
+     -o openvino_2024.6.0.tgz
+   tar -xzf openvino_2024.6.0.tgz
+   sudo mkdir -p /opt/intel
+   sudo mv l_openvino_toolkit_ubuntu22_2024.6.0.17404.4c0f47d2335_x86_64 /opt/intel/openvino_2024.6.0
+   sudo ln -sfn openvino_2024.6.0 /opt/intel/openvino_2024
+   sudo -E /opt/intel/openvino_2024.6.0/install_dependencies/install_openvino_dependencies.sh
+   ```
+
+   每个新终端中初始化 OpenVINO 的 C++ 编译和运行环境：
+   ```bash
+   source /opt/intel/openvino_2024/setupvars.sh
+   echo "$OpenVINO_DIR"
+   test -f "$OpenVINO_DIR/OpenVINOConfig.cmake" && echo "OpenVINO CMake ready"
+   test -f /opt/intel/openvino_2024.6.0/runtime/include/openvino/openvino.hpp && echo "OpenVINO headers ready"
+   test -f /opt/intel/openvino_2024.6.0/runtime/lib/intel64/libopenvino.so && echo "OpenVINO library ready"
+   ```
+
+   **安装 Ceres Solver**
+
+   Ceres 在本项目中作为可选算法模块的 C++ 依赖。Ubuntu 22.04 软件源已提供开发包，它会同时安装头文件、库文件及所需依赖，不需要单独编译源码：
    ```bash
    sudo apt update
    sudo apt install -y libceres-dev
    ```
-   - 其余：
-    ```bash
-    sudo apt install -y \
-        git \
-        g++ \
-        cmake \
-        can-utils \
-        <!-- libopencv-dev \ -->
-        libfmt-dev \
-        libeigen3-dev \
-        libspdlog-dev \
-        libyaml-cpp-dev \
-        libusb-1.0-0-dev \
-        nlohmann-json3-dev \
-        openssh-server \
-        screen
-    ```
+
+   检查 Ceres 是否安装成功：
+   ```bash
+   dpkg-query -W -f='${Package} ${Version}\n' libceres-dev
+   test -f /usr/include/ceres/ceres.h && echo "Ceres headers ready"
+   ```
+
+   Ceres 官方安装说明：<http://ceres-solver.org/installation.html>
+
 
 2. 编译：
     ```bash
+    source /opt/intel/openvino_2024/setupvars.sh
     cmake -B build
-    make -C build/ -j`nproc`
+    cmake --build build --parallel `nproc`
     ```
 
-3. 运行demo:
+3. 运行程序：
     ```bash
-    ./build/auto_aim_test
+    ./build/standard
     ```
+
+   当前 CMake 默认生成 `standard` 。 `auto_aim_debug_mpc`、`auto_aim_test` 已在
+   `CMakeLists.txt` 中注释，不属于当前默认构建目标。
 
 4. 注册自启：
     1. 确保已安装`screen`:
