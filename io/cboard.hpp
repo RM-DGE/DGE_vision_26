@@ -11,7 +11,6 @@
 #include <mutex>   // Added for thread safety
 
 #include "io/command.hpp"
-#include "io/socketcan.hpp"
 #include "tools/logger.hpp"
 
 namespace io
