@@ -4,17 +4,20 @@
 
 #include "io/camera.hpp"
 #include "io/dm_imu/dm_imu.hpp"
+#include "io/gimbal/gimbal.hpp"
 #include "tasks/auto_aim/aimer.hpp"
 #include "tasks/auto_aim/multithread/commandgener.hpp"
 #include "tasks/auto_aim/multithread/mt_detector.hpp"
+#include "tasks/auto_aim/planner/planner.hpp"
 #include "tasks/auto_aim/shooter.hpp"
 #include "tasks/auto_aim/solver.hpp"
 #include "tasks/auto_aim/tracker.hpp"
-#include "tasks/auto_buff/buff_aimer.hpp"
-#include "tasks/auto_buff/buff_detector.hpp"
-#include "tasks/auto_buff/buff_solver.hpp"
-#include "tasks/auto_buff/buff_target.hpp"
-#include "tasks/auto_buff/buff_type.hpp"
+#include "tasks/auto_aim/yolo.hpp"
+// #include "tasks/auto_buff/buff_aimer.hpp"
+// #include "tasks/auto_buff/buff_detector.hpp"
+// #include "tasks/auto_buff/buff_solver.hpp"
+// #include "tasks/auto_buff/buff_target.hpp"
+// #include "tasks/auto_buff/buff_type.hpp"
 #include "tools/exiter.hpp"
 #include "tools/img_tools.hpp"
 #include "tools/logger.hpp"
@@ -52,11 +55,11 @@ int main(int argc, char * argv[])
   tools::ThreadSafeQueue<std::optional<auto_aim::Target>, true> target_queue(1);
   target_queue.push(std::nullopt);
 
-  auto_buff::Buff_Detector buff_detector(config_path);
-  auto_buff::Solver buff_solver(config_path);
-  auto_buff::SmallTarget buff_small_target;
-  auto_buff::BigTarget buff_big_target;
-  auto_buff::Aimer buff_aimer(config_path);
+  // auto_buff::Buff_Detector buff_detector(config_path);
+  // auto_buff::Solver buff_solver(config_path);
+  // auto_buff::SmallTarget buff_small_target;
+  // auto_buff::BigTarget buff_big_target;
+  // auto_buff::Aimer buff_aimer(config_path);
 
   cv::Mat img;
   Eigen::Quaterniond q;
@@ -109,32 +112,32 @@ int main(int argc, char * argv[])
         target_queue.push(targets.front());
       else
         target_queue.push(std::nullopt);
+    } else {
+      gimbal.send(false, false, 0, 0, 0, 0, 0, 0);
     }
 
     /// 打符
-    else if (mode.load() == io::GimbalMode::SMALL_BUFF || mode.load() == io::GimbalMode::BIG_BUFF) {
-      buff_solver.set_R_gimbal2world(q);
+    // else if (mode.load() == io::GimbalMode::SMALL_BUFF || mode.load() == io::GimbalMode::BIG_BUFF) {
+    //   buff_solver.set_R_gimbal2world(q);
 
-      auto power_runes = buff_detector.detect(img);
+    //   auto power_runes = buff_detector.detect(img);
 
-      buff_solver.solve(power_runes);
+    //   buff_solver.solve(power_runes);
 
-      auto_aim::Plan buff_plan;
-      if (mode.load() == io::GimbalMode::SMALL_BUFF) {
-        buff_small_target.get_target(power_runes, t);
-        auto target_copy = buff_small_target;
-        buff_plan = buff_aimer.mpc_aim(target_copy, t, gs, true);
-      } else if (mode.load() == io::GimbalMode::BIG_BUFF) {
-        buff_big_target.get_target(power_runes, t);
-        auto target_copy = buff_big_target;
-        buff_plan = buff_aimer.mpc_aim(target_copy, t, gs, true);
-      }
-      gimbal.send(
-        buff_plan.control, buff_plan.fire, buff_plan.yaw, buff_plan.yaw_vel, buff_plan.yaw_acc,
-        buff_plan.pitch, buff_plan.pitch_vel, buff_plan.pitch_acc);
-
-    } else
-      gimbal.send(false, false, 0, 0, 0, 0, 0, 0);
+    //   auto_aim::Plan buff_plan;
+    //   if (mode.load() == io::GimbalMode::SMALL_BUFF) {
+    //     buff_small_target.get_target(power_runes, t);
+    //     auto target_copy = buff_small_target;
+    //     buff_plan = buff_aimer.mpc_aim(target_copy, t, gs, true);
+    //   } else if (mode.load() == io::GimbalMode::BIG_BUFF) {
+    //     buff_big_target.get_target(power_runes, t);
+    //     auto target_copy = buff_big_target;
+    //     buff_plan = buff_aimer.mpc_aim(target_copy, t, gs, true);
+    //   }
+    //   gimbal.send(
+    //     buff_plan.control, buff_plan.fire, buff_plan.yaw, buff_plan.yaw_vel, buff_plan.yaw_acc,
+    //     buff_plan.pitch, buff_plan.pitch_vel, buff_plan.pitch_acc);
+    // }
   }
 
   quit = true;
