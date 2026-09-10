@@ -1,0 +1,15 @@
+# Linux 接usb转ttl 设备名 ttyUSB0
+# 接cboard虚拟串口 设备名 ttyACM0
+#####-----cboard参数-----#####  
+serial_device: "/dev/ACM0"   # 串口设备
+serial_baudrate: 115200         # 波特率
+
+# sudo chmod 777 /dev/ttyACM0
+# cmake -B build
+# make -C build
+
+# #####-----cboard参数-----#####
+# quaternion_canid: 0x100
+# bullet_speed_canid: 0x101
+# send_canid: 0xff
+# can_interface: "can0"
