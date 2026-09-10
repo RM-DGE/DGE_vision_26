@@ -72,7 +72,7 @@ class CBoard
 public:
   double bullet_speed;
   Mode mode;
-  // ShootMode shoot_mode;
+  int shoot_mode;  // 0 = left, 1 = right, 其它值由 aimer 回退到默认 yaw_offset
   double ft_angle;  //无人机专有
 
   CBoard(const std::string & config_path);

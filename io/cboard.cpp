@@ -21,7 +21,7 @@ namespace io
 {
 CBoard::CBoard(const std::string & config_path)
 : mode(Mode::idle),
-  // shoot_mode(ShootMode::left_shoot),
+  shoot_mode(0),
   // bullet_speed(0),
   ft_angle(0),
   // queue_ initialization removed (using default deque constructor)
@@ -174,8 +174,7 @@ void CBoard::callback(const std::vector<uint8_t> & frame)
     int m = data->mode;
     if (m >= 0 && m < static_cast<int>(MODES.size())) mode = Mode(m);
     
-    // int sm = data->shoot_mode;
-    // if (sm >= 0 && sm < static_cast<int>(SHOOT_MODES.size())) shoot_mode = ShootMode(sm);
+    shoot_mode = data->ShootMode;
 
     ft_angle = data->ft_angle / 10000.0;
 

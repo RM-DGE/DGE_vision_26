@@ -29,7 +29,7 @@ public:
 
   io::Command aim(
     std::list<Target> targets, std::chrono::steady_clock::time_point timestamp, double bullet_speed,
-    io::ShootMode shoot_mode, bool to_now = true);
+    int shoot_mode, bool to_now = true);
 
 private:
   double yaw_offset_;

@@ -124,12 +124,13 @@ io::Command Aimer::aim(
 
 io::Command Aimer::aim(
   std::list<Target> targets, std::chrono::steady_clock::time_point timestamp, double bullet_speed,
-  io::ShootMode shoot_mode, bool to_now)
+  int shoot_mode, bool to_now)
 {
+  // shoot_mode: 0 = left_shoot, 1 = right_shoot, others fall back to default yaw_offset_
   double yaw_offset;
-  if (shoot_mode == io::left_shoot && left_yaw_offset_.has_value()) {
+  if (shoot_mode == 0 && left_yaw_offset_.has_value()) {
     yaw_offset = left_yaw_offset_.value();
-  } else if (shoot_mode == io::right_shoot && right_yaw_offset_.has_value()) {
+  } else if (shoot_mode == 1 && right_yaw_offset_.has_value()) {
     yaw_offset = right_yaw_offset_.value();
   } else {
     yaw_offset = yaw_offset_;
