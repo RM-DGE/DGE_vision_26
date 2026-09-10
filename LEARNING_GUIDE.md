@@ -116,48 +116,123 @@ ROS2 environment not found, skipping ROS2-related code.
 
 若出现该信息，普通程序仍可能构建成功，但 `build/sentry*` 不会生成。应先 source 正确的 ROS2 工作空间，再重新配置构建目录。当前检出还存在独立的构建完整性问题：顶层 `CMakeLists.txt` 注册了 `src/auto_aim_debug_mpc.cpp`、`src/uav.cpp` 和 `src/uav_debug.cpp`，但这些文件不在本地目录中；因此第一次配置可能在到达 ROS2 检查前就失败。先核对检出版本或暂时移除这些失效目标后再构建，不要把失败归因于算法代码。
 
-### 3.2 CAN 与下位机协议
+### 3.2 串口通信与下位机协议
 
-`io/cboard.cpp` 当前协议不是抽象描述，而是固定的 8 字节帧布局。适配前必须与电控逐字节确认。
+当前仓库中，`CBoard` 不是走 `io/socketcan.hpp` 这一套 CAN 协议，而是通过 `io/socketserial.hpp` 里的 `SerialPortMultithread` 进行串口通信。也就是说，真正和下位机/电控交互的底层链路是 UART 串口，`socketcan.hpp` 是另一个独立的总线接口，不能把它和 CBoard 的串口协议混为一谈。
 
-接收帧：
+要点先记住：
 
-| CAN ID | 字节 | 当前含义 | 缩放/编码 |
-| --- | --- | --- | --- |
-| `quaternion_canid` | 0..7 | `x,y,z,w` 四个有符号 16 位整数 | 除以 `1e4` |
-| `bullet_speed_canid` | 0..1 | 弹速 | 有符号 16 位，除以 `1e2` |
-| 同上 | 2 | `Mode` | `idle/auto_aim/small_buff/big_buff/outpost` |
-| 同上 | 3 | `ShootMode` | 左枪/右枪/双枪 |
-| 同上 | 4..5 | `ft_angle` | 有符号 16 位，除以 `1e4` |
+- `CBoard` 在 `io/cboard.cpp` 构造时会创建 `serial_`，并绑定 `callback()` 处理回调；
+- `SerialPortMultithread` 会启动独立的读线程和写线程；
+- 收到的原始字节会被拼帧、识别帧头，再交给 `CBoard::callback()` 解释成 IMU/状态数据；
+- 上层业务通过 `CBoard::send(Command)` 组装控制帧，再通过串口发给下位机。
 
-发送帧 `send_canid`：
+#### 3.2.1 实际通信链路
 
-| 字节 | 当前含义 |
-| --- | --- |
-| 0 | `control` |
-| 1 | `shoot` |
-| 2..3 | `yaw * 1e4` |
-| 4..5 | `pitch * 1e4` |
-| 6..7 | `horizon_distance * 1e4` |
+```text
+src/sentry.cpp / src/standard.cpp
+  -> CBoard::send()
+  -> ControlDataFrame
+  -> SerialPortMultithread::write()
+  -> 串口发送给下位机
 
-必须确认以下约定：
+下位机/电控
+  -> IMU/状态数据帧
+  -> 串口 -> SerialPortMultithread::read_loop()
+  -> process_received_data()
+  -> CBoard::callback()
+  -> imu_at()/bullet_speed/mode/ft_angle
+```
 
-- 大小端和有符号整数编码一致；
-- 四元数顺序与坐标定义一致；
-- yaw、pitch 正方向一致，单位均为弧度；
-- `control=false` 时下位机行为安全；
-- `shoot` 必须经过实体急停、裁判系统和下位机安全条件再次门控；
-- 弹速为 0、IMU 数据中断或视觉进程退出时不会继续发射。
+这条链路的关键文件是：
 
-先执行（目标程序支持的配置位置参数以 `tests/cboard_test.cpp` 为准）。不要省略最后的配置参数：该测试默认读取 `configs/standard.yaml`，而当前检出不一定提供此文件；显式传入自己的配置可避免因默认路径缺失而误判为 CAN 故障。
+- `io/socketserial.hpp`：串口底层，多线程收发、帧头识别、自动重连；
+- `io/cboard.hpp` / `io/cboard.cpp`：对串口协议做语义解释；
+- `io/command.hpp`：视觉侧最终输出命令；
+- `configs/*.yaml`：串口设备名、波特率等参数来源。
+
+#### 3.2.2 当前串口协议（CBoard）
+
+`socketserial.hpp` 中定义了几类关键帧头：
+
+- `IMU_HEADER = 0xAA`
+- `STATUS_HEADER = 0xBB`
+- `CONTROL_HEADER = 0xCC`
+- `IMU_TAIL = 0xDD`
+
+其中，`CBoard::callback()` 固定按照以下结构解释数据：
+
+1. IMU 帧：`0xAA`
+   - 总长度：10 字节（包括尾字节 `0xDD`）
+   - 字段：`w, x, y, z`，每个都是 `int16_t`
+   - 代码中按 `w/x/y/z / 1e4` 还原为真实四元数分量
+   - 尾字节必须为 `0xDD`，否则判定为错位帧并丢弃
+
+2. 状态帧：`0xBB`
+   - 总长度：9 字节
+   - 字段：`bullet_speed`、`mode`、`ft_angle`
+   - 代码中分别按 `bullet_speed / 100.0`、`mode`、`ft_angle / 10000.0` 还原
+
+3. 控制帧：`0xCC`
+   - 代码中由 `ControlDataFrame` 组装
+   - 字节含义：
+     - `control`：是否由视觉控制云台
+     - `shoot`：是否开火
+     - `yaw`：目标偏航，实际为 `yaw * 1e4` 后取整
+     - `pitch`：目标俯仰，实际为 `pitch * 1e4` 后取整
+     - `tail`：`0xEE`
+
+4. 其他帧：`0x5A`
+   - 代码中把这类雷达/底盘数据包整体丢弃，避免干扰后续 `0xAA`/`0xBB` 帧解析
+
+注意：这里的协议是“串口字节协议”，不是 `CAN ID + Data` 的含义。很多文档中出现 `canid` 或“电控协议表”，它们可能是一个历史描述，真正使用时必须和硬件原始协议逐字节核对，不可直接套用。
+
+#### 3.2.3 必须事先确认的几件事
+
+适配串口前，至少必须和下位机确认以下约定：
+
+- 字节序是否为大端/小端；
+- `int16_t`、`uint8_t` 的真实编码方式；
+- 四元数顺序是否为 `w, x, y, z`，不是 `x, y, z, w`；
+- `yaw`、`pitch` 的正方向是否和云台实际安装方向一致；
+- `control=false` 时是否必须安全释放并不继续控制；
+- `shoot` 是否要经过裁判系统、急停和下位机安全门控；
+- 串口中断、掉帧、CRC 或奇偶校验异常时，程序应如何降级到安全状态。
+
+必须先执行以下测试，不能跳过：
 
 ```bash
-ip -details link show can0
-candump can0
 ./build/cboard_test configs/my_sentry.yaml
 ```
 
-验收：静止时四元数模长接近 1；手动按正方向转动云台时欧拉角方向正确且连续；弹速与下位机显示一致；模式及枪口选择无越界值。
+验收标准：
+
+- 静止时四元数模长接近 1；
+- 云台转动时四元数、姿态方向连续且无跳变；
+- 弹速、模式和俯仰角与电控显示一致；
+- 串口断开后程序能够重连，不会持续发危险命令；
+- 发送控制帧时，`control`、`shoot` 两个开关在非法状态下能被安全切断。
+
+#### 3.2.4 与 CAN 的区别
+
+如果你在代码里看到 `io/socketcan.hpp`，它属于另一套外设通信接口，不等价于 `CBoard` 串口协议。当前仓库的默认行为是：
+
+- `CBoard` 通信：串口 `SerialPortMultithread`
+- 其他总线/设备：可能是 CAN `socketcan.hpp`
+
+因此，调试时要分清：
+
+- 串口问题：通信不稳定、帧头错位、长度异常、重连失败；
+- CAN 问题：总线异常、波特率、ID 映射、报文格式不一致；
+- 两者都可能导致“看起来像是协议问题”，但它们不是同一层面的故障。
+
+在上机前，最重要的不是直接改算法，而是先确认：
+
+1. 你连接的到底是串口还是 CAN；
+2. 你用的通信协议是否和硬件原始协议一致；
+3. 你的帧头、尺寸、端序、缩放、坐标系是否与真实设备完全匹配。
+
+如果这三点没有确认，就不要假设算法层面的偏差是“代码 bug”。
 
 ### 3.3 主相机及侧后相机
 
