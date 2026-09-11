@@ -1,20 +1,44 @@
+/* 接收包 (Gimbal -> Vision)
+结构体: GimbalToVision 总长度: 43 字节 (Byte)
+Head,           uint8_t[2], 2,"固定为 'S', 'P' (0x53, 0x50)"
+Mode,           uint8_t,    1,  0: 空闲1: 自瞄(不使用2: 小符3: 大符)
+Q (Quaternion), float[4],   16,"归一化四元数，顺序为 w, x, y, z。"
+Yaw,            float,      4,当前 Yaw 轴角度
+Yaw Vel,        float,      4,当前 Yaw 轴角速度
+Pitch,          float,      4,当前 Pitch 轴角度
+Pitch Vel,      float,      4,当前 Pitch 轴角速度
+Bullet Speed,   float,      4,当前裁判系统读取的弹速 (m/s)
+Bullet Count,   uint16_t,   2,累计发射子弹数（用于判断是否发弹成功）
+CRC16,          uint16_t,   2,校验码 */
+
+/* 发送包 (Vision -> Gimbal)
+结构体: VisionToGimbal 总长度: 29 字节 (Byte)
+Head,           uint8_t[2], 2,"固定为 'S', 'P' (0x53, 0x50)"
+Mode,           uint8_t,    1,0: 不控制1: 控制云台不开火 (瞄准)2: 控制云台且开火
+Yaw,            float,      4,目标 Yaw 轴绝对角度
+Yaw Vel,        float,      4,目标 Yaw 轴前馈速度
+Yaw Acc,        float,      4,目标 Yaw 轴前馈加速度
+Pitch,          float,      4,目标 Pitch 轴绝对角度
+Pitch Vel,      float,      4,目标 Pitch 轴前馈速度
+Pitch Acc,      float,      4,目标 Pitch 轴前馈加速度
+CRC16,          uint16_t,   2,校验码 (Check Sum) */
 #include "gimbal.hpp"
 
 #include "tools/crc.hpp"
 #include "tools/logger.hpp"
 #include "tools/math_tools.hpp"
 #include "tools/yaml.hpp"
+#include <cstring> // For memcpy
 
 namespace io
 {
 Gimbal::Gimbal(const std::string & config_path)
 {
   auto yaml = tools::load(config_path);
-  auto com_port = tools::read<std::string>(yaml, "com_port");
+  port_name_ = tools::read<std::string>(yaml, "com_port");
 
   try {
-    serial_.setPort(com_port);
-    serial_.open();
+    open_serial();
   } catch (const std::exception & e) {
     tools::logger()->error("[Gimbal] Failed to open serial: {}", e.what());
     exit(1);
@@ -22,7 +46,17 @@ Gimbal::Gimbal(const std::string & config_path)
 
   thread_ = std::thread(&Gimbal::read_thread, this);
 
-  queue_.pop();
+  // Wait for first data packet similar to original behavior
+  tools::logger()->info("[Gimbal] Waiting for data...");
+  while (!quit_) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      std::lock_guard<std::mutex> lock(queue_mutex_);
+      if (!queue_.empty()) {
+          // Mimic original logic: queue_.pop() dropped the first element
+          queue_.pop_front(); 
+          break;
+      }
+  }
   tools::logger()->info("[Gimbal] First q received.");
 }
 
@@ -30,7 +64,19 @@ Gimbal::~Gimbal()
 {
   quit_ = true;
   if (thread_.joinable()) thread_.join();
-  serial_.close();
+  if (serial_.IsOpen()) serial_.Close();
+}
+
+void Gimbal::open_serial() 
+{
+    if (serial_.IsOpen()) serial_.Close();
+    serial_.Open(port_name_);
+    // Configure Serial Port (assuming 115200 8N1 as standard, adjust if config requires)
+    serial_.SetBaudRate(LibSerial::BaudRate::BAUD_115200);
+    serial_.SetCharacterSize(LibSerial::CharacterSize::CHAR_SIZE_8);
+    serial_.SetParity(LibSerial::Parity::PARITY_NONE);
+    serial_.SetStopBits(LibSerial::StopBits::STOP_BITS_1);
+    serial_.SetFlowControl(LibSerial::FlowControl::FLOW_CONTROL_NONE);
 }
 
 GimbalMode Gimbal::mode() const

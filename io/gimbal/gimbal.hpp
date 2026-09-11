@@ -7,17 +7,17 @@
 #include <mutex>
 #include <string>
 #include <thread>
-#include <tuple>
+#include <deque>
+#include <vector>
 
-#include "serial/serial.h"
-#include "tools/thread_safe_queue.hpp"
+#include <libserial/SerialPort.h>
 
 namespace io
 {
 struct __attribute__((packed)) GimbalToVision
 {
   uint8_t head[2] = {'S', 'P'};
-  uint8_t mode;  // 0: 空闲, 1: 自瞄, 2: 小符, 3: 大符
+  uint8_t mode;  // 0: 空闲, 1: 自瞄, （2: 小符, 3: 大符不用）
   float q[4];    // wxyz顺序
   float yaw;
   float yaw_vel;
@@ -49,8 +49,8 @@ enum class GimbalMode
 {
   IDLE,        // 空闲
   AUTO_AIM,    // 自瞄
-  SMALL_BUFF,  // 小符
-  BIG_BUFF     // 大符
+  // SMALL_BUFF,  // 小符
+  // BIG_BUFF     // 大符
 };
 
 struct GimbalState
@@ -83,6 +83,7 @@ public:
 
 private:
   serial::Serial serial_;
+  std::string port_name_;
 
   std::thread thread_;
   std::atomic<bool> quit_ = false;
@@ -93,12 +94,20 @@ private:
 
   GimbalMode mode_ = GimbalMode::IDLE;
   GimbalState state_;
-  tools::ThreadSafeQueue<std::tuple<Eigen::Quaterniond, std::chrono::steady_clock::time_point>>
-    queue_{1000};
+
+  // Thread-safe queue replacement
+  struct QueueData {
+    Eigen::Quaterniond q;
+    std::chrono::steady_clock::time_point t;
+  };
+  std::deque<QueueData> queue_;
+  mutable std::mutex queue_mutex_;
+  const size_t queue_capacity_ = 1000;
 
   bool read(uint8_t * buffer, size_t size);
   void read_thread();
   void reconnect();
+  void open_serial(); // Helper to open and configure
 };
 
 }  // namespace io

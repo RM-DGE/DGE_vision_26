@@ -56,6 +56,7 @@ int main(int argc, char * argv[])
     while (!quit) {
       auto target = target_queue.front();
       auto gs = gimbal.state();
+      //读取弹速，gs.bullet_speed后面可以改为具体的值
       auto plan = planner.plan(target, gs.bullet_speed);
 
       gimbal.send(
@@ -135,6 +136,36 @@ int main(int argc, char * argv[])
         solver.reproject_armor(aim_xyza.head(3), aim_xyza[3], target.armor_type, target.name);
       tools::draw_points(img, image_points, {0, 0, 255});
     }
+
+    static auto last_time = std::chrono::steady_clock::now();
+    auto now = std::chrono::steady_clock::now();
+    double fps = 1.0 / tools::delta_time(now, last_time);
+    last_time = now;
+
+    // tools::logger()->info("w:{:.2f} x:{:.2f} y:{:.2f} z:{:.2f}]", q.w(), q.x(), q.y(), q.z());
+
+    // --- 新增：获取电控上传的当前状态 ---
+    auto gs = gimbal.state(); // 获取 rx_data 中的 yaw 和 pitch
+
+    // --- 新增：将四元数转换为欧拉角（用于对比检查 IMU 姿态） ---
+    // q 是刚才从 gimbal.q(t) 获取的
+    Eigen::Vector3d imu_ypr = tools::eulers(q.toRotationMatrix(), 2, 1, 0); 
+    float imu_yaw = imu_ypr[0];   // 转为角度
+    float imu_pitch = imu_ypr[1];
+
+    // --- 新增：格式化字符串 ---
+    std::string fps_str = fmt::format("FPS: {:.1f}", fps);
+    std::string rx_str  = fmt::format("Rx (State) Y: {:.2f}  P: {:.2f}", gs.yaw, gs.pitch);
+    std::string imu_str = fmt::format("Rx (IMU)   Y: {:.2f}  P: {:.2f}", imu_yaw, imu_pitch);
+    std::string tx_str  = fmt::format("Tx (Plan)  Y: {:.2f}  P: {:.2f}", current_tx_yaw.load(), current_tx_pitch.load());
+
+    // --- 新增：在图像左上角绘制文字 ---
+    // cv::putText(图像, 文本, 左下角坐标, 字体, 缩放, 颜色(B,G,R), 粗细)
+    cv::putText(img, fps_str, {20, 40}, cv::FONT_HERSHEY_SIMPLEX, 1.0, {0, 255, 0}, 2);
+    cv::putText(img, rx_str,  {20, 80}, cv::FONT_HERSHEY_SIMPLEX, 0.8, {255, 255, 0}, 2); // 青色
+    cv::putText(img, imu_str, {20, 110}, cv::FONT_HERSHEY_SIMPLEX, 0.8, {255, 150, 0}, 2); // 橙色
+    cv::putText(img, tx_str,  {20, 140}, cv::FONT_HERSHEY_SIMPLEX, 0.8, {0, 0, 255}, 2);   // 红色
+
 
     cv::resize(img, img, {}, 0.5, 0.5);  // 显示时缩小图片尺寸
     cv::imshow("reprojection", img);
