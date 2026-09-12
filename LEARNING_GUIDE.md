@@ -12,20 +12,20 @@
 - [DeepWiki 自瞄系统说明](https://deepwiki.com/TongjiSuperPower/sp_vision_25/5.1-auto-aim-system)
 - [DeepWiki 硬件接口说明](https://deepwiki.com/TongjiSuperPower/sp_vision_25/6-hardware-interfaces)
 - [DeepWiki 配置系统说明](https://deepwiki.com/TongjiSuperPower/sp_vision_25/7-configuration-system)
-- 本地源码，尤其是 `src/sentry.cpp`、`src/sentry_multithread.cpp`、`configs/sentry.yaml`、`io/` 和 `tasks/auto_aim/`
+- 本地源码，尤其是 `src/sentry.cpp`、`src/sentry_multithread.cpp`、`configs/sentry.yaml`、`io/`、`tasks/auto_aim/` 和 `tasks/omniperception/`
 
 项目并不是一个需要从步兵版重新改造成哨兵版的框架。仓库已经提供：
 
 - 哨兵主程序源码：`src/sentry.cpp`、`src/sentry_bp.cpp`、`src/sentry_debug.cpp`、`src/sentry_multithread.cpp`；这些目标只有在 ROS2 依赖全部找到时才会加入构建
 - 主工业相机自瞄与多相机全向感知
-- CAN 下位机通信与图像、IMU 时间对齐
+- 串口 CBoard 下位机通信与图像、IMU 时间对齐
 - ROS2 导航信息交互
 - 装甲板检测、位姿解算、EKF 整车估计、瞄准及开火决策
 
 因此，第一目标应是**适配硬件边界和参数，而不是立即修改算法**。推荐顺序为：
 
 1. 编译及离线回放；
-2. 单独验证相机、IMU、CAN 和坐标方向；
+2. 单独验证相机、IMU、串口协议和坐标方向；
 3. 禁火跑通主相机闭环；
 4. 接入全向感知与 ROS2；
 5. 完成安全实弹基线；
@@ -39,7 +39,7 @@
 | --- | --- | --- | --- |
 | 应用层 | `src/` | 按兵种组装功能并形成唯一主循环 | 数据如何流动、模式如何切换 |
 | 功能层 | `tasks/auto_aim/`、`tasks/omniperception/` | 检测、解算、跟踪、瞄准、射击与全向感知 | 算法输入输出及状态机 |
-| 硬件层 | `io/` | 相机、USB 相机、CAN、串口、ROS2 | 自己机器人最先需要适配的部分 |
+| 硬件层 | `io/` | 相机、USB 相机、串口、ROS2 及云台接口 | 自己机器人最先需要适配的部分 |
 | 工具层 | `tools/` | EKF、弹道、日志、绘图、录制、线程工具 | 调试、评测与复现手段 |
 
 ### 2.2 哨兵单帧主链路
@@ -79,6 +79,22 @@
 | 开火决策 | `tasks/auto_aim/shooter.*` | 最终 `shoot` 标志 |
 | 全向感知 | `tasks/omniperception/` | 丢失目标后的搜索、筛选和切换命令 |
 
+### 2.4 当前目录结构
+
+```text
+src/                         应用入口：standard、sentry 及调试程序
+calibration/                 相机内参、手眼标定和视频切分程序
+tasks/auto_aim/              自瞄算法、planner、multithread、yolos
+tasks/auto_aim/planner/tinympc/  TinyMPC 源码及其 CMake 子项目
+tasks/omniperception/        全向感知算法
+io/                          相机、CBoard、云台、串口和 ROS2 接口
+io/serial/                   内置 serial 库
+tools/                       EKF、弹道、日志、录制、绘图等工具
+tests/                       离线、硬件和规划器测试程序
+configs/                     设备和算法 YAML 配置
+assets/                      模型、演示视频和演示数据
+```
+
 ## 3. 上机前必须建立的适配清单
 
 不要直接复制 `configs/sentry.yaml` 使用。它记录的是原队哨兵的硬件、安装误差和调参结果。建议先复制为自己的配置，例如：
@@ -91,7 +107,7 @@ cp configs/sentry.yaml configs/my_sentry.yaml
 
 ### 3.1 环境和依赖
 
-原项目 README 的基准环境为 Ubuntu 22.04、C++17、OpenCV、Eigen、yaml-cpp、spdlog、fmt、OpenVINO 2024.6.0 和 Ceres；当前本地 `CMakeLists.txt` 实际显式查找的是 OpenCV、fmt、Eigen3、spdlog、yaml-cpp、nlohmann_json 和 OpenVINO。它把 OpenVINO 路径固定为：
+原项目 README 的基准环境为 Ubuntu 22.04、C++17、OpenCV、Eigen、yaml-cpp、spdlog、fmt、OpenVINO 2024.6.0 和 Ceres；当前本地 `CMakeLists.txt` 实际显式查找的是 OpenCV、fmt、Eigen3、spdlog、yaml-cpp、nlohmann_json 和 OpenVINO。OpenVINO 路径默认值为：
 
 ```cmake
 /opt/intel/openvino_2024.6.0/runtime/cmake/
@@ -114,11 +130,11 @@ cmake --build build -j"$(nproc)"
 ROS2 environment not found, skipping ROS2-related code.
 ```
 
-若出现该信息，普通程序仍可能构建成功，但 `build/sentry*` 不会生成。应先 source 正确的 ROS2 工作空间，再重新配置构建目录。当前检出还存在独立的构建完整性问题：顶层 `CMakeLists.txt` 注册了 `src/auto_aim_debug_mpc.cpp`、`src/uav.cpp` 和 `src/uav_debug.cpp`，但这些文件不在本地目录中；因此第一次配置可能在到达 ROS2 检查前就失败。先核对检出版本或暂时移除这些失效目标后再构建，不要把失败归因于算法代码。
+若出现该信息，普通程序仍可能构建成功，但 `build/sentry*` 不会生成。应先 source 正确的 ROS2 工作空间，再重新配置构建目录。当前顶层 CMake 注册的 `src/`、`calibration/` 和 `tests/` 源文件均位于本地目录；如果配置失败，应优先检查依赖、工具链和 OpenVINO 路径，而不是把失败归因于算法代码。
 
 ### 3.2 串口通信与下位机协议
 
-当前仓库中，`CBoard` 不是走 `io/socketcan.hpp` 这一套 CAN 协议，而是通过 `io/socketserial.hpp` 里的 `SerialPortMultithread` 进行串口通信。也就是说，真正和下位机/电控交互的底层链路是 UART 串口，`socketcan.hpp` 是另一个独立的总线接口，不能把它和 CBoard 的串口协议混为一谈。
+当前仓库中，`CBoard` 通过 `io/socketserial.hpp` 里的 `SerialPortMultithread` 进行串口通信。真正和下位机/电控交互的底层链路是 UART 串口；当前目录没有 `io/socketcan.hpp`，不要根据旧文档假设存在另一套 CAN 接口。
 
 要点先记住：
 
@@ -213,22 +229,22 @@ src/sentry.cpp / src/standard.cpp
 - 串口断开后程序能够重连，不会持续发危险命令；
 - 发送控制帧时，`control`、`shoot` 两个开关在非法状态下能被安全切断。
 
-#### 3.2.4 与 CAN 的区别
+#### 3.2.4 与 CAN 的边界
 
-如果你在代码里看到 `io/socketcan.hpp`，它属于另一套外设通信接口，不等价于 `CBoard` 串口协议。当前仓库的默认行为是：
+当前仓库没有 `io/socketcan.hpp`。默认行为是：
 
 - `CBoard` 通信：串口 `SerialPortMultithread`
-- 其他总线/设备：可能是 CAN `socketcan.hpp`
+- 其他总线/设备：需以实际接入代码和硬件协议为准
 
 因此，调试时要分清：
 
 - 串口问题：通信不稳定、帧头错位、长度异常、重连失败；
-- CAN 问题：总线异常、波特率、ID 映射、报文格式不一致；
-- 两者都可能导致“看起来像是协议问题”，但它们不是同一层面的故障。
+- 若另行接入 CAN：需单独确认总线异常、波特率、ID 映射和报文格式；
+- 不要把未接入的 CAN 接口当作当前 CBoard 链路的一部分。
 
 在上机前，最重要的不是直接改算法，而是先确认：
 
-1. 你连接的到底是串口还是 CAN；
+1. 你连接的串口设备是否和配置一致；
 2. 你用的通信协议是否和硬件原始协议一致；
 3. 你的帧头、尺寸、端序、缩放、坐标系是否与真实设备完全匹配。
 
@@ -339,7 +355,7 @@ Linux 的 `/dev/videoN` 编号可能在重启或插拔后变化，正式部署�
 
 ### 阶段 1：硬件单元测试
 
-按“相机 -> CAN/IMU -> 标定 -> 云台命令”的顺序测试，每次只接通一个变量。此阶段禁止发弹。
+按“相机 -> 串口 CBoard/IMU -> 标定 -> 云台命令”的顺序测试，每次只接通一个变量。此阶段禁止发弹。
 
 **验收表**
 
@@ -347,7 +363,7 @@ Linux 的 `/dev/videoN` 编号可能在重启或插拔后变化，正式部署�
 | --- | --- |
 | 主相机 | 连续 10 分钟无断流，曝光适合高速装甲板 |
 | 多相机 | 设备身份稳定，方向/FOV 测量完成 |
-| CAN | ID、端序、缩放和频率全部有记录 |
+| 串口 CBoard | 帧头、长度、端序、缩放和重连行为全部有记录 |
 | IMU | 四元数有效，旋转方向正确，时间序列连续 |
 | 标定 | 保存数据集、参数、重投影误差和实物复核结果 |
 | 云台命令 | 小角度限速测试方向正确，断联自动退出视觉控制 |
@@ -421,7 +437,7 @@ Linux 的 `/dev/videoN` 编号可能在重启或插拔后变化，正式部署�
 部署验收至少包括：
 
 - 冷启动、热重启均能拉起正确程序和配置；
-- 相机拔插、CAN 中断、ROS2 中断和模型加载失败均不产生危险命令；
+- 相机拔插、串口中断、ROS2 中断和模型加载失败均不产生危险命令；
 - 日志不会无限占满磁盘；
 - 进程重启后默认禁火，直到输入状态全部有效；
 - 断电前后的配置、模型和二进制版本可追溯。
@@ -437,7 +453,7 @@ Linux 的 `/dev/videoN` 编号可能在重启或插拔后变化，正式部署�
 3. `io/command.hpp` 与 `io/cboard.cpp`：系统输入输出边界；
 4. `configs/sentry.yaml`：参数如何进入各模块。
 
-产出：手绘一张从图像到 CAN 帧的数据流图，并标注每个变量的单位和坐标系。
+产出：手绘一张从图像到串口控制帧的数据流图，并标注每个变量的单位和坐标系。
 
 ### 第 2 轮：检测和几何
 
@@ -453,7 +469,7 @@ Linux 的 `/dev/videoN` 编号可能在重启或插拔后变化，正式部署�
 1. `tracker.*`：跟踪状态机、目标创建、匹配与丢失；
 2. `target.*`：11 维状态、状态转移、观测函数及装甲板切换；
 3. `tools/extended_kalman_filter.hpp`：预测、更新与协方差传播；
-4. `auto_aim_test.cpp` 中的残差、NIS、NEES 绘图字段。
+4. `auto_aim_test.cpp` 中的残差和绘图字段。
 
 产出：解释状态向量 `x,vx,y,vy,z,vz,a,w,r,l,h` 的物理意义；在静止、平移、低速及高速旋转数据上画出观测、估计和残差。
 
@@ -476,7 +492,7 @@ Linux 的 `/dev/videoN` 编号可能在重启或插拔后变化，正式部署�
 
 ### 第 5 轮：并发和全向感知
 
-1. `io` 中各相机和 CAN 的采集线程、队列与重连；
+1. `io` 中各相机和串口的采集线程、队列与重连；
 2. `src/sentry_multithread.cpp`；
 3. `tasks/omniperception/perceptron.*`；
 4. `tasks/auto_aim/multithread/`；
@@ -496,7 +512,7 @@ Linux 的 `/dev/videoN` 编号可能在重启或插拔后变化，正式部署�
 - 对齐后的 IMU 四元数；
 - 检测框、四点、类别和置信度；
 - PnP 位姿与重投影误差；
-- EKF 状态、协方差、残差、NIS/NEES；
+- EKF 状态、协方差和残差；
 - 瞄准点、弹道飞行时间、预测时间；
 - 云台命令、实际角度、是否开火；
 - 下位机模式、弹速和枪口；
@@ -528,7 +544,7 @@ Linux 的 `/dev/videoN` 编号可能在重启或插拔后变化，正式部署�
 
 ### 6.4 EKF 与目标管理优化
 
-指标：位置/角速度 RMSE、NIS/NEES 一致性、错误切板率、丢失率、重捕获时间。
+指标：位置/角速度 RMSE、残差统计、错误切板率、丢失率、重捕获时间。
 
 实验方向：
 
@@ -590,14 +606,16 @@ Linux 的 `/dev/videoN` 编号可能在重启或插拔后变化，正式部署�
 
 ## 8. 已发现的仓库注意事项
 
-1. 顶层 `CMakeLists.txt` 注册了 `src/auto_aim_debug_mpc.cpp`、`src/uav.cpp` 和 `src/uav_debug.cpp`，但当前本地目录没有这些文件；首次 CMake 配置可能因此失败。
+1. 顶层 `CMakeLists.txt` 当前注册的 `src/`、`calibration/` 和 `tests/` 源文件均已按当前目录结构存在；`src/auto_aim_debug_mpc.cpp` 已恢复，且没有 `uav` 目标。
 2. 当前本地目录没有 `watchdog.sh`，但 `autostart.sh` 会调用它；部署前必须补齐脚本或改成实际的进程管理方式。
 3. `src/sentry*.cpp` 中 USB 摄像头节点和 `tasks/omniperception/decider.cpp` 中安装角/FOV 存在硬编码。
 4. `configs/sentry.yaml` 的 `auto_fire` 默认值是 `true`，第一次上机必须显式改为 `false`，并使用下位机/实体急停做第二道禁火保护。
-5. `io/cboard.cpp` 将 CAN 原始模式字节直接转换为 `Mode`、`ShootMode`，这些值后续会参与分支或索引；真实部署前应增加合法值校验，并让非法帧进入禁火、释放控制的安全状态。
-6. `tests/cboard_test.cpp` 默认读取 `configs/standard.yaml`，当前检出不保证存在该文件；运行时应显式传入自有配置。
-7. 原始 README 列出的 `tasks/auto_buff/` 和 `tests/auto_buff_test.cpp` 当前检出不存在；不要根据 README 假定打符功能已经可构建。
-8. DeepWiki 是基于特定提交生成的辅助说明，可能包含推断或与本地检出不一致的内容；实际行为以本地源码、构建结果和实测为准。
+5. `io/cboard.cpp` 将串口状态帧中的模式字节直接转换为 `Mode`、`ShootMode`，这些值后续会参与分支或索引；真实部署前应增加合法值校验，并让非法帧进入禁火、释放控制的安全状态。
+6. `tests/cboard_test.cpp` 和 `tests/cboard_send_test.cpp` 默认读取 `configs/cboard.yaml`；其他测试程序的默认配置应以源码为准。
+7. 当前检出没有 `io/socketcan.hpp`、`tasks/auto_buff/`、`tests/auto_buff_test.cpp` 或 `tests/dm_test.cpp`；不要根据旧 README 假定这些接口和功能已经可构建。
+8. `tests/handeye_test.cpp` 的默认配置路径是 `configs/handeye.yaml`，但当前检出没有该文件；运行时应显式传入实际配置或补充对应 YAML。
+9. `src/mt_standard.cpp` 和 `tests/minimum_vision_system.cpp` 仍引用不存在的 `io/dm_imu/dm_imu.hpp`；对应目标需要补回该模块或调整源码后才能构建。
+10. DeepWiki 是基于特定提交生成的辅助说明，可能包含推断或与本地检出不一致的内容；实际行为以本地源码和实测为准。
 
 ## 9. 推荐的近期里程碑
 
@@ -610,7 +628,7 @@ Linux 的 `/dev/videoN` 编号可能在重启或插拔后变化，正式部署�
 ### 里程碑 B：哨兵禁火运行
 
 - 自有 YAML、相机内参和手眼标定完成；
-- CAN 与下位机协议逐字节验证；
+- 串口与下位机协议逐字节验证；
 - 主相机闭环稳定，异常时可靠释放控制；
 - 每次运行能保存足够数据供离线复现。
 

@@ -45,10 +45,15 @@ int main(int argc, char * argv[])
   auto_aim::Tracker tracker(config_path, solver);
   auto_aim::Planner planner(config_path);
 
+  // 用于在主线程和规划线程之间传递当前目标，规划线程会用 target_queue.front() 获取最新目标。
   tools::ThreadSafeQueue<std::optional<auto_aim::Target>, true> target_queue(1);
   target_queue.push(std::nullopt);
 
   std::atomic<bool> quit = false;
+
+  // ===================== 规划线程：实时生成 MPC 控制命令 =====================
+  // 持续从 target_queue 读取最新目标，
+  // 调用 planner.plan(...) 生成 yaw / pitch / velocity / acceleration，并下发到 gimbal。
   auto plan_thread = std::thread([&]() {
     auto t0 = std::chrono::steady_clock::now();
     uint16_t last_bullet_count = 0;
@@ -66,6 +71,8 @@ int main(int argc, char * argv[])
       auto fired = gs.bullet_count > last_bullet_count;
       last_bullet_count = gs.bullet_count;
 
+      // ===================== 记录规划结果用于调试 =====================
+      // 这里把云台状态、目标状态、规划输出写进 JSON，用于 plotter.plot(data) 可视化调试。
       nlohmann::json data;
       data["t"] = tools::delta_time(std::chrono::steady_clock::now(), t0);
 
@@ -108,6 +115,8 @@ int main(int argc, char * argv[])
   cv::Mat img;
   std::chrono::steady_clock::time_point t;
 
+  // ===================== 主循环：读取图像并建立观测-跟踪-重投影闭环 =====================
+  // 主线程负责：相机读图、IMU姿态更新、检测装甲、跟踪目标、重投影到图像中、显示调试信息。
   while (!exiter.exit()) {
     camera.read(img, t);
     auto q = gimbal.q(t);
@@ -120,6 +129,8 @@ int main(int argc, char * argv[])
     else
       target_queue.push(std::nullopt);
 
+    // ===================== 对当前目标进行重投影与视觉调试 =====================
+    // 把跟踪到的目标对应装甲板四点和 planner 规划得到的瞄准点重新投影到图像中，可用于观察控制点是否正确。
     if (!targets.empty()) {
       auto target = targets.front();
 
@@ -137,6 +148,7 @@ int main(int argc, char * argv[])
       tools::draw_points(img, image_points, {0, 0, 255});
     }
 
+    // ===================== 计算 FPS 与显示状态 =====================
     static auto last_time = std::chrono::steady_clock::now();
     auto now = std::chrono::steady_clock::now();
     double fps = 1.0 / tools::delta_time(now, last_time);

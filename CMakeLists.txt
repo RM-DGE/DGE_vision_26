@@ -3,6 +3,8 @@ cmake_minimum_required(VERSION 3.16.3)
 project(sp_vision)
 
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_BUILD_TYPE Release)
 message(STATUS "--------------------CMAKE_BUILD_TYPE: ${CMAKE_BUILD_TYPE}--------------------")
 
@@ -12,7 +14,7 @@ find_package(Eigen3 REQUIRED)
 find_package(spdlog REQUIRED)
 find_package(yaml-cpp REQUIRED)
 find_package(nlohmann_json REQUIRED)
-set(OpenVINO_DIR "/opt/intel/openvino_2024.6.0/runtime/cmake/")
+set(OpenVINO_DIR "/opt/intel/openvino_2024.6.0/runtime/cmake/" CACHE PATH "OpenVINO CMake package directory")
 find_package(OpenVINO REQUIRED)
 
 include_directories(${EIGEN3_INCLUDE_DIR})
@@ -25,7 +27,8 @@ add_subdirectory(io)
 add_subdirectory(tasks/auto_aim)
 add_subdirectory(tasks/omniperception)
 
-####################src###################
+#################### src applications ###################
+# These executables are the current application layer under src/.
 add_executable(standard src/standard.cpp)
 add_executable(mt_standard src/mt_standard.cpp)
 add_executable(standard_mpc src/standard_mpc.cpp)
@@ -40,7 +43,7 @@ target_link_libraries(auto_aim_debug_mpc ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_a
 target_link_libraries(mt_auto_aim_debug ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
 
 
-##################calibration################
+################## calibration ################
 add_executable(capture calibration/capture.cpp)
 add_executable(calibrate_camera calibration/calibrate_camera.cpp)
 add_executable(calibrate_handeye calibration/calibrate_handeye.cpp)
@@ -53,7 +56,7 @@ target_link_libraries(calibrate_handeye ${OpenCV_LIBS} fmt::fmt yaml-cpp tools)
 target_link_libraries(calibrate_robotworld_handeye ${OpenCV_LIBS} fmt::fmt yaml-cpp tools)
 target_link_libraries(split_video ${OpenCV_LIBS} fmt::fmt tools)
 
-##################tests##################
+################## tests ##################
 add_executable(auto_aim_test tests/auto_aim_test.cpp)
 add_executable(camera_detect_test tests/camera_detect_test.cpp)
 add_executable(camera_test tests/camera_test.cpp)

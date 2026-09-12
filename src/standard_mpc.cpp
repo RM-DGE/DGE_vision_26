@@ -51,6 +51,7 @@ int main(int argc, char * argv[])
   auto_aim::Tracker tracker(config_path, solver);
   auto_aim::Planner planner(config_path);
 
+  // target_queue 用于在检测线程和规划线程之间传递当前目标，保证控制线程拿到最新目标。
   tools::ThreadSafeQueue<std::optional<auto_aim::Target>, true> target_queue(1);
   target_queue.push(std::nullopt);
 
@@ -69,6 +70,9 @@ int main(int argc, char * argv[])
   std::atomic<io::GimbalMode> mode{io::GimbalMode::IDLE};
   auto last_mode{io::GimbalMode::IDLE};
 
+  // ===================== 规划线程：基于 MPC / Planner 生成控制指令 =====================
+  // 这个线程独立于主循环，持续查看 target_queue 中有没有最新目标；一旦进入 AUTO_AIM 模式，
+  // 就调用 planner.plan(...) 得到下一步云台控制量，并通过 gimbal.send(...) 下发给机械结构。
   auto plan_thread = std::thread([&]() {
     auto t0 = std::chrono::steady_clock::now();
     uint16_t last_bullet_count = 0;
@@ -89,6 +93,9 @@ int main(int argc, char * argv[])
     }
   });
 
+  // ===================== 主循环：读取图像、状态、检测、跟踪与目标入队 =====================
+  // 这里主线程主要负责：相机读图、获取 IMU/云台状态、更新世界坐标系、检测和跟踪目标，
+  // 最后把跟踪到的目标压入 target_queue，供规划线程使用。
   while (!exiter.exit()) {
     mode = gimbal.mode();
 
@@ -105,13 +112,17 @@ int main(int argc, char * argv[])
 
     /// 自瞄
     if (mode.load() == io::GimbalMode::AUTO_AIM) {
+      // 检测装甲板并进行目标跟踪
       auto armors = yolo.detect(img);
       auto targets = tracker.track(armors, t);
+
+      // 把当前有效目标传给规划线程，供 MPC 控制器使用
       if (!targets.empty())
         target_queue.push(targets.front());
       else
         target_queue.push(std::nullopt);
     } else {
+      // 不在自瞄模式时，给云台一个清零或空闲控制命令，避免残留的指令继续使云台运动。
       gimbal.send(false, false, 0, 0, 0, 0, 0, 0);
     }
 
@@ -139,6 +150,7 @@ int main(int argc, char * argv[])
     // }
   }
 
+  // 在退出时，停止规划线程，并再次发送 0 控制以确保云台进入安全状态。
   quit = true;
   if (plan_thread.joinable()) plan_thread.join();
   gimbal.send(false, false, 0, 0, 0, 0, 0, 0);
