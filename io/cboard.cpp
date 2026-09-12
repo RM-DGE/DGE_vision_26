@@ -62,7 +62,7 @@ Eigen::Quaterniond CBoard::imu_at(std::chrono::steady_clock::time_point timestam
     
     // Thread-safe pop
     {
-        std::lock_guard<std::mutex> lock(queue_mutex_);
+        std::lock_guard<std::mutex> lock(queue_mutex_); //互斥锁
         if (!queue_.empty()) {
             temp = queue_.front();
             queue_.pop_front();
@@ -77,7 +77,7 @@ Eigen::Quaterniond CBoard::imu_at(std::chrono::steady_clock::time_point timestam
     data_ahead_ = data_behind_;
   }
 
-  Eigen::Quaterniond q_a = data_ahead_.q.normalized();
+  Eigen::Quaterniond q_a = data_ahead_.q.normalized();  //归一化
   Eigen::Quaterniond q_b = data_behind_.q.normalized();
   auto t_a = data_ahead_.timestamp;
   auto t_b = data_behind_.timestamp;
