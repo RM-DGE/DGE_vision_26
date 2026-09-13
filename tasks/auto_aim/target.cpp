@@ -94,13 +94,13 @@ void Target::predict(double dt)
   // Piecewise White Noise Model
   // https://github.com/rlabbe/Kalman-and-Bayesian-Filters-in-Python/blob/master/07-Kalman-Filter-Math.ipynb
   double v1, v2;
-  if (name == ArmorName::outpost) {
-    v1 = 10;   // 前哨站加速度方差
-    v2 = 0.1;  // 前哨站角加速度方差
-  } else {
+  // if (name == ArmorName::outpost) {
+  //   v1 = 10;   // 前哨站加速度方差
+  //   v2 = 0.1;  // 前哨站角加速度方差
+  // } else {
     v1 = 100;  // 加速度方差
     v2 = 400;  // 角加速度方差
-  }
+  // }
   auto a = dt * dt * dt * dt / 4;
   auto b = dt * dt * dt / 2;
   auto c = dt * dt;
@@ -128,9 +128,9 @@ void Target::predict(double dt)
     return x_prior;
   };
 
-  // 前哨站转速特判
-  if (this->convergened() && this->name == ArmorName::outpost && std::abs(this->ekf_.x[7]) > 2)
-    this->ekf_.x[7] = this->ekf_.x[7] > 0 ? 2.51 : -2.51;
+  // // 前哨站转速特判
+  // if (this->convergened() && this->name == ArmorName::outpost && std::abs(this->ekf_.x[7]) > 2)
+  //   this->ekf_.x[7] = this->ekf_.x[7] > 0 ? 2.51 : -2.51;
 
   ekf_.predict(F, Q, f);
 }
@@ -255,10 +255,10 @@ bool Target::convergened()
     is_converged_ = true;
   }
 
-  //前哨站特殊判断
-  if (this->name == ArmorName::outpost && update_count_ > 10 && !this->diverged()) {
-    is_converged_ = true;
-  }
+  // //前哨站特殊判断
+  // if (this->name == ArmorName::outpost && update_count_ > 10 && !this->diverged()) {
+  //   is_converged_ = true;
+  // }
 
   return is_converged_;
 }

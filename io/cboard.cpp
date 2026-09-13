@@ -22,7 +22,7 @@ namespace io
 CBoard::CBoard(const std::string & config_path)
 : mode(Mode::idle),
   shoot_mode(0),
-  // bullet_speed(0),
+  // bullet_speed(0), //弹速初始化
   ft_angle(0),
   // queue_ initialization removed (using default deque constructor)
   serial_(read_yaml(config_path), read_baudrate(config_path),
@@ -51,6 +51,10 @@ CBoard::CBoard(const std::string & config_path)
   tools::logger()->info("[Cboard] Opened.");
 }
 
+// ============================================================================
+//   IMU 时间对齐：按时间戳获取该时刻的姿态四元数
+//    核心思想：IMU 是离散采样，图像/控制都需要“某个时刻”的姿态，
+//    所以需要用相邻两帧做四元数插值。
 // 根据给定的时间戳，通过插值计算出该时刻对应的 IMU 四元
 Eigen::Quaterniond CBoard::imu_at(std::chrono::steady_clock::time_point timestamp)
 {
@@ -118,6 +122,10 @@ void CBoard::send(Command command) const
   }
 }
 
+//    串口回调：接收并解析 IMU / 状态帧
+//    - 0xAA：IMU 数据帧
+//    - 0xBB：状态数据帧
+//    - 其他：忽略或记录 debug 信息
 // 解析并存储IMU和状态数据
 void CBoard::callback(const std::vector<uint8_t> & frame)
 {
@@ -181,7 +189,7 @@ void CBoard::callback(const std::vector<uint8_t> & frame)
     static auto last_log_time = std::chrono::steady_clock::time_point::min();
     if (tools::delta_time(timestamp, last_log_time) >= 1.0) {
       tools::logger()->info(
-        "[CBoard] Speed: {:.2f}, Mode: {}, Shoot: {}", //, FT: {:.2f}",
+        "[CBoard] Speed: {:.2f}," //Mode: {}, Shoot: {} , FT: {:.2f}",
         bullet_speed);//, ft_angle);, SHOOT_MODES[shoot_mode]
       last_log_time = timestamp;
     }

@@ -82,7 +82,7 @@ public:
   void send(io::VisionToGimbal VisionToGimbal);
 
 private:
-  serial::Serial serial_;
+  LibSerial::SerialPort serial_;
   std::string port_name_;
 
   std::thread thread_;

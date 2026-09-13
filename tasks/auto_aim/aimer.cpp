@@ -12,7 +12,7 @@
 namespace auto_aim
 {
 Aimer::Aimer(const std::string & config_path)
-: left_yaw_offset_(std::nullopt), right_yaw_offset_(std::nullopt)
+// : left_yaw_offset_(std::nullopt), right_yaw_offset_(std::nullopt)
 {
   auto yaml = YAML::LoadFile(config_path);
   yaw_offset_ = yaml["yaw_offset"].as<double>() / 57.3;        // degree to rad
@@ -22,11 +22,11 @@ Aimer::Aimer(const std::string & config_path)
   high_speed_delay_time_ = yaml["high_speed_delay_time"].as<double>();
   low_speed_delay_time_ = yaml["low_speed_delay_time"].as<double>();
   decision_speed_ = yaml["decision_speed"].as<double>();
-  if (yaml["left_yaw_offset"].IsDefined() && yaml["right_yaw_offset"].IsDefined()) {
-    left_yaw_offset_ = yaml["left_yaw_offset"].as<double>() / 57.3;    // degree to rad
-    right_yaw_offset_ = yaml["right_yaw_offset"].as<double>() / 57.3;  // degree to rad
-    tools::logger()->info("[Aimer] successfully loading shootmode");
-  }
+  // if (yaml["left_yaw_offset"].IsDefined() && yaml["right_yaw_offset"].IsDefined()) {
+  //   left_yaw_offset_ = yaml["left_yaw_offset"].as<double>() / 57.3;    // degree to rad
+  //   right_yaw_offset_ = yaml["right_yaw_offset"].as<double>() / 57.3;  // degree to rad
+  //   tools::logger()->info("[Aimer] successfully loading shootmode");
+  // }
 }
 
 io::Command Aimer::aim(
@@ -122,25 +122,24 @@ io::Command Aimer::aim(
   return {true, false, yaw, pitch};
 }
 
-io::Command Aimer::aim(
-  std::list<Target> targets, std::chrono::steady_clock::time_point timestamp, double bullet_speed,
-  int shoot_mode, bool to_now)
-{
-  // shoot_mode: 0 = left_shoot, 1 = right_shoot, others fall back to default yaw_offset_
-  double yaw_offset;
-  if (shoot_mode == 0 && left_yaw_offset_.has_value()) {
-    yaw_offset = left_yaw_offset_.value();
-  } else if (shoot_mode == 1 && right_yaw_offset_.has_value()) {
-    yaw_offset = right_yaw_offset_.value();
-  } else {
-    yaw_offset = yaw_offset_;
-  }
+// io::Command Aimer::aim(
+//   std::list<Target> targets, std::chrono::steady_clock::time_point timestamp, double bullet_speed,
+//   io::ShootMode shoot_mode, bool to_now)
+// {
+//   double yaw_offset;
+//   if (shoot_mode == io::left_shoot && left_yaw_offset_.has_value()) {
+//     yaw_offset = left_yaw_offset_.value();
+//   } else if (shoot_mode == io::right_shoot && right_yaw_offset_.has_value()) {
+//     yaw_offset = right_yaw_offset_.value();
+//   } else {
+//     yaw_offset = yaw_offset_;
+//   }
 
-  auto command = aim(targets, timestamp, bullet_speed, to_now);
-  command.yaw = command.yaw - yaw_offset_ + yaw_offset;
+//   auto command = aim(targets, timestamp, bullet_speed, to_now);
+//   command.yaw = command.yaw - yaw_offset_ + yaw_offset;
 
-  return command;
-}
+//   return command;
+// }
 
 AimPoint Aimer::choose_aim_point(const Target & target)
 {
@@ -191,13 +190,13 @@ AimPoint Aimer::choose_aim_point(const Target & target)
   }
 
   double coming_angle, leaving_angle;
-  if (target.name == ArmorName::outpost) {
-    coming_angle = 70 / 57.3;
-    leaving_angle = 30 / 57.3;
-  } else {
+  // if (target.name == ArmorName::outpost) {
+  //   coming_angle = 70 / 57.3;
+  //   leaving_angle = 30 / 57.3;
+  // } else {
     coming_angle = comming_angle_;
     leaving_angle = leaving_angle_;
-  }
+  // }
 
   // 在小陀螺时，一侧的装甲板不断出现，另一侧的装甲板不断消失，显然前者被打中的概率更高
   for (int i = 0; i < armor_num; i++) {
