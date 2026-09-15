@@ -14,6 +14,9 @@ const std::string keys =
   "{config-path c  | configs/calibration.yaml | yaml配置文件路径 }"
   "{@input-folder  | assets/img_with_q        | 输入文件夹路径   }";
 
+// =========================
+// 2. 标定板 3D 点生成
+// =========================
 std::vector<cv::Point3f> centers_3d(const cv::Size & pattern_size, const float center_distance)
 {
   std::vector<cv::Point3f> centers_3d;
@@ -25,6 +28,9 @@ std::vector<cv::Point3f> centers_3d(const cv::Size & pattern_size, const float c
   return centers_3d;
 }
 
+// =========================
+// 3. IMU 四元数读取
+// =========================
 Eigen::Quaterniond read_q(const std::string & q_path)
 {
   std::ifstream q_file(q_path);
@@ -33,6 +39,16 @@ Eigen::Quaterniond read_q(const std::string & q_path)
   return {w, x, y, z};
 }
 
+// =========================
+// 4. 数据加载与预处理
+// =========================
+// 作用：
+//   - 读取标定配置（标定板大小、点距、相机内参、云台到IMU转置矩阵）
+//   - 遍历图片序列
+//   - 识别标定板圆点
+//   - 计算每次采样的 gimbal->world 旋转关系
+//   - 通过 solvePnP 求解每张图的相机位姿
+//   - 保存用于后续手眼标定的所有输入数据
 void load(
   const std::string & input_folder, const std::string & config_path,
   std::vector<double> & R_gimbal2imubody_data, std::vector<cv::Mat> & R_gimbal2world_list,
@@ -61,7 +77,9 @@ void load(
     Eigen::Quaterniond q = read_q(q_path);
     if (img.empty()) break;
 
-    // 计算云台的欧拉角
+    // 计算云台对应世界坐标系的旋转矩阵
+    // 参考公式：R_gimbal2world = R_gimbal2imubody^T * R_imubody2imuabs * R_gimbal2imubody
+    // 其中 R_imubody2imuabs 来自 IMU 的四元数
     Eigen::Matrix3d R_imubody2imuabs = q.toRotationMatrix();
     Eigen::Matrix3d R_gimbal2world =
       R_gimbal2imubody.transpose() * R_imubody2imuabs * R_gimbal2imubody;
@@ -73,12 +91,14 @@ void load(
     tools::draw_text(drawing, fmt::format("pitch {:.2f}", ypr[1]), {40, 80}, {0, 0, 255});
     tools::draw_text(drawing, fmt::format("roll  {:.2f}", ypr[2]), {40, 120}, {0, 0, 255});
 
-    // 识别标定板
-    std::vector<cv::Point2f> centers_2d;
-    auto success = cv::findCirclesGrid(img, pattern_size, centers_2d);  // 默认是对称圆点图案
+    // 识别标定板（棋盘格）
+    std::vector<cv::Point2f> corners_2d;
+    auto success = cv::findChessboardCorners(
+      img, pattern_size, corners_2d,
+      cv::CALIB_CB_ADAPTIVE_THRESH | cv::CALIB_CB_NORMALIZE_IMAGE);
 
     // 显示识别结果
-    cv::drawChessboardCorners(drawing, pattern_size, centers_2d, success);
+    cv::drawChessboardCorners(drawing, pattern_size, corners_2d, success);
     cv::resize(drawing, drawing, {}, 0.5, 0.5);  // 显示时缩小图片尺寸
     cv::imshow("Press any to continue", drawing);
     cv::waitKey(0);
@@ -87,16 +107,19 @@ void load(
     fmt::print("[{}] {}\n", success ? "success" : "failure", img_path);
     if (!success) continue;
 
-    // 计算所需的数据
+    // 计算每张图对应的相机位姿（rvec, tvec）
+    // 这里的 t_gimbal2world 设为零，是因为在本程序中，
+    // 我们用 R_gimbal2world 作为机械臂/云台相对世界的旋转，再通过手眼标定求平移。
     cv::Mat t_gimbal2world = (cv::Mat_<double>(3, 1) << 0, 0, 0);
     cv::Mat R_gimbal2world_cv;
     cv::eigen2cv(R_gimbal2world, R_gimbal2world_cv);
     cv::Mat rvec, tvec;
     auto centers_3d_ = centers_3d(pattern_size, center_distance_mm);
     cv::solvePnP(
-      centers_3d_, centers_2d, camera_matrix, distort_coeffs, rvec, tvec, false, cv::SOLVEPNP_IPPE);
+      centers_3d_, corners_2d, camera_matrix, distort_coeffs, rvec, tvec, false,
+      cv::SOLVEPNP_IPPE);
 
-    // 记录所需的数据
+    // 记录所需的数据，供后续 calibrateHandEye 使用
     R_gimbal2world_list.emplace_back(R_gimbal2world_cv);
     t_gimbal2world_list.emplace_back(t_gimbal2world);
     rvecs.emplace_back(rvec);
@@ -104,6 +127,9 @@ void load(
   }
 }
 
+// =========================
+// 5. 标定结果输出
+// =========================
 void print_yaml(
   const std::vector<double> & R_gimbal2imubody_data, const cv::Mat & R_camera2gimbal,
   const cv::Mat & t_camera2gimbal, const Eigen::Vector3d & ypr)
@@ -131,6 +157,9 @@ void print_yaml(
   fmt::print("\n{}\n", result.c_str());
 }
 
+// =========================
+// 6. 主程序入口
+// =========================
 int main(int argc, char * argv[])
 {
   // 读取命令行参数
@@ -150,7 +179,7 @@ int main(int argc, char * argv[])
     input_folder, config_path, R_gimbal2imubody_data, R_gimbal2world_list, t_gimbal2world_list,
     rvecs, tvecs);
 
-  // 手眼标定
+  // 手眼标定：求解相机相对云台的固定外参
   cv::Mat R_camera2gimbal, t_camera2gimbal;
   cv::calibrateHandEye(
     R_gimbal2world_list, t_gimbal2world_list, rvecs, tvecs, R_camera2gimbal, t_camera2gimbal);

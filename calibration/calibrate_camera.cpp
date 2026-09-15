@@ -43,13 +43,15 @@ void load(
     // 设置图片尺寸
     img_size = img.size();
 
-    // 识别标定板
-    std::vector<cv::Point2f> centers_2d;
-    auto success = cv::findCirclesGrid(img, pattern_size, centers_2d, cv::CALIB_CB_SYMMETRIC_GRID);
+    // 识别标定板（棋盘格）
+    std::vector<cv::Point2f> corners_2d;
+    auto success = cv::findChessboardCorners(
+      img, pattern_size, corners_2d,
+      cv::CALIB_CB_ADAPTIVE_THRESH | cv::CALIB_CB_NORMALIZE_IMAGE);
 
     // 显示识别结果
     auto drawing = img.clone();
-    cv::drawChessboardCorners(drawing, pattern_size, centers_2d, success);
+    cv::drawChessboardCorners(drawing, pattern_size, corners_2d, success);
     cv::resize(drawing, drawing, {}, 0.5, 0.5);  // 缩小图片尺寸便于显示完全
     cv::imshow("Press any to continue", drawing);
     cv::waitKey(0);
@@ -59,7 +61,7 @@ void load(
     if (!success) continue;
 
     // 记录所需的数据
-    img_points.emplace_back(centers_2d);
+    img_points.emplace_back(corners_2d);
     obj_points.emplace_back(centers_3d(pattern_size, center_distance_mm));
   }
 }

@@ -44,9 +44,11 @@ void capture_loop(
     tools::draw_text(img_with_ypr, fmt::format("Y {:.2f}", zyx[1]), {40, 80}, {0, 0, 255});
     tools::draw_text(img_with_ypr, fmt::format("X {:.2f}", zyx[2]), {40, 120}, {0, 0, 255});
 
-    std::vector<cv::Point2f> centers_2d;
-    auto success = cv::findCirclesGrid(img, cv::Size(10, 7), centers_2d);  // 默认是对称圆点图案
-    cv::drawChessboardCorners(img_with_ypr, cv::Size(10, 7), centers_2d, success);  // 显示识别结果
+    std::vector<cv::Point2f> corners_2d;
+    auto success = cv::findChessboardCorners(
+      img, cv::Size(10, 7), corners_2d,
+      cv::CALIB_CB_ADAPTIVE_THRESH | cv::CALIB_CB_NORMALIZE_IMAGE);
+    cv::drawChessboardCorners(img_with_ypr, cv::Size(10, 7), corners_2d, success);  // 显示识别结果
     cv::resize(img_with_ypr, img_with_ypr, {}, 0.5, 0.5);  // 显示时缩小图片尺寸
 
     // 按“s”保存图片和对应四元数，按“q”退出程序
@@ -83,7 +85,7 @@ int main(int argc, char * argv[])
   // 新建输出文件夹
   std::filesystem::create_directory(output_folder);
 
-  tools::logger()->info("默认标定板尺寸为10列7行");
+  tools::logger()->info("默认标定板尺寸为10列7行（棋盘格内角点）");
   // 主循环，保存图片和对应四元数
   capture_loop(config_path, "can0", output_folder);
 
