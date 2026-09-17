@@ -9,10 +9,12 @@
 
 namespace auto_aim
 {
+// 真实装甲板尺寸和 3D 模板点
 constexpr double LIGHTBAR_LENGTH = 56e-3;     // m
 constexpr double BIG_ARMOR_WIDTH = 230e-3;    // m
 constexpr double SMALL_ARMOR_WIDTH = 135e-3;  // m
 
+// 大装甲板和小装甲板的 4 个角点，在装甲板局部坐标系中定义。
 const std::vector<cv::Point3f> BIG_ARMOR_POINTS{
   {0, BIG_ARMOR_WIDTH / 2, LIGHTBAR_LENGTH / 2},
   {0, -BIG_ARMOR_WIDTH / 2, LIGHTBAR_LENGTH / 2},
@@ -22,8 +24,10 @@ const std::vector<cv::Point3f> SMALL_ARMOR_POINTS{
   {0, SMALL_ARMOR_WIDTH / 2, LIGHTBAR_LENGTH / 2},
   {0, -SMALL_ARMOR_WIDTH / 2, LIGHTBAR_LENGTH / 2},
   {0, -SMALL_ARMOR_WIDTH / 2, -LIGHTBAR_LENGTH / 2},
-  {0, SMALL_ARMOR_WIDTH / 2, -LIGHTBAR_LENGTH / 2}};
+  {0, SMALL_ARMOR_WIDTH / 2, -LIGHTBAR_LENGTH / 2}}; // 大小装甲板模板点，供 PnP / 重投影使用
 
+// ==============================  构造函数：加载标定参数 ==============================
+// 从 YAML 配置文件读取相机内参、畸变参数以及相机/云台/IMU 之间的外参。
 Solver::Solver(const std::string & config_path) : R_gimbal2world_(Eigen::Matrix3d::Identity())
 {
   auto yaml = YAML::LoadFile(config_path);
@@ -41,17 +45,22 @@ Solver::Solver(const std::string & config_path) : R_gimbal2world_(Eigen::Matrix3
   Eigen::Matrix<double, 1, 5> distort_coeffs(distort_coeffs_data.data());
   cv::eigen2cv(camera_matrix, camera_matrix_);
   cv::eigen2cv(distort_coeffs, distort_coeffs_);
-}
+} // 读取相机内参、畸变和外参，初始化视觉求解器
 
+// ==============================  坐标系转换关系 ==============================
+// 获取云台相对于世界坐标系的旋转矩阵 R_gimbal2world_。
 Eigen::Matrix3d Solver::R_gimbal2world() const { return R_gimbal2world_; }
 
+// 设置云台相对于世界坐标系的姿态，输入为四元数 q。
+// 该函数主要用于根据 IMU 提供的姿态信息，更新云台的朝向。
 void Solver::set_R_gimbal2world(const Eigen::Quaterniond & q)
 {
   Eigen::Matrix3d R_imubody2imuabs = q.toRotationMatrix();
   R_gimbal2world_ = R_gimbal2imubody_.transpose() * R_imubody2imuabs * R_gimbal2imubody_;
-}
+} // 根据 IMU 姿态更新云台到世界坐标系的旋转关系
 
-//solvePnP（获得姿态）
+// ==============================  装甲板姿态求解：solve() ==============================
+// 输入为一块装甲板的 2D 角点坐标，通过 PnP 算法求解其在世界坐标系中的 3D 位姿。
 void Solver::solve(Armor & armor) const
 {
   const auto & object_points =
@@ -85,8 +94,11 @@ void Solver::solve(Armor & armor) const
   if (is_balance) return;
 
   optimize_yaw(armor);
-}
+} // 用 PnP 求目标 3D 位姿，并把坐标转换到云台/世界坐标系
 
+// ==============================  装甲板重投影：reproject_armor() ==============================
+// 输入装甲板在世界坐标系中的 3D 坐标、偏航角和装甲板类型，输出其在图像中的 2D 投影坐标。
+// 用于根据当前估计的 3D 位姿，预测装甲板在图像中的位置。
 std::vector<cv::Point2f> Solver::reproject_armor(
   const Eigen::Vector3d & xyz_in_world, double yaw, ArmorType type, ArmorName name) const
 {
@@ -124,8 +136,11 @@ std::vector<cv::Point2f> Solver::reproject_armor(
   const auto & object_points = (type == ArmorType::big) ? BIG_ARMOR_POINTS : SMALL_ARMOR_POINTS;
   cv::projectPoints(object_points, rvec, tvec, camera_matrix_, distort_coeffs_, image_points);
   return image_points;
-}
+} // 根据假设姿态把装甲板投影回图像，用于误差评估和调试
 
+// ==============================  外点重投影误差计算：oupost_reprojection_error() ==============================
+// 该函数专门用于计算一组特定 3D 点（如云台中心）在给定俯仰角下的重投影误差。
+// 优化算法，评估某一俯仰角猜测的好坏。
 double Solver::oupost_reprojection_error(Armor armor, const double & pitch)
 {
   // solve
@@ -170,7 +185,6 @@ double Solver::oupost_reprojection_error(Armor armor, const double & pitch)
   };
   // clang-format on
 
-  // get R_armor2camera t_armor2camera
   const Eigen::Vector3d & t_armor2world = xyz_in_world;
   Eigen::Matrix3d _R_armor2camera =
     R_camera2gimbal_.transpose() * R_gimbal2world_.transpose() * _R_armor2world;
@@ -191,13 +205,16 @@ double Solver::oupost_reprojection_error(Armor armor, const double & pitch)
   auto error = 0.0;
   for (int i = 0; i < 4; i++) error += cv::norm(armor.points[i] - image_points[i]);
   return error;
-}
+} // 在给定俯仰角下计算重投影误差，用于筛选最佳解
 
+// ==============================  偏航角优化：optimize_yaw() ==============================
+// 该函数用于在已知俯仰角和滚动角的情况下，优化装甲板的偏航角估计。
+// 搜索范围由上一帧的偏航角决定，搜索步长为 1 度。
 void Solver::optimize_yaw(Armor & armor) const
 {
   Eigen::Vector3d gimbal_ypr = tools::eulers(R_gimbal2world_, 2, 1, 0);
 
-  constexpr double SEARCH_RANGE = 140;  // degree
+  constexpr double SEARCH_RANGE = 140;  // 上一帧的搜索范围
   auto yaw0 = tools::limit_rad(gimbal_ypr[0] - SEARCH_RANGE / 2 * CV_PI / 180.0);
 
   auto min_error = 1e10;
@@ -215,8 +232,10 @@ void Solver::optimize_yaw(Armor & armor) const
 
   armor.yaw_raw = armor.ypr_in_world[0];
   armor.ypr_in_world[0] = best_yaw;
-}
+} // 在搜索范围内选取误差最小的 yaw，修正装甲板偏航角
 
+// ==============================  重投影误差计算：SJTU_cost() ==============================
+// 该函数用于计算一组点的重投影误差，主要用于优化算法中评估误差大小。
 double Solver::SJTU_cost(
   const std::vector<cv::Point2f> & cv_refs, const std::vector<cv::Point2f> & cv_pts,
   const double & inclined) const
@@ -231,26 +250,24 @@ double Solver::SJTU_cost(
   double cost = 0.;
   for (std::size_t i = 0u; i < size; ++i) {
     std::size_t p = (i + 1u) % size;
-    // i - p 构成线段。过程：先移动起点，再补长度，再旋转
-    Eigen::Vector2d ref_d = refs[p] - refs[i];  // 标准
+    Eigen::Vector2d ref_d = refs[p] - refs[i];
     Eigen::Vector2d pt_d = pts[p] - pts[i];
-    // 长度差代价 + 起点差代价(1 / 2)（0 度左右应该抛弃)
-    double pixel_dis =  // dis 是指方差平面内到原点的距离
+    double pixel_dis =
       (0.5 * ((refs[i] - pts[i]).norm() + (refs[p] - pts[p]).norm()) +
        std::fabs(ref_d.norm() - pt_d.norm())) /
       ref_d.norm();
     double angular_dis = ref_d.norm() * tools::get_abs_angle(ref_d, pt_d) / ref_d.norm();
-    // 平方可能是为了配合 sin 和 cos
-    // 弧度差代价（0 度左右占比应该大）
     double cost_i =
       tools::square(pixel_dis * std::sin(inclined)) +
-      tools::square(angular_dis * std::cos(inclined)) * 2.0;  // DETECTOR_ERROR_PIXEL_BY_SLOPE
-    // 重投影像素误差越大，越相信斜率
+      tools::square(angular_dis * std::cos(inclined)) * 2.0;
     cost += std::sqrt(cost_i);
   }
   return cost;
-}
+} // 评估点集拟合质量，作为补充的误差度量指标
 
+// ==============================  装甲板重投影误差：armor_reprojection_error() ==============================
+// 该函数用于计算装甲板的重投影误差，主要用于优化算法中评估误差大小。
+// 输入为装甲板的 3D 位姿信息，输出为重投影误差值。
 double Solver::armor_reprojection_error(
   const Armor & armor, double yaw, const double & inclined) const
 {
@@ -260,9 +277,11 @@ double Solver::armor_reprojection_error(
   // auto error = SJTU_cost(image_points, armor.points, inclined);
 
   return error;
-}
+} // 直接计算四角点重投影误差，判断当前 yaw 是否合理
 
-// 世界坐标到像素坐标的转换
+// ==============================  世界坐标到像素坐标的转换：world2pixel() ==============================
+// 该函数用于将一组 3D 世界坐标点转换为 2D 像素坐标。
+// 该函数主要用于根据装甲板在世界坐标系中的位置，预测其在图像中的位置。
 std::vector<cv::Point2f> Solver::world2pixel(const std::vector<cv::Point3f> & worldPoints)
 {
   Eigen::Matrix3d R_world2camera = R_camera2gimbal_.transpose() * R_gimbal2world_.transpose();
@@ -282,12 +301,11 @@ std::vector<cv::Point2f> Solver::world2pixel(const std::vector<cv::Point3f> & wo
       valid_world_points.push_back(world_point);
     }
   }
-  // 如果没有有效点，返回空vector
   if (valid_world_points.empty()) {
     return std::vector<cv::Point2f>();
   }
   std::vector<cv::Point2f> pixelPoints;
   cv::projectPoints(valid_world_points, rvec, tvec, camera_matrix_, distort_coeffs_, pixelPoints);
   return pixelPoints;
-}
+} // 把世界坐标点投到图像上，便于可视化和调试
 }  // namespace auto_aim

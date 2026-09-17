@@ -8,6 +8,7 @@ using namespace std::chrono_literals;
 
 namespace io
 {
+// 构造：初始化相机参数并启动守护线程，保持采集稳定
 HikRobot::HikRobot(double exposure_ms, double gain, const std::string & vid_pid)
 : exposure_us_(exposure_ms * 1e3), gain_(gain), queue_(1), daemon_quit_(false), vid_(-1), pid_(-1)
 {
@@ -35,6 +36,7 @@ HikRobot::HikRobot(double exposure_ms, double gain, const std::string & vid_pid)
   }};
 }
 
+// 析构：停止守护线程并清理
 HikRobot::~HikRobot()
 {
   daemon_quit_ = true;
@@ -51,6 +53,7 @@ void HikRobot::read(cv::Mat & img, std::chrono::steady_clock::time_point & times
   timestamp = data.timestamp;
 }
 
+// 启动采集：枚举设备、打开相机、配置参数并启动抓图线程
 void HikRobot::capture_start()
 {
   capturing_ = false;
@@ -58,6 +61,7 @@ void HikRobot::capture_start()
 
   unsigned int ret;
 
+  // 枚举 USB 相机设备
   MV_CC_DEVICE_INFO_LIST device_list;
   ret = MV_CC_EnumDevices(MV_USB_DEVICE, &device_list);
   if (ret != MV_OK) {
@@ -70,6 +74,7 @@ void HikRobot::capture_start()
     return;
   }
 
+  // 创建并打开设备句柄
   ret = MV_CC_CreateHandle(&handle_, device_list.pDeviceInfo[0]);
   if (ret != MV_OK) {
     tools::logger()->warn("MV_CC_CreateHandle failed: {:#x}", ret);
@@ -82,19 +87,21 @@ void HikRobot::capture_start()
     return;
   }
 
-  set_enum_value("BalanceWhiteAuto", MV_BALANCEWHITE_AUTO_CONTINUOUS);
-  set_enum_value("ExposureAuto", MV_EXPOSURE_AUTO_MODE_OFF);
-  set_enum_value("GainAuto", MV_GAIN_MODE_OFF);
+  set_enum_value("BalanceWhiteAuto", MV_BALANCEWHITE_AUTO_CONTINUOUS);  //连续自动白平衡
+  set_enum_value("ExposureAuto", MV_EXPOSURE_AUTO_MODE_OFF);   //关闭自动曝光
+  set_enum_value("GainAuto", MV_GAIN_MODE_OFF);   //关闭自动增益
   set_float_value("ExposureTime", exposure_us_);
   set_float_value("Gain", gain_);
   MV_CC_SetFrameRate(handle_, 150);
 
+  // 开始抓取数据
   ret = MV_CC_StartGrabbing(handle_);
   if (ret != MV_OK) {
     tools::logger()->warn("MV_CC_StartGrabbing failed: {:#x}", ret);
     return;
   }
 
+  // 启动抓图线程：循环获取帧、Bayer->RGB、入队
   capture_thread_ = std::thread{[this] {
     tools::logger()->info("HikRobot's capture thread started.");
 
@@ -109,25 +116,28 @@ void HikRobot::capture_start()
       unsigned int ret;
       unsigned int nMsec = 100;
 
+      // 获取原始帧
       ret = MV_CC_GetImageBuffer(handle_, &raw, nMsec);
       if (ret != MV_OK) {
         tools::logger()->warn("MV_CC_GetImageBuffer failed: {:#x}", ret);
         break;
       }
 
-      auto timestamp = std::chrono::steady_clock::now();
+      auto timestamp = std::chrono::steady_clock::now(); // 时间戳为取到图的时间
       cv::Mat img(cv::Size(raw.stFrameInfo.nWidth, raw.stFrameInfo.nHeight), CV_8U, raw.pBufAddr);
 
-      cvt_param.nWidth = raw.stFrameInfo.nWidth;
-      cvt_param.nHeight = raw.stFrameInfo.nHeight;
+      //改用了 OpenCV 的 cv::cvtColor 做 Bayer 转 RGB，不再用海康 SDK 的转换。
 
-      cvt_param.pSrcData = raw.pBufAddr;
-      cvt_param.nSrcDataLen = raw.stFrameInfo.nFrameLen;
-      cvt_param.enSrcPixelType = raw.stFrameInfo.enPixelType;
+      // cvt_param.nWidth = raw.stFrameInfo.nWidth;
+      // cvt_param.nHeight = raw.stFrameInfo.nHeight;
 
-      cvt_param.pDstBuffer = img.data;
-      cvt_param.nDstBufferSize = img.total() * img.elemSize();
-      cvt_param.enDstPixelType = PixelType_Gvsp_BGR8_Packed;
+      // cvt_param.pSrcData = raw.pBufAddr;
+      // cvt_param.nSrcDataLen = raw.stFrameInfo.nFrameLen;
+      // cvt_param.enSrcPixelType = raw.stFrameInfo.enPixelType;
+
+      // cvt_param.pDstBuffer = img.data;
+      // cvt_param.nDstBufferSize = img.total() * img.elemSize();
+      // cvt_param.enDstPixelType = PixelType_Gvsp_BGR8_Packed;
 
       // ret = MV_CC_ConvertPixelType(handle_, &cvt_param);
       const auto & frame_info = raw.stFrameInfo;
@@ -141,6 +151,7 @@ void HikRobot::capture_start()
       cv::cvtColor(img, dst_image, type_map.at(pixel_type));
       img = dst_image;
 
+      // 将图像和时间戳推入队列供外部读取
       queue_.push({img, timestamp});
 
       ret = MV_CC_FreeImageBuffer(handle_, &raw);
