@@ -50,6 +50,8 @@ int main(int argc, char * argv[])
   target_queue.push(std::nullopt);
 
   std::atomic<bool> quit = false;
+  std::atomic<float> current_tx_yaw{0};
+  std::atomic<float> current_tx_pitch{0};
 
   // ===================== 规划线程：实时生成 MPC 控制命令 =====================
   // 持续从 target_queue 读取最新目标，
@@ -67,6 +69,9 @@ int main(int argc, char * argv[])
       gimbal.send(
         plan.control, plan.fire, plan.yaw, plan.yaw_vel, plan.yaw_acc, plan.pitch, plan.pitch_vel,
         plan.pitch_acc);
+
+      current_tx_yaw.store(plan.yaw);
+      current_tx_pitch.store(plan.pitch);
 
       auto fired = gs.bullet_count > last_bullet_count;
       last_bullet_count = gs.bullet_count;

@@ -19,7 +19,7 @@ using namespace std::chrono_literals;
 
 const std::string keys =
   "{help h usage ? |                     | 输出命令行参数说明}"
-  "{config-path c  | configs/handeye.yaml | yaml配置文件路径 }"
+  "{config-path c  | configs/calibration.yaml | yaml配置文件路径 }"
   "{d display      |                     | 显示视频流       }";
 
 // 世界坐标到像素坐标的转换
@@ -70,7 +70,6 @@ int main(int argc, char * argv[])
     tools::draw_text(result, fmt::format("yaw   {:.2f}", euler[0]), {40, 40}, {0, 0, 255});
     tools::draw_text(result, fmt::format("pitch {:.2f}", euler[1]), {40, 80}, {0, 0, 255});
     tools::draw_text(result, fmt::format("roll  {:.2f}", euler[2]), {40, 120}, {0, 0, 255});
-    if (!display) continue;
     cv::imshow("result", result);
     if (cv::waitKey(1) == 'q') break;
   }

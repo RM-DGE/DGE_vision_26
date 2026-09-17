@@ -189,8 +189,8 @@ void CBoard::callback(const std::vector<uint8_t> & frame)
     static auto last_log_time = std::chrono::steady_clock::time_point::min();
     if (tools::delta_time(timestamp, last_log_time) >= 1.0) {
       tools::logger()->info(
-        "[CBoard] Speed: {:.2f}," //Mode: {}, Shoot: {} , FT: {:.2f}",
-        bullet_speed);//, ft_angle);, SHOOT_MODES[shoot_mode]
+        "[CBoard] Speed: {:.2f}",
+        bullet_speed);
       last_log_time = timestamp;
     }
   } else {

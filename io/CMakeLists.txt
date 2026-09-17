@@ -7,7 +7,6 @@ add_subdirectory(serial)
 # 创建目标 io
 add_library(io STATIC 
     hikrobot/hikrobot.cpp    
-    mindvision/mindvision.cpp  
     usbcamera/usbcamera.cpp  
     camera.cpp
     cboard.cpp
@@ -34,8 +33,8 @@ endif()
 #   message(FATAL_ERROR "Unsupported architecture: ${CMAKE_HOST_SYSTEM_PROCESSOR}!")
 # endif()
 
-# find_library(LIBSERIAL_LIB serial /usr/lib /usr/local/lib)
-# target_link_libraries(io MvCameraControl MVSDK usb-1.0 yaml-cpp serial ${LIBSERIAL_LIB})
+find_library(SYSTEM_SERIAL_LIB serial PATHS /usr/lib /usr/lib/x86_64-linux-gnu)
+target_link_libraries(io PUBLIC usb-1.0 yaml-cpp serial ${SYSTEM_SERIAL_LIB} MvCameraControl)
 
 # ################## 检查 ROS 环境 ##################
 # find_package(ament_cmake QUIET)
@@ -56,4 +55,4 @@ endif()
 #     # 设置 ROS2 依赖
 #     include_directories(${std_msgs_INCLUDE_DIRS})
 #     ament_target_dependencies(io rclcpp std_msgs sp_msgs)
-endif()
+# endif()
