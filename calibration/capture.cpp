@@ -1,4 +1,5 @@
 #include <fmt/core.h>
+#include <yaml-cpp/yaml.h>
 
 #include <filesystem>
 #include <fstream>
@@ -27,6 +28,11 @@ void write_q(const std::string q_path, const Eigen::Quaterniond & q)
 void capture_loop(
   const std::string & config_path, const std::string & can, const std::string & output_folder)
 {
+  // 标定板尺寸从配置读取，必须与calibrate_camera/calibrate_handeye保持一致，
+  // 否则此处识别结果与后续标定程序不符，操作者无法确认采集是否可用
+  auto yaml = YAML::LoadFile(config_path);
+  cv::Size pattern_size(yaml["pattern_cols"].as<int>(), yaml["pattern_rows"].as<int>());
+
   io::CBoard cboard(config_path);
   io::Camera camera(config_path);
   cv::Mat img;
@@ -46,9 +52,15 @@ void capture_loop(
 
     std::vector<cv::Point2f> corners_2d;
     auto success = cv::findChessboardCorners(
-      img, cv::Size(10, 7), corners_2d,
+      img, pattern_size, corners_2d,
       cv::CALIB_CB_ADAPTIVE_THRESH | cv::CALIB_CB_NORMALIZE_IMAGE);
-    cv::drawChessboardCorners(img_with_ypr, cv::Size(10, 7), corners_2d, success);  // 显示识别结果
+    cv::drawChessboardCorners(img_with_ypr, pattern_size, corners_2d, success);  // 显示识别结果
+
+    // 明确提示识别结果，避免保存下无法用于标定的图片
+    tools::draw_text(
+      img_with_ypr, success ? "DETECTED" : "NOT DETECTED", {40, 160},
+      success ? cv::Scalar{0, 255, 0} : cv::Scalar{0, 0, 255});
+
     cv::resize(img_with_ypr, img_with_ypr, {}, 0.5, 0.5);  // 显示时缩小图片尺寸
 
     // 按“s”保存图片和对应四元数，按“q”退出程序
@@ -59,13 +71,16 @@ void capture_loop(
     else if (key != 's')
       continue;
 
-    // 保存图片和四元数
+    // 保存图片和四元数。编号必须连续：标定程序遇缺号即停止读取且不报错
     count++;
     auto img_path = fmt::format("{}/{}.jpg", output_folder, count);
     auto q_path = fmt::format("{}/{}.txt", output_folder, count);
     cv::imwrite(img_path, img);
     write_q(q_path, q);
-    tools::logger()->info("[{}] Saved in {}", count, output_folder);
+    if (success)
+      tools::logger()->info("[{}] Saved in {}", count, output_folder);
+    else
+      tools::logger()->warn("[{}] Saved in {}，但未识别到标定板，该图无法用于标定", count, output_folder);
   }
 
   // 离开该作用域时，camera和cboard会自动关闭
@@ -85,7 +100,11 @@ int main(int argc, char * argv[])
   // 新建输出文件夹
   std::filesystem::create_directory(output_folder);
 
-  tools::logger()->info("默认标定板尺寸为10列7行（棋盘格内角点）");
+  auto yaml = YAML::LoadFile(config_path);
+  tools::logger()->info(
+    "标定板尺寸为{}列{}行（棋盘格内角点），读自 {}", yaml["pattern_cols"].as<int>(),
+    yaml["pattern_rows"].as<int>(), config_path);
+
   // 主循环，保存图片和对应四元数
   capture_loop(config_path, "can0", output_folder);
 

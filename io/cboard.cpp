@@ -147,13 +147,11 @@ void CBoard::callback(const std::vector<uint8_t> & frame)
       return; // 帧尾不对，说明发生了数据错位，直接丢弃该帧
     }
 
-    // IMU固件使用scalar-last约定(x,y,z,w)，交换为Eigen的(w,x,y,z)
-    double w = data->z / 10000.0;
+    double w = data->w / 10000.0;
     double x = data->x / 10000.0;
     double y = data->y / 10000.0;
-    double z = data->w / 10000.0;
+    double z = data->z / 10000.0;
 
-    tools::logger()->debug("[CBoard] IMU q: w={:.4f} x={:.4f} y={:.4f} z={:.4f}", w, x, y, z);
 
 
     //校验接收到的四元数是否是合法的单位四元数
