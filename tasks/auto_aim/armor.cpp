@@ -6,6 +6,7 @@
 
 namespace auto_aim
 {
+// 由灯条轮廓生成灯条特征：中心、角度、长度、比例等。
 Lightbar::Lightbar(const cv::RotatedRect & rotated_rect, std::size_t id)
 : id(id), rotated_rect(rotated_rect)
 {
@@ -30,7 +31,7 @@ Lightbar::Lightbar(const cv::RotatedRect & rotated_rect, std::size_t id)
   ratio = length / width;
 }
 
-//传统构造函数
+// 根据左右灯条构造装甲板：计算中心、宽高比和矩形误差。
 Armor::Armor(const Lightbar & left, const Lightbar & right)
 : left(left), right(right), duplicated(false)
 {
@@ -55,7 +56,7 @@ Armor::Armor(const Lightbar & left, const Lightbar & right)
   rectangular_error = std::max(left_rectangular_error, right_rectangular_error);
 }
 
-//神经网络构造函数
+// 由神经网络分类结果构造装甲：解析颜色、编号和装甲类型。
 Armor::Armor(
   int class_id, float confidence, const cv::Rect & box, std::vector<cv::Point2f> armor_keypoints)
 : class_id(class_id), confidence(confidence), box(box), points(armor_keypoints)
@@ -96,7 +97,7 @@ Armor::Armor(
   }
 }
 
-//神经网络ROI构造函数
+// 在 ROI 偏移后重建装甲：把关键点转换回原图坐标系。
 Armor::Armor(
   int class_id, float confidence, const cv::Rect & box, std::vector<cv::Point2f> armor_keypoints,
   cv::Point2f offset)
@@ -144,7 +145,7 @@ Armor::Armor(
   }
 }
 
-// YOLOV5构造函数
+// YOLOV5 生成装甲：根据颜色和编号标定对象属性。
 Armor::Armor(
   int color_id, int num_id, float confidence, const cv::Rect & box,
   std::vector<cv::Point2f> armor_keypoints)
@@ -179,7 +180,7 @@ Armor::Armor(
   type = num_id == 1 ? ArmorType::big : ArmorType::small;
 }
 
-// YOLOV5+ROI构造函数
+// YOLOV5+ROI 版本：先补偿偏移，再计算装甲几何和类别。
 Armor::Armor(
   int color_id, int num_id, float confidence, const cv::Rect & box,
   std::vector<cv::Point2f> armor_keypoints, cv::Point2f offset)

@@ -30,6 +30,8 @@ Detector::Detector(const std::string & config_path, bool debug)
   std::filesystem::create_directory(save_path_);
 }
 
+// 构造：加载 YAML 配置并初始化分类器和参数
+
 std::list<Armor> Detector::detect(const cv::Mat & bgr_img, int frame_count)
 {
   // 彩色图转灰度图
@@ -118,6 +120,8 @@ std::list<Armor> Detector::detect(const cv::Mat & bgr_img, int frame_count)
 
   return armors;
 }
+
+// 全图检测：返回所有满足几何与分类条件的 Armor 列表
 
 bool Detector::detect(Armor & armor, const cv::Mat & bgr_img)
 {
@@ -230,6 +234,8 @@ bool Detector::detect(Armor & armor, const cv::Mat & bgr_img)
   return false;
 }
 
+// 局部检测：在给定 Armor 四角附近裁剪并验证灯条，更新角点
+
 bool Detector::check_geometry(const Lightbar & lightbar) const
 {
   auto angle_ok = lightbar.angle_error < max_angle_error_;
@@ -238,6 +244,8 @@ bool Detector::check_geometry(const Lightbar & lightbar) const
   return angle_ok && ratio_ok && length_ok;
 }
 
+// 校验灯条几何特征（角度/长度/比率）
+
 bool Detector::check_geometry(const Armor & armor) const
 {
   auto ratio_ok = armor.ratio > min_armor_ratio_ && armor.ratio < max_armor_ratio_;
@@ -245,6 +253,8 @@ bool Detector::check_geometry(const Armor & armor) const
   auto rectangular_error_ok = armor.rectangular_error < max_rectangular_error_;
   return ratio_ok && side_ratio_ok && rectangular_error_ok;
 }
+
+// 校验装甲几何特征（长宽比/侧比/矩形误差）
 
 bool Detector::check_name(const Armor & armor) const
 {
@@ -259,6 +269,8 @@ bool Detector::check_name(const Armor & armor) const
 
   return name_ok && confidence_ok;
 }
+
+// 名称与置信度检查；对异常样本进行保存用于迭代
 
 bool Detector::check_type(const Armor & armor) const
 {
@@ -276,6 +288,8 @@ bool Detector::check_type(const Armor & armor) const
   return name_ok;
 }
 
+// 检测轮廓平均颜色以判断红/蓝阵营
+
 Color Detector::get_color(const cv::Mat & bgr_img, const std::vector<cv::Point> & contour) const
 {
   int red_sum = 0, blue_sum = 0;
@@ -287,6 +301,8 @@ Color Detector::get_color(const cv::Mat & bgr_img, const std::vector<cv::Point> 
 
   return blue_sum > red_sum ? Color::blue : Color::red;
 }
+
+// 裁切装甲图案 ROI，基于灯条向外延长后的边界
 
 cv::Mat Detector::get_pattern(const cv::Mat & bgr_img, const Armor & armor) const
 {
@@ -307,6 +323,8 @@ cv::Mat Detector::get_pattern(const cv::Mat & bgr_img, const Armor & armor) cons
 
   return bgr_img(roi);
 }
+
+// 根据装甲宽高比与名称规则判定装甲类型（大/小）
 
 ArmorType Detector::get_type(const Armor & armor)
 {
@@ -337,12 +355,16 @@ ArmorType Detector::get_type(const Armor & armor)
   return ArmorType::small;
 }
 
+// 将像素坐标中心归一化为 [0,1] 范围
+
 cv::Point2f Detector::get_center_norm(const cv::Mat & bgr_img, const cv::Point2f & center) const
 {
   auto h = bgr_img.rows;
   auto w = bgr_img.cols;
   return {center.x / w, center.y / h};
 }
+
+// 将装甲图案保存到磁盘（用于训练/调试）
 
 void Detector::save(const Armor & armor) const
 {
@@ -351,6 +373,8 @@ void Detector::save(const Armor & armor) const
   cv::imwrite(img_path, armor.pattern);
 }
 
+// 调试显示：绘制检测信息并在窗口中展示
+
 void Detector::show_result(
   const cv::Mat & binary_img, const cv::Mat & bgr_img, const std::list<Lightbar> & lightbars,
   const std::list<Armor> & armors, int frame_count) const
@@ -358,6 +382,8 @@ void Detector::show_result(
   auto detection = bgr_img.clone();
   tools::draw_text(detection, fmt::format("[{}]", frame_count), {10, 30}, {255, 255, 255});
 
+
+// PCA 辅助：对灯条角点进行细化校正（可选逻辑）
   for (const auto & lightbar : lightbars) {
     auto info = fmt::format(
       "{:.1f} {:.1f} {:.1f} {}", lightbar.angle_error * 57.3, lightbar.ratio, lightbar.length,

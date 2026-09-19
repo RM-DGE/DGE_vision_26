@@ -12,6 +12,8 @@
 namespace auto_aim
 {
 
+// Detector 模块：从 BGR 图像检测光条与装甲板，并返回候选 Armor 列表。
+// 包含几何筛选、模式裁剪、分类与可视化（调试/保存用）。
 class Detector
 {
 public:
