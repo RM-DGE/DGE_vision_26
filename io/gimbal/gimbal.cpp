@@ -94,57 +94,68 @@ GimbalState Gimbal::state() const
 std::string Gimbal::str(GimbalMode mode) const
 {
   switch (mode) {
-    case GimbalMode::IDLE:
-      return "IDLE";
-    case GimbalMode::AUTO_AIM:
-      return "AUTO_AIM";
-    case GimbalMode::SMALL_BUFF:
-      return "SMALL_BUFF";
-    case GimbalMode::BIG_BUFF:
-      return "BIG_BUFF";
-    default:
-      return "INVALID";
+    case GimbalMode::IDLE: return "IDLE";
+    case GimbalMode::AUTO_AIM: return "AUTO_AIM";
+    case GimbalMode::SMALL_BUFF: return "SMALL_BUFF";
+    case GimbalMode::BIG_BUFF: return "BIG_BUFF";
+    default: return "INVALID";
   }
 }
 
 Eigen::Quaterniond Gimbal::q(std::chrono::steady_clock::time_point t)
 {
   while (true) {
-    auto [q_a, t_a] = queue_.front();
-    queue_.pop_front();
-    auto [q_b, t_b] = queue_.front();
-    auto t_ab = tools::delta_time(t_a, t_b);
-    auto t_ac = tools::delta_time(t_a, t);
-    auto k = t_ac / t_ab;
-    Eigen::Quaterniond q_c = q_a.slerp(k, q_b).normalized();
-    if (t < t_a) return q_c;
-    if (!(t_a < t && t <= t_b)) continue;
-
-    return q_c;
+    QueueData a, b;
+    {
+        std::lock_guard<std::mutex> lock(queue_mutex_);
+        if (queue_.size() < 2) {
+            if (!queue_.empty()) return queue_.back().q;
+            return Eigen::Quaterniond::Identity();
+        }
+        
+        // Peek first two elements
+        a = queue_[0];
+        b = queue_[1];
+        
+        // If t > b.t, 'a' is obsolete. Pop 'a' and retry.
+        if (t > b.t) {
+            queue_.pop_front();
+            continue;
+        }
+    }
+    
+    // Interpolate between a and b
+    // This covers cases: t < a.t (extrapolate/clamp start) and a.t <= t <= b.t
+    
+    double dt = tools::delta_time(a.t, b.t);
+    if (std::abs(dt) < 1e-6) return a.q; // Avoid div by zero
+    
+    double t_ac = tools::delta_time(a.t, t);
+    double k = t_ac / dt;
+    
+    return a.q.slerp(k, b.q).normalized();
   }
 }
 
 void Gimbal::send(io::VisionToGimbal VisionToGimbal)
 {
-  tx_data_.mode = VisionToGimbal.mode;
-  tx_data_.yaw = VisionToGimbal.yaw;
-  tx_data_.yaw_vel = VisionToGimbal.yaw_vel;
-  tx_data_.yaw_acc = VisionToGimbal.yaw_acc;
-  tx_data_.pitch = VisionToGimbal.pitch;
-  tx_data_.pitch_vel = VisionToGimbal.pitch_vel;
-  tx_data_.pitch_acc = VisionToGimbal.pitch_acc;
+  tx_data_ = VisionToGimbal; // Helper assignment if supported, else manual copy
+  // Ensure head is correct if passed struct was raw
+  tx_data_.head[0] = 'S'; tx_data_.head[1] = 'P';
+  
   tx_data_.crc16 = tools::get_crc16(
     reinterpret_cast<uint8_t *>(&tx_data_), sizeof(tx_data_) - sizeof(tx_data_.crc16));
 
   try {
-    serial_.Write(LibSerial::DataBuffer(
-      reinterpret_cast<uint8_t *>(&tx_data_),
-      reinterpret_cast<uint8_t *>(&tx_data_) + sizeof(tx_data_)));
+    std::vector<uint8_t> buffer(sizeof(tx_data_));
+    std::memcpy(buffer.data(), &tx_data_, sizeof(tx_data_));
+    serial_.Write(buffer);
   } catch (const std::exception & e) {
     tools::logger()->warn("[Gimbal] Failed to write serial: {}", e.what());
   }
 }
 
+//映射发送0：空闲 1：控制 2：开火
 void Gimbal::send(
   bool control, bool fire, float yaw, float yaw_vel, float yaw_acc, float pitch, float pitch_vel,
   float pitch_acc)
@@ -160,9 +171,9 @@ void Gimbal::send(
     reinterpret_cast<uint8_t *>(&tx_data_), sizeof(tx_data_) - sizeof(tx_data_.crc16));
 
   try {
-    serial_.Write(LibSerial::DataBuffer(
-      reinterpret_cast<uint8_t *>(&tx_data_),
-      reinterpret_cast<uint8_t *>(&tx_data_) + sizeof(tx_data_)));
+    std::vector<uint8_t> buffer(sizeof(tx_data_));
+    std::memcpy(buffer.data(), &tx_data_, sizeof(tx_data_));
+    serial_.Write(buffer);
   } catch (const std::exception & e) {
     tools::logger()->warn("[Gimbal] Failed to write serial: {}", e.what());
   }
@@ -171,15 +182,16 @@ void Gimbal::send(
 bool Gimbal::read(uint8_t * buffer, size_t size)
 {
   try {
-    LibSerial::DataBuffer data;
-    serial_.Read(data, size, 10);
-    if (data.size() >= size) {
-      std::memcpy(buffer, data.data(), size);
-      return true;
+    LibSerial::DataBuffer read_buffer;
+    // 20ms timeout for reading
+    serial_.Read(read_buffer, size, 20);
+    if (read_buffer.size() == size) 
+    {
+        std::memcpy(buffer, read_buffer.data(), size);
+        return true;
     }
     return false;
-  } catch (const std::exception & e) {
-    // tools::logger()->warn("[Gimbal] Failed to read serial: {}", e.what());
+  } catch (...) {
     return false;
   }
 }
@@ -197,7 +209,14 @@ void Gimbal::read_thread()
       continue;
     }
 
-    if (!read(reinterpret_cast<uint8_t *>(&rx_data_), sizeof(rx_data_.head))) {
+    if (!serial_.IsOpen()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        reconnect();
+        continue;
+    }
+
+    // Read Head
+    if (!read(reinterpret_cast<uint8_t *>(&rx_data_.head), sizeof(rx_data_.head))) {
       error_count++;
       continue;
     }
@@ -206,9 +225,11 @@ void Gimbal::read_thread()
 
     auto t = std::chrono::steady_clock::now();
 
+    // Read Body
+    size_t body_size = sizeof(rx_data_) - sizeof(rx_data_.head);
     if (!read(
           reinterpret_cast<uint8_t *>(&rx_data_) + sizeof(rx_data_.head),
-          sizeof(rx_data_) - sizeof(rx_data_.head))) {
+          body_size)) {
       error_count++;
       continue;
     }
@@ -220,34 +241,32 @@ void Gimbal::read_thread()
 
     error_count = 0;
     Eigen::Quaterniond q(rx_data_.q[0], rx_data_.q[1], rx_data_.q[2], rx_data_.q[3]);
-    queue_.push_back({q, t});
+    
+    {
+        std::lock_guard<std::mutex> lock(queue_mutex_);
+        if (queue_.size() >= queue_capacity_) queue_.pop_front();
+        queue_.push_back({q, t});
+    }
 
-    std::lock_guard<std::mutex> lock(mutex_);
-
-    state_.yaw = rx_data_.yaw;
-    state_.yaw_vel = rx_data_.yaw_vel;
-    state_.pitch = rx_data_.pitch;
-    state_.pitch_vel = rx_data_.pitch_vel;
-    state_.bullet_speed = rx_data_.bullet_speed;
-    state_.bullet_count = rx_data_.bullet_count;
-
-    switch (rx_data_.mode) {
-      case 0:
-        mode_ = GimbalMode::IDLE;
-        break;
-      case 1:
-        mode_ = GimbalMode::AUTO_AIM;
-        break;
-      case 2:
-        mode_ = GimbalMode::SMALL_BUFF;
-        break;
-      case 3:
-        mode_ = GimbalMode::BIG_BUFF;
-        break;
-      default:
-        mode_ = GimbalMode::IDLE;
-        tools::logger()->warn("[Gimbal] Invalid mode: {}", rx_data_.mode);
-        break;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        state_.yaw = rx_data_.yaw;
+        state_.yaw_vel = rx_data_.yaw_vel;
+        state_.pitch = rx_data_.pitch;
+        state_.pitch_vel = rx_data_.pitch_vel;
+        state_.bullet_speed = rx_data_.bullet_speed;
+        state_.bullet_count = rx_data_.bullet_count;
+//映射模式
+        switch (rx_data_.mode) {
+          case 0: mode_ = GimbalMode::IDLE; break;
+          case 1: mode_ = GimbalMode::AUTO_AIM; break;
+          case 2: mode_ = GimbalMode::SMALL_BUFF; break;
+          case 3: mode_ = GimbalMode::BIG_BUFF; break;
+          default:
+            mode_ = GimbalMode::IDLE;
+            tools::logger()->warn("[Gimbal] Invalid mode: {}", rx_data_.mode);
+            break;
+        }
     }
   }
 
@@ -260,14 +279,14 @@ void Gimbal::reconnect()
   for (int i = 0; i < max_retry_count && !quit_; ++i) {
     tools::logger()->warn("[Gimbal] Reconnecting serial, attempt {}/{}...", i + 1, max_retry_count);
     try {
-      serial_.Close();
+      if (serial_.IsOpen()) serial_.Close();
       std::this_thread::sleep_for(std::chrono::seconds(1));
-    } catch (...) {
-    }
-
-    try {
-      serial_.Open(port_name_);  // 尝试重新打开
-      queue_.clear();
+      open_serial();
+      
+      {
+          std::lock_guard<std::mutex> lock(queue_mutex_);
+          queue_.clear();
+      }
       tools::logger()->info("[Gimbal] Reconnected serial successfully.");
       break;
     } catch (const std::exception & e) {

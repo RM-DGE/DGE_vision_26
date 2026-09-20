@@ -5,7 +5,7 @@
 #include <nlohmann/json.hpp>
 
 #include "io/camera.hpp"
-#include "io/cboard.hpp"
+#include "io/gimbal/gimbal.hpp"
 #include "tasks/auto_aim/aimer.hpp"
 #include "tasks/auto_aim/shooter.hpp"
 #include "tasks/auto_aim/solver.hpp"
@@ -37,7 +37,7 @@ int main(int argc, char * argv[])
   tools::Plotter plotter;
   // tools::Recorder recorder;
 
-  io::CBoard cboard(config_path);
+  io::Gimbal gimbal(config_path);
   io::Camera camera(config_path);
 
   auto_aim::YOLO detector(config_path, false);
@@ -50,40 +50,39 @@ int main(int argc, char * argv[])
   // Eigen::Quaterniond q;
   std::chrono::steady_clock::time_point t;
 
-  auto mode = io::Mode::idle;   //空闲
-  auto last_mode = io::Mode::idle;
-
   auto last_time = std::chrono::steady_clock::now();
   double fps = 0.0;
 
 
   // ===================== 主循环：单帧自瞄闭环 =====================
-  while (!exiter.exit()) {
-    camera.read(img, t);  //读取当前帧图像与时间戳
-    if (img.empty()) {
-        std::this_thread::sleep_for(10ms);
-        continue;
-    }
-    cboard.mode = io::Mode::auto_aim;//强制自瞄
-    cboard.bullet_speed = 24.5; // 强制弹速
+   while (!exiter.exit()) {
+     camera.read(img, t);  //读取当前帧图像与时间戳
+     if (img.empty()) {
+         std::this_thread::sleep_for(10ms);
+         continue;
+     }
 
-    // --------------------- 获取 IMU 姿态并更新解算基准 ---------------------
-    // 这里读取当前时刻的四元数姿态，并稍微回溯 1ms 来补偿延迟，避免控制时序偏差。
-    Eigen::Quaterniond q = cboard.imu_at(t - 1ms);
+     // --------------------- 获取 IMU 姿态并更新解算基准 ---------------------
+     // 这里读取当前时刻的四元数姿态，并稍微回溯 1ms 来补偿延迟，避免控制时序偏差。
+     Eigen::Quaterniond q = gimbal.q(t - 1ms);
 
-    solver.set_R_gimbal2world(q); 
+     solver.set_R_gimbal2world(q); 
 
-    // --------------------- 检测、跟踪与瞄准计算 ---------------------
-    auto armors = detector.detect(img); //检测
-    auto targets = tracker.track(armors, t);  //预测和滤波
-    auto command = aimer.aim(targets, t, cboard.bullet_speed);
+     // --------------------- 检测、跟踪与瞄准计算 ---------------------
+     auto armors = detector.detect(img); //检测
+     auto targets = tracker.track(armors, t);  //预测和滤波
+     auto gimbal_state = gimbal.state();
+     auto command = aimer.aim(targets, t, gimbal_state.bullet_speed);
 
-    // --------------------- 3.4 射击判定与下发控制 ---------------------
-    // 通过当前云台欧拉角和目标瞄准结果决定是否发射，并将控制指令发送到底层控制器。
-    Eigen::Vector3d current_ypr = tools::eulers(solver.R_gimbal2world(), 2, 1, 0);
-    command.shoot = shooter.shoot(command, aimer, targets, current_ypr);
+     // --------------------- 3.4 射击判定与下发控制 ---------------------
+     // 通过当前云台欧拉角和目标瞄准结果决定是否发射，并将控制指令发送到底层控制器。
+     Eigen::Vector3d current_ypr = tools::eulers(solver.R_gimbal2world(), 2, 1, 0);
+     command.shoot = shooter.shoot(command, aimer, targets, current_ypr);
 
-    cboard.send(command);
+     // 发送控制命令给Gimbal（包含前馈速度和加速度）
+     gimbal.send(command.control, command.shoot, command.yaw, 
+                 command.yaw_vel, command.yaw_acc, command.pitch, 
+                 command.pitch_vel, command.pitch_acc);
 
     
     // ===================== 4. 可视化与调试显示 =====================
