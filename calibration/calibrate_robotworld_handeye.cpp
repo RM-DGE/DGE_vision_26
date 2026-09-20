@@ -12,6 +12,7 @@
 const std::string keys =
   "{help h usage ? |                          | 输出命令行参数说明}"
   "{config-path c  | configs/calibration.yaml | yaml配置文件路径 }"
+  "{no-preview     |                          | 不逐张显示，直接标定 }"
   "{@input-folder  | assets/img_with_q        | 输入文件夹路径   }";
 
 std::vector<cv::Point3f> centers_3d(const cv::Size & pattern_size, const float center_distance)
@@ -42,7 +43,7 @@ void load(
   const std::string & input_folder, const std::string & config_path,
   std::vector<double> & R_gimbal2imubody_data, std::vector<cv::Mat> & R_world2gimbal_list,
   std::vector<cv::Mat> & t_world2gimbal_list, std::vector<cv::Mat> & rvecs,
-  std::vector<cv::Mat> & tvecs)
+  std::vector<cv::Mat> & tvecs, bool preview)
 {
   // 读取yaml参数
   auto yaml = YAML::LoadFile(config_path);
@@ -84,14 +85,26 @@ void load(
       img, pattern_size, corners_2d,
       cv::CALIB_CB_ADAPTIVE_THRESH | cv::CALIB_CB_NORMALIZE_IMAGE);
 
-    // 显示识别结果
-    cv::drawChessboardCorners(drawing, pattern_size, corners_2d, success);
-    cv::resize(drawing, drawing, {}, 0.5, 0.5);  // 显示时缩小图片尺寸
-    cv::imshow("Press any to continue", drawing);
-    cv::waitKey(0);
+    // findChessboardCorners只有整像素精度，不精化会使解出的平移量偏差近10倍
+    if (success) {
+      cv::Mat gray;
+      cv::cvtColor(img, gray, cv::COLOR_BGR2GRAY);
+      cv::cornerSubPix(
+        gray, corners_2d, {11, 11}, {-1, -1},
+        {cv::TermCriteria::EPS + cv::TermCriteria::MAX_ITER, 30, 1e-3});
+    }
 
-    // 输出识别结果
-    fmt::print("[{}] {}\n", success ? "success" : "failure", img_path);
+    // 显示识别结果
+    if (preview) {
+      cv::drawChessboardCorners(drawing, pattern_size, corners_2d, success);
+      cv::resize(drawing, drawing, {}, 0.5, 0.5);  // 显示时缩小图片尺寸
+      cv::imshow("Press any to continue", drawing);
+      cv::waitKey(0);
+    }
+
+    fmt::print(
+      "[{}] {}  yaw{:+.1f} pitch{:+.1f} roll{:+.1f}\n", success ? "success" : "failure", img_path,
+      ypr[0], ypr[1], ypr[2]);
     if (!success) continue;
 
     // 计算所需的数据
@@ -158,6 +171,7 @@ int main(int argc, char * argv[])
   }
   auto input_folder = cli.get<std::string>(0);
   auto config_path = cli.get<std::string>("config-path");
+  auto preview = !cli.has("no-preview");
 
   // 从输入文件夹中加载标定所需的数据
   std::vector<double> R_gimbal2imubody_data;
@@ -165,7 +179,12 @@ int main(int argc, char * argv[])
   std::vector<cv::Mat> rvecs, tvecs;
   load(
     input_folder, config_path, R_gimbal2imubody_data, R_world2gimbal_list, t_world2gimbal_list,
-    rvecs, tvecs);
+    rvecs, tvecs, preview);
+
+  if (rvecs.size() < 10) {
+    fmt::print("\n仅{}张图可用，样本过少，标定结果不可信\n", rvecs.size());
+    if (rvecs.size() < 3) return 1;
+  }
 
   // 手眼标定
   cv::Mat R_gimbal2camera, t_gimbal2camera;
