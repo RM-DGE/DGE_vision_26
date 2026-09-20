@@ -52,7 +52,7 @@ YOLOV5::YOLOV5(const std::string & config_path, bool debug)
   model = ppp.build();
   compiled_model_ = core_.compile_model(
     model, device_, ov::hint::performance_mode(ov::hint::PerformanceMode::LATENCY));
-}
+}  // 构造：加载模型和 ROI 配置，初始化 OpenVINO 推理器
 
 std::list<Armor> YOLOV5::detect(const cv::Mat & raw_img, int frame_count)
 {
@@ -80,7 +80,7 @@ std::list<Armor> YOLOV5::detect(const cv::Mat & raw_img, int frame_count)
   auto h = static_cast<int>(bgr_img.rows * scale);
   auto w = static_cast<int>(bgr_img.cols * scale);
 
-  // preproces
+  // preprocess
   auto input = cv::Mat(640, 640, CV_8UC3, cv::Scalar(0, 0, 0));
   auto roi = cv::Rect(0, 0, w, h);
   cv::resize(bgr_img, input(roi), {w, h});
@@ -97,7 +97,7 @@ std::list<Armor> YOLOV5::detect(const cv::Mat & raw_img, int frame_count)
   cv::Mat output(output_shape[1], output_shape[2], CV_32F, output_tensor.data());
 
   return parse(scale, output, raw_img, frame_count);
-}
+}  // 入口：输入图像并完成预处理、推理、后处理，返回候选装甲板
 
 std::list<Armor> YOLOV5::parse(
   double scale, cv::Mat & output, const cv::Mat & bgr_img, int frame_count)
@@ -168,6 +168,7 @@ std::list<Armor> YOLOV5::parse(
       armors.emplace_back(color_ids[i], num_ids[i], confidences[i], boxes[i], armors_key_points[i]);
     }
   }
+  // NMS 去重：保留最优候选框，避免一块装甲被重复识别
 
   tmp_img_ = bgr_img;
   for (auto it = armors.begin(); it != armors.end();) {
@@ -186,11 +187,12 @@ std::list<Armor> YOLOV5::parse(
     it->center_norm = get_center_norm(bgr_img, it->center);
     ++it;
   }
+  // 过滤低置信度/异常类型：保留真实装甲板并补充归一化中心
 
   if (debug_) draw_detections(bgr_img, armors, frame_count);
 
   return armors;
-}
+}  // 解析：从网络输出还原装甲关键点，并做筛选与二次校正
 
 bool YOLOV5::check_name(const Armor & armor) const
 {
@@ -201,7 +203,7 @@ bool YOLOV5::check_name(const Armor & armor) const
   // if (name_ok && !confidence_ok) save(armor);
 
   return name_ok && confidence_ok;
-}
+}  // 过滤无效编号：保留有效目标和足够可信度的装甲板
 
 bool YOLOV5::check_type(const Armor & armor) const
 {
@@ -214,14 +216,14 @@ bool YOLOV5::check_type(const Armor & armor) const
   // if (!name_ok) save(armor);
 
   return name_ok;
-}
+}  // 过滤类型错误：保证大/小装甲类型与编号相匹配
 
 cv::Point2f YOLOV5::get_center_norm(const cv::Mat & bgr_img, const cv::Point2f & center) const
 {
   auto h = bgr_img.rows;
   auto w = bgr_img.cols;
   return {center.x / w, center.y / h};
-}
+}  // 归一化中心：把像素坐标转换到 [0,1] 范围，便于后续控制
 
 void YOLOV5::draw_detections(
   const cv::Mat & img, const std::list<Armor> & armors, int frame_count) const
@@ -242,14 +244,14 @@ void YOLOV5::draw_detections(
   }
   cv::resize(detection, detection, {}, 0.5, 0.5);  // 显示时缩小图片尺寸
   cv::imshow("detection", detection);
-}
+}  // 调试显示：标出装甲轮廓和类别，方便观察检测结果
 
 void YOLOV5::save(const Armor & armor) const
 {
   auto file_name = fmt::format("{:%Y-%m-%d_%H-%M-%S}", std::chrono::system_clock::now());
   auto img_path = fmt::format("{}/{}_{}.jpg", save_path_, armor.name, file_name);
   cv::imwrite(img_path, tmp_img_);
-}
+}  // 保存可疑样本：用于后续训练或回归优化
 
 double YOLOV5::sigmoid(double x)
 {
@@ -257,12 +259,12 @@ double YOLOV5::sigmoid(double x)
     return 1.0 / (1.0 + exp(-x));
   else
     return exp(x) / (1.0 + exp(x));
-}
+}  // sigmoid：把网络输出压到 (0,1)，用于置信度计算
 
 std::list<Armor> YOLOV5::postprocess(
   double scale, cv::Mat & output, const cv::Mat & bgr_img, int frame_count)
 {
   return parse(scale, output, bgr_img, frame_count);
-}
+}  // 后处理入口：直接复用通用解析流程
 
 }  // namespace auto_aim

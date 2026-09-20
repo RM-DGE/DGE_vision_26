@@ -56,7 +56,7 @@ YOLOV8::YOLOV8(const std::string & config_path, bool debug)
   model = ppp.build();
   compiled_model_ = core_.compile_model(
     model, device_, ov::hint::performance_mode(ov::hint::PerformanceMode::LATENCY));
-}
+}  // 构造：初始化分类器和模型，并读取 ROI 配置
 
 std::list<Armor> YOLOV8::detect(const cv::Mat & raw_img, int frame_count)
 {
@@ -101,7 +101,7 @@ std::list<Armor> YOLOV8::detect(const cv::Mat & raw_img, int frame_count)
   cv::Mat output(output_shape[1], output_shape[2], CV_32F, output_tensor.data());
 
   return parse(scale, output, raw_img, frame_count);
-}
+}  // 入口：图像预处理、推理和后处理，输出候选装甲板
 
 std::list<Armor> YOLOV8::parse(
   double scale, cv::Mat & output, const cv::Mat & bgr_img, int frame_count)
@@ -182,7 +182,7 @@ std::list<Armor> YOLOV8::parse(
   if (debug_) draw_detections(bgr_img, armors, frame_count);
 
   return armors;
-}
+}  // 解析：从检测输出恢复关键点并做置信度/类型过滤
 
 bool YOLOV8::check_name(const Armor & armor) const
 {
@@ -193,7 +193,7 @@ bool YOLOV8::check_name(const Armor & armor) const
   // if (name_ok && !confidence_ok) save(armor);
 
   return name_ok && confidence_ok;
-}
+}  // 过滤无效编号：保留可信装甲候选
 
 bool YOLOV8::check_type(const Armor & armor) const
 {
@@ -206,7 +206,7 @@ bool YOLOV8::check_type(const Armor & armor) const
   // if (!name_ok) save(armor);
 
   return name_ok;
-}
+}  // 过滤类型错误：约束大/小装甲与编号相符
 
 ArmorType YOLOV8::get_type(const Armor & armor)
 {
@@ -224,14 +224,14 @@ ArmorType YOLOV8::get_type(const Armor & armor)
 
   // 步兵假设为小装甲板
   return ArmorType::small;
-}
+}  // 规则判定：按编号字段给出装甲大小类型
 
 cv::Point2f YOLOV8::get_center_norm(const cv::Mat & bgr_img, const cv::Point2f & center) const
 {
   auto h = bgr_img.rows;
   auto w = bgr_img.cols;
   return {center.x / w, center.y / h};
-}
+}  // 归一化中心：便于后续目标跟踪和控制
 
 cv::Mat YOLOV8::get_pattern(const cv::Mat & bgr_img, const Armor & armor) const
 {
@@ -264,14 +264,14 @@ cv::Mat YOLOV8::get_pattern(const cv::Mat & bgr_img, const Armor & armor) const
   }
 
   return bgr_img(roi);
-}
+}  // 裁切装甲图案：供分类器识别数字或类型
 
 void YOLOV8::save(const Armor & armor) const
 {
   auto file_name = fmt::format("{:%Y-%m-%d_%H-%M-%S}", std::chrono::system_clock::now());
   auto img_path = fmt::format("{}/{}_{}.jpg", save_path_, armor.name, file_name);
   cv::imwrite(img_path, armor.pattern);
-}
+}  // 保存样本：便于分析异常或重训模型
 
 void YOLOV8::draw_detections(
   const cv::Mat & img, const std::list<Armor> & armors, int frame_count) const
@@ -291,7 +291,7 @@ void YOLOV8::draw_detections(
   }
   cv::resize(detection, detection, {}, 0.5, 0.5);  // 显示时缩小图片尺寸
   cv::imshow("detection", detection);
-}
+}  // 调试显示：标出装甲和类别信息
 
 void YOLOV8::sort_keypoints(std::vector<cv::Point2f> & keypoints)
 {
@@ -319,12 +319,12 @@ void YOLOV8::sort_keypoints(std::vector<cv::Point2f> & keypoints)
   keypoints[1] = top_points[1];     // top-right
   keypoints[2] = bottom_points[1];  // bottom-right
   keypoints[3] = bottom_points[0];  // bottom-left
-}
+}  // 重排关键点：保证四角顺序统一
 
 std::list<Armor> YOLOV8::postprocess(
   double scale, cv::Mat & output, const cv::Mat & bgr_img, int frame_count)
 {
   return parse(scale, output, bgr_img, frame_count);
-}
+}  // 后处理入口：复用统一解析逻辑
 
 }  // namespace auto_aim

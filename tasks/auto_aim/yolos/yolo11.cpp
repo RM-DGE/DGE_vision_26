@@ -51,7 +51,7 @@ YOLO11::YOLO11(const std::string & config_path, bool debug)
   model = ppp.build();
   compiled_model_ = core_.compile_model(
     model, device_, ov::hint::performance_mode(ov::hint::PerformanceMode::LATENCY));
-}
+}  // 构造：加载模型配置并初始化 OpenVINO 运行时
 
 std::list<Armor> YOLO11::detect(const cv::Mat & raw_img, int frame_count)
 {
@@ -97,7 +97,7 @@ std::list<Armor> YOLO11::detect(const cv::Mat & raw_img, int frame_count)
   cv::Mat output(output_shape[1], output_shape[2], CV_32F, output_tensor.data());
 
   return parse(scale, output, raw_img, frame_count);
-}
+}  // 入口：图像预处理、推理和后处理，得到装甲板候选
 
 std::list<Armor> YOLO11::parse(
   double scale, cv::Mat & output, const cv::Mat & bgr_img, int frame_count)
@@ -173,7 +173,7 @@ std::list<Armor> YOLO11::parse(
   if (debug_) draw_detections(bgr_img, armors, frame_count);
 
   return armors;
-}
+}  // 解析：从 YOLO11 输出恢复装甲关键点并做过滤
 
 bool YOLO11::check_name(const Armor & armor) const
 {
@@ -184,7 +184,7 @@ bool YOLO11::check_name(const Armor & armor) const
   // if (name_ok && !confidence_ok) save(armor);
 
   return name_ok && confidence_ok;
-}
+}  // 过滤低可信度/无效编号目标
 
 bool YOLO11::check_type(const Armor & armor) const
 {
@@ -197,14 +197,14 @@ bool YOLO11::check_type(const Armor & armor) const
   // if (!name_ok) save(armor);
 
   return name_ok;
-}
+}  // 保证大/小装甲类型与编号一致
 
 cv::Point2f YOLO11::get_center_norm(const cv::Mat & bgr_img, const cv::Point2f & center) const
 {
   auto h = bgr_img.rows;
   auto w = bgr_img.cols;
   return {center.x / w, center.y / h};
-}
+}  // 归一化中心：便于后续控制使用
 
 void YOLO11::sort_keypoints(std::vector<cv::Point2f> & keypoints)
 {
@@ -232,7 +232,7 @@ void YOLO11::sort_keypoints(std::vector<cv::Point2f> & keypoints)
   keypoints[1] = top_points[1];     // top-right
   keypoints[2] = bottom_points[1];  // bottom-right
   keypoints[3] = bottom_points[0];  // bottom-left
-}
+}  // 重排关键点：保证顺序为左上、右上、右下、左下
 
 void YOLO11::draw_detections(
   const cv::Mat & img, const std::list<Armor> & armors, int frame_count) const
@@ -253,19 +253,19 @@ void YOLO11::draw_detections(
   }
   cv::resize(detection, detection, {}, 0.5, 0.5);  // 显示时缩小图片尺寸
   cv::imshow("detection", detection);
-}
+}  // 调试显示：绘制装甲标注和 ROI 边框
 
 void YOLO11::save(const Armor & armor) const
 {
   auto file_name = fmt::format("{:%Y-%m-%d_%H-%M-%S}", std::chrono::system_clock::now());
   auto img_path = fmt::format("{}/{}_{}.jpg", save_path_, armor.name, file_name);
   cv::imwrite(img_path, tmp_img_);
-}
+}  // 保存可疑样本：用于后续模型迭代
 
 std::list<Armor> YOLO11::postprocess(
   double scale, cv::Mat & output, const cv::Mat & bgr_img, int frame_count)
 {
   return parse(scale, output, bgr_img, frame_count);
-}
+}  // 后处理入口：直接复用同一套解析逻辑
 
 }  // namespace auto_aim
