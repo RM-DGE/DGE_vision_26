@@ -4,6 +4,7 @@ build/
 Camera/
 logs/
 assets/img_with_q/
+assets/img_intrinsic/
 records/
 records_auto_buff_big/
 records_new/

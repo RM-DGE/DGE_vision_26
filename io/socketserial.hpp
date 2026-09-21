@@ -249,13 +249,14 @@ private:
                 frame_buffer.erase(frame_buffer.begin(), frame_buffer.begin() + 9);
             }
             else if (header == 0x5A) {
-                // ROS 雷达包：总长度 29 字节 (带 0x0D 尾)
-                if (frame_buffer.size() < 29) break;
+                // ROS 雷达包：总长度 33 字节 (带 0x0D 尾)
+                // 实测固件布局：0x5A 0x01 + 7个float(28字节) + 2字节校验 + 0x0D = 33
+                if (frame_buffer.size() < 33) break;
                 
-                if (frame_buffer[28] == 0x0D) {
-                    // CBoard 不处理底盘数据，直接安全地把这 29 字节整体丢弃！
+                if (frame_buffer[32] == 0x0D) {
+                    // CBoard 不处理底盘数据，直接安全地把这 33 字节整体丢弃！
                     // 这将完美防止它的浮点数数据干扰后面的 AA 或 BB 帧
-                    frame_buffer.erase(frame_buffer.begin(), frame_buffer.begin() + 29);
+                    frame_buffer.erase(frame_buffer.begin(), frame_buffer.begin() + 33);
                 } else {
                     frame_buffer.erase(frame_buffer.begin());
                 }
