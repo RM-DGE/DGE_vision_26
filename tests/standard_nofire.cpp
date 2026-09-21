@@ -64,6 +64,15 @@ int main(int argc, char * argv[])
         std::this_thread::sleep_for(10ms);
         continue;
     }
+    // 必须在下面的强制覆盖之前读取，否则拿到的是本地写入值而非固件上报值
+    auto fw_mode = cboard.mode;
+    auto fw_bullet_speed = cboard.bullet_speed;
+    if (fw_mode != last_mode) {
+      tools::logger()->warn(
+        ">>> 固件mode变化: {} -> {}", io::MODES[int(last_mode)], io::MODES[int(fw_mode)]);
+      last_mode = fw_mode;
+    }
+
     cboard.mode = io::Mode::auto_aim;//强制自瞄
     cboard.bullet_speed = 24.5; // 强制弹速
 
@@ -84,6 +93,17 @@ int main(int argc, char * argv[])
     command.shoot = false;
 
     cboard.send(command);
+
+    static auto mode_log_stamp = std::chrono::steady_clock::now();
+    static auto first_log = true;
+    if (first_log || tools::delta_time(t, mode_log_stamp) >= 1.0) {
+      first_log = false;
+      mode_log_stamp = t;
+      tools::logger()->info(
+        "固件mode={} bullet_speed={:.2f} | 装甲板{} 目标{} | control={} yaw={:.2f} pitch={:.2f}deg",
+        io::MODES[int(fw_mode)], fw_bullet_speed, armors.size(), targets.size(),
+        command.control ? 1 : 0, command.yaw * 57.3, command.pitch * 57.3);
+    }
 
     
     // ===================== 4. 可视化与调试显示 =====================
