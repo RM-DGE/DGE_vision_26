@@ -37,7 +37,7 @@ int main(int argc, char * argv[])
     return 0;
   }
 
-  io::Gimbal gimbal(config_path);
+  io::CBoard cboard(config_path);
   io::Camera camera(config_path);
 
   auto_aim::YOLO yolo(config_path, true);

@@ -33,7 +33,7 @@ int main(int argc, char * argv[])
   tools::Exiter exiter;
   tools::Plotter plotter;
 
-  io::Gimbal gimbal(config_path);
+  io::CBoard cboard(config_path);
   auto_aim::Planner planner(config_path);
   auto_aim::Target target(d, w, 0.2, 0.1);
 

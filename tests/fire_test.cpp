@@ -30,7 +30,7 @@ int main(int argc, char * argv[])
   tools::Exiter exiter;
 
   // 初始化云台
-  io::Gimbal gimbal(config_path);
+  io::CBoard cboard(config_path);
   io::VisionToGimbal plan;
   auto last_t = std::chrono::steady_clock::now();
   plan.yaw = 0;

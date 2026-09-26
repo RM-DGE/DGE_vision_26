@@ -29,7 +29,7 @@ int main(int argc, char * argv[])
   tools::Exiter exiter;
   tools::Plotter plotter;
 
-  io::Gimbal gimbal(config_path);
+  io::CBoard cboard(config_path);
 
   auto t0 = std::chrono::steady_clock::now();
   auto last_mode = gimbal.mode();

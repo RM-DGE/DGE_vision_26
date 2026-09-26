@@ -236,6 +236,12 @@ void Solver::optimize_yaw(Armor & armor) const
 
 // ==============================  重投影误差计算：SJTU_cost() ==============================
 // 该函数用于计算一组点的重投影误差，主要用于优化算法中评估误差大小。
+// 与 armor_reprojection_error() 的区别：
+// 1) armor_reprojection_error() 是“点到点”的直接距离和：逐个角点比较投影点与真实角点，
+//    适合快速筛选 yaw 是否靠谱，计算简单、直观；
+// 2) SJTU_cost() 更关注“整块四边形的形状一致性”：比较边长变化和边方向变化，
+//    对整体轮廓拟合更敏感，适合更复杂的误差优化，但通常用于研究/调参，不是当前主流程。
+// 这里当前主流程仍使用 armor_reprojection_error()，因为它更稳定、实现更直接，适合离散 yaw 搜索。
 double Solver::SJTU_cost(
   const std::vector<cv::Point2f> & cv_refs, const std::vector<cv::Point2f> & cv_pts,
   const double & inclined) const
@@ -268,6 +274,11 @@ double Solver::SJTU_cost(
 // ==============================  装甲板重投影误差：armor_reprojection_error() ==============================
 // 该函数用于计算装甲板的重投影误差，主要用于优化算法中评估误差大小。
 // 输入为装甲板的 3D 位姿信息，输出为重投影误差值。
+// 这是当前代码中真正使用的误差定义：
+// - 先根据候选 yaw 投影出 4 个装甲角点 image_points；
+// - 再把它们和真实检测到的 armor.points 做逐点欧氏距离累加；
+// - 误差越小，说明当前 yaw 下的装甲板姿态越贴近观测。
+// 这种误差更适合 optimize_yaw() 这类“扫描 yaw 并取最小误差”的搜索过程。
 double Solver::armor_reprojection_error(
   const Armor & armor, double yaw, const double & inclined) const
 {

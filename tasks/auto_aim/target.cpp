@@ -98,14 +98,15 @@ void Target::predict(double dt)
   //   v1 = 10;   // 前哨站加速度方差
   //   v2 = 0.1;  // 前哨站角加速度方差
   // } else {
-    v1 = 100;  // 加速度方差
-    v2 = 400;  // 角加速度方差
+    v1 = 100;  // 加速度方差，v1越大，越相信目标可能突然改变平移速度
+    v2 = 400;  // 角加速度方差，v2越大，越相信目标可能突然改变旋转速度
   // }
   auto a = dt * dt * dt * dt / 4;
   auto b = dt * dt * dt / 2;
   auto c = dt * dt;
   // 预测过程噪声偏差的方差
   // clang-format off
+  //过程噪声 Q,机器人速度位移可能会突然改变
   Eigen::MatrixXd Q{
     {a * v1, b * v1,      0,      0,      0,      0,      0,      0, 0, 0, 0},
     {b * v1, c * v1,      0,      0,      0,      0,      0,      0, 0, 0, 0},
@@ -135,6 +136,7 @@ void Target::predict(double dt)
   ekf_.predict(F, Q, f);
 }
 
+//根据运动模型预测下一时刻状态
 void Target::update(const Armor & armor)
 {
   // 装甲板匹配
