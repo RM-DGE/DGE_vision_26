@@ -17,6 +17,15 @@ find_package(nlohmann_json REQUIRED)
 set(OpenVINO_DIR "/opt/intel/openvino_2024.6.0/runtime/cmake/" CACHE PATH "OpenVINO CMake package directory")
 find_package(OpenVINO REQUIRED)
 
+# 检查仿真模式并查找 ROS2
+option(ENABLE_SIM_MODE "Enable simulator mode (ROS2-based)" OFF)
+if(ENABLE_SIM_MODE)
+  find_package(rclcpp REQUIRED)
+  find_package(sensor_msgs REQUIRED)
+  find_package(geometry_msgs REQUIRED)
+  find_package(rcl_interfaces REQUIRED)
+endif()
+
 include_directories(${EIGEN3_INCLUDE_DIR})
 include_directories(${OpenCV_INCLUDE_DIRS})
 include_directories(${PROJECT_SOURCE_DIR})
@@ -37,6 +46,10 @@ add_executable(mt_auto_aim_debug src/mt_auto_aim_debug.cpp)
 
 
 target_link_libraries(standard ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
+if(ENABLE_SIM_MODE)
+  target_link_libraries(standard rclcpp::rclcpp sensor_msgs::sensor_msgs geometry_msgs::geometry_msgs)
+endif()
+
 target_link_libraries(mt_standard ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
 target_link_libraries(standard_mpc ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
 target_link_libraries(auto_aim_debug_mpc ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)

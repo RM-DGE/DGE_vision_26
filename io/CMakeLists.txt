@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.16)
 
 find_package(yaml-cpp REQUIRED)
+find_package(OpenCV REQUIRED)
+
+# 仿真模式选项
+option(ENABLE_SIM_MODE "Enable simulator mode (ROS2-based)" OFF)
 
 add_subdirectory(serial)
 
@@ -11,6 +15,7 @@ add_library(io STATIC
     camera.cpp
     cboard.cpp
     gimbal/gimbal.cpp
+    ros2/ros2.cpp
 )
 
 # hikrobot
@@ -34,25 +39,26 @@ endif()
 # endif()
 
 find_library(SYSTEM_SERIAL_LIB serial PATHS /usr/lib /usr/lib/x86_64-linux-gnu)
-target_link_libraries(io PUBLIC usb-1.0 yaml-cpp serial ${SYSTEM_SERIAL_LIB} MvCameraControl)
+target_link_libraries(io PUBLIC usb-1.0 yaml-cpp serial ${SYSTEM_SERIAL_LIB} MvCameraControl ${OpenCV_LIBS})
 
-# ################## 检查 ROS 环境 ##################
-# find_package(ament_cmake QUIET)
-# find_package(rclcpp QUIET)
-# find_package(std_msgs QUIET)
-# find_package(rosidl_typesupport_cpp QUIET)
-# find_package(sp_msgs QUIET)
-
-# # 如果找不到 ROS 环境，则跳过 ROS 相关的部分
-# if(NOT ament_cmake_FOUND OR NOT rclcpp_FOUND OR NOT std_msgs_FOUND OR NOT rosidl_typesupport_cpp_FOUND OR NOT sp_msgs_FOUND)
-#     message(WARNING "ROS2 not found, skipping ROS2 specific code.")
-# else()
-#     message(STATUS "ROS2 environment found, compiling ROS2-related code.")
+# ROS2 仿真模式
+if(ENABLE_SIM_MODE)
+    message(STATUS "Simulator mode enabled")
+    find_package(rclcpp REQUIRED)
+    find_package(sensor_msgs REQUIRED)
+    find_package(geometry_msgs REQUIRED)
+    find_package(std_msgs REQUIRED)
+    find_package(cv_bridge REQUIRED)
     
-#     # 添加 ROS2 相关的文件
-#     target_sources(io PRIVATE ros2/publish2nav.cpp ros2/ros2.cpp ros2/subscribe2nav.cpp)
-
-#     # 设置 ROS2 依赖
-#     include_directories(${std_msgs_INCLUDE_DIRS})
-#     ament_target_dependencies(io rclcpp std_msgs sp_msgs)
-# endif()
+    target_link_libraries(io PUBLIC 
+        rclcpp::rclcpp
+        sensor_msgs::sensor_msgs
+        geometry_msgs::geometry_msgs
+        std_msgs::std_msgs
+        cv_bridge::cv_bridge
+    )
+    
+    target_compile_definitions(io PUBLIC ENABLE_SIM_MODE)
+else()
+    message(STATUS "Simulator mode disabled (default: hardware mode)")
+endif()

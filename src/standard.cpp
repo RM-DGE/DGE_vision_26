@@ -6,6 +6,9 @@
 
 #include "io/camera.hpp"
 #include "io/gimbal/gimbal.hpp"
+#ifdef ENABLE_SIM_MODE
+#include "io/ros2/ros2.hpp"
+#endif
 #include "tasks/auto_aim/aimer.hpp"
 #include "tasks/auto_aim/shooter.hpp"
 #include "tasks/auto_aim/solver.hpp"
@@ -37,8 +40,13 @@ int main(int argc, char * argv[])
   tools::Plotter plotter;
   // tools::Recorder recorder;
 
+#ifdef ENABLE_SIM_MODE
+  io::ROS2 sim_ros2;
+#else
   io::CBoard cboard(config_path);
   io::Camera camera(config_path);
+  io::Gimbal gimbal(config_path);
+#endif
 
   auto_aim::YOLO detector(config_path, false);
   auto_aim::Solver solver(config_path);
@@ -56,23 +64,55 @@ int main(int argc, char * argv[])
 
   // ===================== 主循环：单帧自瞄闭环 =====================
    while (!exiter.exit()) {
-     camera.read(img, t);  //读取当前帧图像与时间戳
-     if (img.empty()) {
+#ifdef ENABLE_SIM_MODE
+     sim_ros2.read_image(img, t);
+#else
+     camera.read(img, t);
+#endif
+      if (img.empty()) {
          std::this_thread::sleep_for(10ms);
          continue;
      }
 
+     // 调试：打印图像尺寸和帧数（每 30 帧打一次）
+     static int frame_count = 0;
+     if (++frame_count % 30 == 0) {
+       std::cerr << "[DEBUG] Image: " << img.size() << " channels: " << img.channels() 
+                 << " frames: " << frame_count << std::endl;
+     }
+
      // --------------------- 获取 IMU 姿态并更新解算基准 ---------------------
      // 这里读取当前时刻的四元数姿态，并稍微回溯 1ms 来补偿延迟，避免控制时序偏差。
+#ifdef ENABLE_SIM_MODE
+     Eigen::Quaterniond q = sim_ros2.get_gimbal_quaternion(t - 1ms);
+#else
      Eigen::Quaterniond q = gimbal.q(t - 1ms);
+#endif
 
      solver.set_R_gimbal2world(q); 
 
      // --------------------- 检测、跟踪与瞄准计算 ---------------------
-     auto armors = detector.detect(img); //检测
-     auto targets = tracker.track(armors, t);  //预测和滤波
+      auto armors = detector.detect(img); //检测
+      const auto detected_armor_count = armors.size();
+      auto targets = tracker.track(armors, t);  //预测和滤波
+#ifdef ENABLE_SIM_MODE
+     io::GimbalState gimbal_state{.bullet_speed = 15.0};
+#else
      auto gimbal_state = gimbal.state();
-     auto command = aimer.aim(targets, t, gimbal_state.bullet_speed);
+#endif
+      auto command = aimer.aim(targets, t, gimbal_state.bullet_speed);
+
+#ifdef ENABLE_SIM_MODE
+      if (frame_count % 30 == 0) {
+        std::cerr << "[DEBUG] Vision: detected_armors=" << detected_armor_count
+                  << " tracked_armors=" << armors.size()
+                  << " targets=" << targets.size()
+                  << " tracker_state=" << tracker.state()
+                  << " command_control=" << command.control
+                  << " yaw=" << command.yaw
+                  << " pitch=" << command.pitch << std::endl;
+      }
+#endif
 
      // --------------------- 3.4 射击判定与下发控制 ---------------------
      // 通过当前云台欧拉角和目标瞄准结果决定是否发射，并将控制指令发送到底层控制器。
@@ -80,9 +120,15 @@ int main(int argc, char * argv[])
      command.shoot = shooter.shoot(command, aimer, targets, current_ypr);
 
      // 发送控制命令给Gimbal（包含前馈速度和加速度）
+#ifdef ENABLE_SIM_MODE
+     sim_ros2.send_gimbal_command(command.control, command.shoot, command.yaw, 
+                                   command.yaw_vel, command.yaw_acc, command.pitch, 
+                                   command.pitch_vel, command.pitch_acc);
+#else
      gimbal.send(command.control, command.shoot, command.yaw, 
                  command.yaw_vel, command.yaw_acc, command.pitch, 
                  command.pitch_vel, command.pitch_acc);
+#endif
 
     
     // ===================== 4. 可视化与调试显示 =====================
@@ -133,6 +179,14 @@ int main(int argc, char * argv[])
 
     cv::imshow("Standard Test", img);
     if (cv::waitKey(1) == 'q') break;
+
+    // 保存每 300 帧一张截图用于调试
+    static int save_count = 0;
+    if (++save_count % 300 == 0) {
+      std::string filename = fmt::format("/tmp/frame_{:06d}.jpg", save_count);
+      cv::imwrite(filename, img);
+      std::cerr << "[DEBUG] Saved screenshot to " << filename << std::endl;
+    }
 
     
     // //曲线可视化
