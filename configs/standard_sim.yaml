@@ -8,7 +8,7 @@ yolo11_model_path: assets/yolo11.xml
 yolov8_model_path: assets/yolov8.xml
 yolov5_model_path: assets/yolov5.xml
 device: CPU
-min_confidence: 0.8
+min_confidence: 0.6
 use_traditional: true
 
 #####-----ROI-----#####
@@ -21,7 +21,7 @@ roi:
 use_roi: false
 
 #####-----传统方法参数-----#####
-threshold: 80
+threshold: 70
 max_angle_error: 45 # degree
 min_lightbar_ratio: 1.5
 max_lightbar_ratio: 20
@@ -37,8 +37,8 @@ max_temp_lost_count: 15
 outpost_max_temp_lost_count: 75
 
 #####-----aimer参数-----#####
-yaw_offset: 2 # degree -2.5
-pitch_offset: 2.4 # degree 2
+yaw_offset: 0 # degree 仿真内外参为解析精确值，无需补偿；实机值为 2
+pitch_offset: 0 # degree 仿真内外参为解析精确值，无需补偿；实机值为 2.4
 comming_angle: 60 # degree
 leaving_angle: 20 # degree
 decision_speed: 7 # rad/s
@@ -61,14 +61,30 @@ vid_pid: "2bdf:0001"
 #  0  0  1
 R_gimbal2imubody: [1, 0, 0, 0, 1, 0, 0, 0, 1]
 
-# 重投影误差: 0.3837px
-camera_matrix: [2398.6530956665547, 0, 652.50424985373832, 0, 2354.8720963275914, 519.94484493193204, 0, 0, 1]
-distort_coeffs: [-0.12518733339829832, 0.044079240432317993, -0.0037658098226756756, -0.0017846341792588762, 0]
+# 仿真相机为理想针孔模型，内参由渲染分辨率和垂直FOV解析得出，不可沿用实机标定值。
+# bevy_robomaster_simulator: capture.color = 1440x1080, camera.fov = 45.0 度(垂直)
+#   fx = fy = 1080 / (2 * tan(45/2 deg)) = 1303.6753236814714
+#   cx, cy = 1440/2, 1080/2 = 720.0, 540.0
+# 渲染图无畸变，故 distort_coeffs 全零。
+camera_matrix: [1303.6753236814714, 0, 720.0, 0, 1303.6753236814714, 540.0, 0, 0, 1]
+distort_coeffs: [0, 0, 0, 0, 0]
 
+# 仿真外参为解析精确值，非标定结果。/gimbal_pose 发布的 gimbal_link 基准为
+# GIMBAL * SHOT_DIRECTION(绕局部X -65度) * Rx(+90度)，经 M(ROS=M*Bevy) 变换后，
+# 相机光轴(OpenCV +Z)恰好对应该坐标系 +X，故 R_camera2gimbal 为精确置换矩阵。
+R_camera2gimbal: [0, 0, 1, -1, 0, 0, 0, -1, 0]
+# 相机原点取 vehicle.glb 中 CAM_DIRECTION 的局部平移 [-0.0020168, 0.1963421, -0.0600252]，
+# 变换到上述 gimbal_link 坐标系并转为 ROS 轴向。实机值距原点 0.0718m，仿真模型为 0.2053m。
+t_camera2gimbal: [0.137379029604, 0.002016811632, 0.152578677007]
+
+# 实机 HikRobot 标定值备份（切回真机时恢复以下四项）:
+# 重投影误差: 0.3837px
+# camera_matrix: [2398.6530956665547, 0, 652.50424985373832, 0, 2354.8720963275914, 519.94484493193204, 0, 0, 1]
+# distort_coeffs: [-0.12518733339829832, 0.044079240432317993, -0.0037658098226756756, -0.0017846341792588762, 0]
 # 相机同理想情况的偏角: yaw-1.20 pitch-0.44 roll4.33 degree
 # 精度受限: pitch激励仅12.6度(占±30度行程21%)，留一法下t的x分量有27mm不确定度、旋转残差3~6度
-R_camera2gimbal: [0.020227746068642315, -0.0092904232749438861, 0.99975223246780243, -0.99694291364478005, 0.075294389962130129, 0.020870595911160292, -0.075469631126955872, -0.99711806867371666, -0.0077389858481684134]
-t_camera2gimbal: [-0.020272009441520859, 0.021658145736285928, 0.065437347502743312]
+# R_camera2gimbal: [0.020227746068642315, -0.0092904232749438861, 0.99975223246780243, -0.99694291364478005, 0.075294389962130129, 0.020870595911160292, -0.075469631126955872, -0.99711806867371666, -0.0077389858481684134]
+# t_camera2gimbal: [-0.020272009441520859, 0.021658145736285928, 0.065437347502743312]
 
 # Linux 接usb转ttl 设备名 ttyUSB0
 # 接cboard虚拟串口 设备名 ttyACM0

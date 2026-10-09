@@ -159,10 +159,16 @@ Eigen::Quaterniond ROS2::get_gimbal_quaternion(std::chrono::steady_clock::time_p
 void ROS2::send_gimbal_command(bool control, bool fire, float yaw, float yaw_vel, float yaw_acc,
                                float pitch, float pitch_vel, float pitch_acc)
 {
+  constexpr double kRadToDeg = 57.29577951308232;
+  const double sim_yaw_deg = static_cast<double>(yaw) * kRadToDeg;
+  const double sim_pitch_deg = static_cast<double>(pitch) * kRadToDeg + 90.0;
+
   static int cmd_count = 0;
-  if (++cmd_count % 10 == 0) {
+  ++cmd_count;
+  if (control || fire || cmd_count % 10 == 0) {
     std::cerr << "[ROS2::send_gimbal_command] #" << cmd_count 
-              << " Yaw: " << yaw << " Pitch: " << pitch 
+              << " Yaw: " << yaw << " Pitch: " << pitch
+              << " SimYawDeg: " << sim_yaw_deg << " SimPitchDeg: " << sim_pitch_deg
               << " Fire: " << (fire ? 1 : 0) << std::endl;
   }
   
@@ -170,10 +176,10 @@ void ROS2::send_gimbal_command(bool control, bool fire, float yaw, float yaw_vel
   msg.data = {
     static_cast<double>(control),
     static_cast<double>(fire),
-    static_cast<double>(yaw),
+    sim_yaw_deg,
     static_cast<double>(yaw_vel),
     static_cast<double>(yaw_acc),
-    static_cast<double>(pitch),
+    sim_pitch_deg,
     static_cast<double>(pitch_vel),
     static_cast<double>(pitch_acc)
   };

@@ -26,7 +26,7 @@ Lightbar::Lightbar(const cv::RotatedRect & rotated_rect, std::size_t id)
 
   width = cv::norm(corners[0] - corners[1]);
   angle = std::atan2(top2bottom.y, top2bottom.x);
-  angle_error = std::abs(angle - CV_PI / 2);
+  angle_error = std::abs(std::atan2(std::sin(angle - CV_PI / 2), std::cos(angle - CV_PI / 2)));
   length = cv::norm(top2bottom);
   ratio = length / width;
 }
@@ -51,8 +51,12 @@ Armor::Armor(const Lightbar & left, const Lightbar & right)
   side_ratio = max_lightbar_length / min_lightbar_length;
 
   auto roll = std::atan2(left2right.y, left2right.x);
-  auto left_rectangular_error = std::abs(left.angle - roll - CV_PI / 2);
-  auto right_rectangular_error = std::abs(right.angle - roll - CV_PI / 2);
+  auto left_rectangular_error =
+    std::abs(std::atan2(
+      std::sin(left.angle - roll - CV_PI / 2), std::cos(left.angle - roll - CV_PI / 2)));
+  auto right_rectangular_error =
+    std::abs(std::atan2(
+      std::sin(right.angle - roll - CV_PI / 2), std::cos(right.angle - roll - CV_PI / 2)));
   rectangular_error = std::max(left_rectangular_error, right_rectangular_error);
 }
 
