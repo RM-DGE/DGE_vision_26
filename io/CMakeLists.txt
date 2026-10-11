@@ -34,9 +34,13 @@ add_library(io STATIC
     # usbcamera/usbcamera.cpp  
     camera.cpp
     cboard.cpp
+    Daedalus/daedalus_camera.cpp
     # dm_imu/dm_imu.cpp
     # gimbal/gimbal.cpp
 )
+
+# Daedalus 仿真器 IPC 适配层（协议头在 io/Daedalus/，header-only，无额外链接）
+target_include_directories(io PUBLIC Daedalus)
 
 # hikrobot
 target_include_directories(io PUBLIC hikrobot/include)
@@ -57,6 +61,31 @@ target_link_libraries(io PUBLIC
     yaml-cpp 
     ${LIBSERIAL_LIBRARIES}
 )
+
+# ---------- Foxglove（官方 C++ SDK，原样 vendor 在 foxglove/，用法同 hikrobot/）----------
+# 只编 SDK 的 C++ 包装层（12 个源文件）；不要用 src/*.cpp 通配，
+# 否则会引入 remote_access.cpp 的未实现 gateway 符号。
+add_library(foxglove_cpp STATIC
+    foxglove/src/channel.cpp
+    foxglove/src/connection_graph.cpp
+    foxglove/src/context.cpp
+    foxglove/src/error.cpp
+    foxglove/src/fetch_asset.cpp
+    foxglove/src/foxglove.cpp
+    foxglove/src/mcap.cpp
+    foxglove/src/messages.cpp
+    foxglove/src/parameter.cpp
+    foxglove/src/service.cpp
+    foxglove/src/websocket.cpp
+    foxglove/src/system_info.cpp
+)
+target_include_directories(foxglove_cpp SYSTEM PUBLIC foxglove/include)
+target_link_libraries(foxglove_cpp PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/foxglove/lib/libfoxglove.a"
+    pthread dl m
+)
+
+target_link_libraries(io PUBLIC foxglove_cpp)
 
 # # mindvision
 # target_include_directories(io PUBLIC mindvision/include)

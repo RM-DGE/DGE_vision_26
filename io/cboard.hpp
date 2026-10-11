@@ -67,19 +67,29 @@ struct ControlDataFrame {
 };
 #pragma pack(pop)
 
-class CBoard
+// 云台通信的抽象基类：真机用 CBoard（串口），仿真用 DaedalusCBoard（共享内存）。
+class CBoardBase
 {
 public:
-  double bullet_speed;
-  Mode mode;
-  // ShootMode shoot_mode;
-  double ft_angle;
+  CBoardBase() = default;
+  virtual ~CBoardBase() = default;
 
+  double bullet_speed = 0;
+  Mode mode = Mode::idle;
+  double ft_angle = 0;
+
+  virtual Eigen::Quaterniond imu_at(std::chrono::steady_clock::time_point timestamp) = 0;
+  virtual void send(Command command) const = 0;
+};
+
+class CBoard : public CBoardBase
+{
+public:
   CBoard(const std::string & config_path);
 
-  Eigen::Quaterniond imu_at(std::chrono::steady_clock::time_point timestamp);
+  Eigen::Quaterniond imu_at(std::chrono::steady_clock::time_point timestamp) override;
 
-  void send(Command command) const;
+  void send(Command command) const override;
 
 private:
   struct IMUData

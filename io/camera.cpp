@@ -2,6 +2,7 @@
 
 #include <stdexcept>
 
+#include "Daedalus/daedalus_camera.hpp"
 #include "hikrobot/hikrobot.hpp"
 // #include "mindvision/mindvision.hpp"
 #include "tools/yaml.hpp"
@@ -24,6 +25,10 @@ Camera::Camera(const std::string & config_path)
     auto gain = tools::read<double>(yaml, "gain");
     auto vid_pid = tools::read<std::string>(yaml, "vid_pid");
     camera_ = std::make_unique<HikRobot>(exposure_ms, gain, vid_pid);
+  }
+
+  else if (camera_name == "daedalus") {
+    camera_ = std::make_unique<DaedalusCamera>(config_path);
   }
 
   else {

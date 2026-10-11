@@ -1,16 +1,20 @@
 #include <fmt/core.h>
 #include <chrono>
+#include <memory>
 #include <opencv2/opencv.hpp>
 #include <thread>
+#include <yaml-cpp/yaml.h>
 
 #include "io/camera.hpp"
 #include "io/cboard.hpp"
+#include "io/Daedalus/daedalus_cboard.hpp"
 #include "tasks/auto_aim/aimer.hpp"
 #include "tasks/auto_aim/shooter.hpp"
 #include "tasks/auto_aim/solver.hpp"
 #include "tasks/auto_aim/tracker.hpp"
 #include "tasks/auto_aim/yolo.hpp"
 #include "tools/exiter.hpp"
+#include "tools/Foxglove/foxglove.hpp"
 #include "tools/logger.hpp"
 #include "tools/plotter.hpp"
 #include <nlohmann/json.hpp>
@@ -34,8 +38,21 @@ int main(int argc, char * argv[])
 
   tools::Exiter exiter;
   tools::Plotter plotter;
+  tools::FoxgloveServer foxglove(8765);
+  foxglove.configure_camera(config_path);
 
-  io::CBoard cboard(config_path); 
+  // 仿真时在 yaml 里写 cboard_name: daedalus，真机不写或写 cboard
+  std::unique_ptr<io::CBoardBase> cboard_ptr;
+  {
+    auto yaml = YAML::LoadFile(config_path);
+    auto cboard_name =
+      yaml["cboard_name"] ? yaml["cboard_name"].as<std::string>() : "cboard";
+    if (cboard_name == "daedalus")
+      cboard_ptr = std::make_unique<io::DaedalusCBoard>(config_path);
+    else
+      cboard_ptr = std::make_unique<io::CBoard>(config_path);
+  }
+  auto & cboard = *cboard_ptr;
   io::Camera camera(config_path);
 
   auto_aim::YOLO detector(config_path, false);
@@ -88,6 +105,13 @@ int main(int argc, char * argv[])
             cv::line(img, armor.points[i], armor.points[(i+1)%4], {0,255,0}, 2);
     }
 
+    // Foxglove：推送（原始分辨率）图像 + 装甲板识别框 + TF + 3D 场景
+    foxglove.publish_image(img);
+    foxglove.publish_annotations(armors);
+    foxglove.publish_tf(q);
+    foxglove.publish_scene(
+      armors, targets, aimer.debug_aim_point.valid, aimer.debug_aim_point.xyza);
+
     // //红框
     // if (!targets.empty() && aimer.debug_aim_point.valid) {
     //     auto target = targets.front();
@@ -127,6 +151,10 @@ int main(int argc, char * argv[])
     // Shoot 状态通过三目运算符转换为 1 或 0
     std::string text_shoot = fmt::format("Shoot: {}", command.shoot ? 1 : 0);
     cv::putText(img, text_shoot, cv::Point(10, 60), font, scale, cv::Scalar(0, 0, 255), thickness);
+
+    // Foxglove 调试曲线（Plot 面板可直接选字段）
+    foxglove.publish_debug(
+      fps, command, targets, armors, aimer.debug_aim_point.valid, aimer.debug_aim_point.xyza);
 
     cv::imshow("Standard Test", img);
     if (cv::waitKey(1) == 'q') break;

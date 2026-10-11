@@ -23,10 +23,8 @@ namespace io
 
 //初始化C板通信
 CBoard::CBoard(const std::string & config_path)
-: mode(Mode::idle),
-  // shoot_mode(ShootMode::left_shoot),
+: // shoot_mode(ShootMode::left_shoot),
   // bullet_speed(0),
-  ft_angle(0),
   // queue_ initialization removed (using default deque constructor)
   serial_(read_yaml(config_path), read_baudrate(config_path),
           std::bind(&CBoard::callback, this, std::placeholders::_1))
