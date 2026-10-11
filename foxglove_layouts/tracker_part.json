@@ -1,0 +1,201 @@
+{
+  "configById": {
+    "ImageViewPanel!zh743e": {
+      "cameraTopic": "/detector/result_img/compressed",
+      "enabledMarkerTopics": [],
+      "mode": "fit",
+      "pan": {
+        "x": -4.7252156524932545,
+        "y": 39.23141173936994
+      },
+      "rotation": 0,
+      "synchronize": false,
+      "transformMarkers": false,
+      "zoom": 0.5
+    },
+    "3D!142sc7x": {
+      "cameraState": {
+        "distance": 2.4435187499955857,
+        "perspective": true,
+        "phi": 58.14887762500699,
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOffset": [
+          -0.8074708790809183,
+          -0.03627009231610194,
+          7.438220360789025e-18
+        ],
+        "targetOrientation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "thetaOffset": -99.3920145190583,
+        "fovy": 40,
+        "near": 0.5,
+        "far": 5000
+      },
+      "followMode": "follow-pose",
+      "followTf": "gimbal_link",
+      "scene": {
+        "transforms": {
+          "showLabel": false
+        }
+      },
+      "transforms": {},
+      "topics": {
+        "/detector/marker": {
+          "visible": true,
+          "namespaces": {
+            "classification": {
+              "visible": false
+            },
+            "armors": {
+              "visible": true
+            }
+          },
+          "showOutlines": false,
+          "color": "#005cff"
+        },
+        "/tracker/marker": {
+          "visible": true,
+          "showOutlines": false
+        },
+        "/camera_info": {
+          "visible": true,
+          "distance": 6
+        },
+        "/aiming_point": {
+          "visible": true
+        }
+      },
+      "layers": {
+        "c023eef1-e181-48a5-aea6-6ee686100564": {
+          "visible": true,
+          "frameLocked": true,
+          "label": "Grid",
+          "instanceId": "c023eef1-e181-48a5-aea6-6ee686100564",
+          "layerId": "foxglove.Grid",
+          "frameId": "odom",
+          "size": 10,
+          "divisions": 10,
+          "lineWidth": 1,
+          "color": "#248eff",
+          "position": [
+            0,
+            0,
+            -0.4
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "order": 1
+        }
+      },
+      "publish": {
+        "type": "point",
+        "poseTopic": "/move_base_simple/goal",
+        "pointTopic": "/clicked_point",
+        "poseEstimateTopic": "/initialpose",
+        "poseEstimateXDeviation": 0.5,
+        "poseEstimateYDeviation": 0.5,
+        "poseEstimateThetaDeviation": 0.26179939
+      },
+      "imageMode": {}
+    },
+    "RawMessages!2iy8s07": {
+      "diffEnabled": false,
+      "diffMethod": "custom",
+      "diffTopicPath": "",
+      "showFullMessageForDiff": false,
+      "topicPath": "/tracker/info"
+    },
+    "RawMessages!3800pj3": {
+      "diffEnabled": false,
+      "diffMethod": "custom",
+      "diffTopicPath": "",
+      "showFullMessageForDiff": false,
+      "topicPath": "/detector/marker"
+    },
+    "Plot!1nd28n": {
+      "title": "Plot",
+      "paths": [
+        {
+          "value": "/tracker/info.yaw",
+          "enabled": true,
+          "timestampMethod": "receiveTime"
+        }
+      ],
+      "showXAxisLabels": true,
+      "showYAxisLabels": true,
+      "showLegend": true,
+      "legendDisplay": "floating",
+      "showPlotValuesInLegend": false,
+      "isSynced": true,
+      "xAxisVal": "timestamp",
+      "sidebarDimension": 240,
+      "foxglovePanelTitle": "Plot",
+      "followingViewWidth": 5
+    },
+    "RawMessages!2wpb0i4": {
+      "diffEnabled": false,
+      "diffMethod": "custom",
+      "diffTopicPath": "",
+      "showFullMessageForDiff": false,
+      "topicPath": "/tracker/target"
+    },
+    "ImageViewPanel!sfw93p": {
+      "cameraTopic": "/detector/number_img",
+      "enabledMarkerTopics": [],
+      "mode": "fit",
+      "pan": {
+        "x": 0,
+        "y": 0
+      },
+      "rotation": 0,
+      "synchronize": false,
+      "transformMarkers": false,
+      "zoom": 1
+    }
+  },
+  "globalVariables": {},
+  "userNodes": {},
+  "playbackConfig": {
+    "speed": 1
+  },
+  "layout": {
+    "first": {
+      "first": "ImageViewPanel!zh743e",
+      "second": "3D!142sc7x",
+      "direction": "column",
+      "splitPercentage": 42.42125984251969
+    },
+    "second": {
+      "first": {
+        "direction": "column",
+        "second": "Plot!1nd28n",
+        "first": {
+          "first": "RawMessages!2iy8s07",
+          "second": "RawMessages!3800pj3",
+          "direction": "column",
+          "splitPercentage": 50.39370078740157
+        }
+      },
+      "second": {
+        "first": "RawMessages!2wpb0i4",
+        "second": "ImageViewPanel!sfw93p",
+        "direction": "column"
+      },
+      "direction": "row",
+      "splitPercentage": 62.83008815334258
+    },
+    "direction": "row",
+    "splitPercentage": 58.941504178272986
+  }
+}

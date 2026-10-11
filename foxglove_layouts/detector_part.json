@@ -1,0 +1,200 @@
+{
+  "configById": {
+    "ImageViewPanel!1k1127x": {
+      "cameraTopic": "/detector/result_img/compressed",
+      "enabledMarkerTopics": [],
+      "mode": "fit",
+      "pan": {
+        "x": 0,
+        "y": 0
+      },
+      "rotation": 0,
+      "synchronize": false,
+      "transformMarkers": false,
+      "zoom": 1
+    },
+    "3D!34cqx0a": {
+      "cameraState": {
+        "distance": 1.2534432653773337,
+        "perspective": true,
+        "phi": 71.56192342408772,
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOffset": [
+          0.053470492032452833,
+          -0.18236822422298007,
+          -1.789861440376795e-16
+        ],
+        "targetOrientation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "thetaOffset": -100.10475243199537,
+        "fovy": 45,
+        "near": 0.5,
+        "far": 5000
+      },
+      "followMode": "follow-pose",
+      "followTf": "odom",
+      "scene": {
+        "syncCamera": true,
+        "transforms": {
+          "showLabel": false
+        }
+      },
+      "transforms": {
+        "frame:gimbal_link": {
+          "visible": true
+        },
+        "frame:odom": {
+          "visible": true
+        },
+        "frame:camera_link": {
+          "visible": true
+        },
+        "frame:camera_optical_frame": {
+          "visible": true
+        },
+        "frame:": {
+          "visible": true
+        }
+      },
+      "topics": {
+        "/aiming_point": {
+          "showOutlines": false,
+          "visible": false
+        },
+        "/camera_info": {
+          "visible": true
+        },
+        "/detector/marker": {
+          "visible": true
+        },
+        "/image_raw": {
+          "visible": false,
+          "frameLocked": true,
+          "cameraInfoTopic": "/camera_info",
+          "distance": 1,
+          "planarProjectionFactor": 0,
+          "color": "#ffffff"
+        },
+        "/tracker/marker": {
+          "visible": false
+        },
+        "/robot_description": {
+          "visible": true
+        },
+        "/initialpose": {
+          "visible": false
+        },
+        "/image_raw/compressedDepth": {
+          "visible": false
+        },
+        "/image_raw/compressed": {
+          "visible": false,
+          "frameLocked": true,
+          "cameraInfoTopic": "/camera_info",
+          "distance": 1,
+          "planarProjectionFactor": 0,
+          "color": "#ffffff"
+        },
+        "/detector/binary_img": {
+          "visible": false
+        },
+        "/move_base_simple/goal": {
+          "visible": false
+        },
+        "/detector/number_img": {
+          "visible": false
+        },
+        "/detector/binary_img/compressedDepth": {
+          "visible": false
+        },
+        "/detector/result_img": {
+          "visible": false
+        }
+      },
+      "layers": {
+        "7115231c-4d39-468f-ad3a-8a49261cbfba": {
+          "visible": true,
+          "frameLocked": true,
+          "label": "Grid",
+          "instanceId": "7115231c-4d39-468f-ad3a-8a49261cbfba",
+          "layerId": "foxglove.Grid",
+          "size": 10,
+          "divisions": 10,
+          "lineWidth": 1,
+          "color": "#248eff",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "order": 1
+        }
+      },
+      "publish": {
+        "type": "point",
+        "poseTopic": "/move_base_simple/goal",
+        "pointTopic": "/clicked_point",
+        "poseEstimateTopic": "/initialpose",
+        "poseEstimateXDeviation": 0.5,
+        "poseEstimateYDeviation": 0.5,
+        "poseEstimateThetaDeviation": 0.26179939
+      },
+      "imageMode": {}
+    },
+    "ImageViewPanel!26ehcys": {
+      "cameraTopic": "/detector/number_img",
+      "enabledMarkerTopics": [],
+      "mode": "fit",
+      "pan": {
+        "x": 0,
+        "y": 0
+      },
+      "rotation": 0,
+      "synchronize": false,
+      "transformMarkers": false,
+      "zoom": 1
+    },
+    "RawMessages!45aw5yt": {
+      "diffEnabled": false,
+      "diffMethod": "custom",
+      "diffTopicPath": "",
+      "showFullMessageForDiff": false,
+      "topicPath": "/detector/armors",
+      "expansion": "all"
+    }
+  },
+  "globalVariables": {},
+  "userNodes": {},
+  "playbackConfig": {
+    "speed": 1
+  },
+  "layout": {
+    "first": {
+      "first": "ImageViewPanel!1k1127x",
+      "second": "3D!34cqx0a",
+      "direction": "column",
+      "splitPercentage": 48.523622047244096
+    },
+    "second": {
+      "first": "ImageViewPanel!26ehcys",
+      "second": "RawMessages!45aw5yt",
+      "direction": "row",
+      "splitPercentage": 25.682451253481904
+    },
+    "direction": "row",
+    "splitPercentage": 54.9096622152396
+  }
+}

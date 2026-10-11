@@ -63,10 +63,7 @@ IMU型号：使用C板内置BMI088作为IMU\
 辅助工具：NoMachine（远程桌面）、PlotJuggler（绘制曲线图）
 注：使用有线连接小电脑需要将双方配置到同一网段下，将IPV4设为静态。
 
- 本机使用 FishROS 安装 ROS 2 Humble，ROS 环境位于 `/opt/ros/humble`。检查 ROS 环境：
- ```bash
- ros2 --version
- ```
+ 本机使用 FishROS 安装 ROS 2 Humble，ROS 环境位于 `/opt/ros/humble`。
 
  PlotJuggler 使用 ROS 2 插件时可直接运行：
  ```bash
@@ -152,6 +149,18 @@ IMU型号：使用C板内置BMI088作为IMU\
 
    当前 CMake 默认生成 `standard` 。 `auto_aim_debug_mpc`、`auto_aim_test` 已在
    `CMakeLists.txt` 中注释，不属于当前默认构建目标。
+
+   **Daedalus 仿真 + Foxglove 3D 可视化**（查看检测 / 跟踪 / 预测 / 瞄准）：
+
+   ```bash
+   export LD_LIBRARY_PATH=/opt/intel/openvino_2024.6.0/runtime/lib/intel64:$LD_LIBRARY_PATH
+   ./build/standard configs/daedalus.yaml     # 需先启动 Daedalus 仿真器
+   ```
+
+   程序内置 Foxglove WebSocket 服务器（`ws://<本机IP>:8765`）。Foxglove Studio →
+   Open connection → Foxglove WebSocket → 连接后导入
+   `foxglove_layouts/dge_3d_layout.json` 即可看到 3D 场景。
+   发布的 3D 话题、坐标系与布局说明见 `foxglove_layouts/README.md`。
 
 4. 注册自启：
     1. 确保已安装`screen`:

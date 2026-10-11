@@ -1,0 +1,38 @@
+{
+  "configById": {
+    "Plot!3yck0qh": {
+      "paths": [
+        {
+          "value": "/tracker/target.position.x",
+          "enabled": true,
+          "timestampMethod": "receiveTime"
+        }
+      ],
+      "showXAxisLabels": true,
+      "showYAxisLabels": true,
+      "showLegend": true,
+      "legendDisplay": "floating",
+      "showPlotValuesInLegend": false,
+      "isSynced": true,
+      "xAxisVal": "timestamp",
+      "sidebarDimension": 240,
+      "foxglovePanelTitle": "Plot",
+      "title": "Plot",
+      "followingViewWidth": 9
+    },
+    "Parameters!1g2882b": {
+      "title": "Parameters"
+    }
+  },
+  "globalVariables": {},
+  "userNodes": {},
+  "playbackConfig": {
+    "speed": 1
+  },
+  "layout": {
+    "direction": "row",
+    "first": "Plot!3yck0qh",
+    "second": "Parameters!1g2882b",
+    "splitPercentage": 54.83991514898388
+  }
+}

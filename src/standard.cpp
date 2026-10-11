@@ -108,9 +108,14 @@ int main(int argc, char * argv[])
     // Foxglove：推送（原始分辨率）图像 + 装甲板识别框 + TF + 3D 场景
     foxglove.publish_image(img);
     foxglove.publish_annotations(armors);
+    foxglove.publish_number_image(armors);
+    foxglove.publish_rmvision(armors, targets, aimer.debug_aim_point.xyza);
+    foxglove.publish_detector_markers(armors);
+    foxglove.publish_tracker_markers(targets);
     foxglove.publish_tf(q);
     foxglove.publish_scene(
-      armors, targets, aimer.debug_aim_point.valid, aimer.debug_aim_point.xyza);
+      armors, targets, aimer.debug_aim_point.valid, aimer.debug_aim_point.xyza, q);
+    foxglove.publish_prediction(targets);
 
     // //红框
     // if (!targets.empty() && aimer.debug_aim_point.valid) {
