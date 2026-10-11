@@ -67,6 +67,7 @@ private:
 
   cv::Mat last_image_;
   std::chrono::steady_clock::time_point last_image_time_;
+  std::optional<std::chrono::steady_clock::time_point> delivered_image_time_;
   std::deque<std::pair<std::chrono::steady_clock::time_point, Eigen::Quaterniond>> gimbal_queue_;
   mutable std::mutex image_mutex_;
   mutable std::mutex gimbal_mutex_;

@@ -24,6 +24,7 @@ Tracker::Tracker(const std::string & config_path, Solver & solver)
   max_temp_lost_count_ = yaml["max_temp_lost_count"].as<int>();
   outpost_max_temp_lost_count_ = yaml["outpost_max_temp_lost_count"].as<int>();
   normal_temp_lost_count_ = max_temp_lost_count_;
+  max_tracking_dt_ = yaml["max_tracking_dt"] ? yaml["max_tracking_dt"].as<double>() : 0.1;
 }
 
 std::string Tracker::state() const { return state_; }
@@ -35,7 +36,7 @@ std::list<Target> Tracker::track(
   last_timestamp_ = t;
 
   // 时间间隔过长，说明可能发生了相机离线
-  if (state_ != "lost" && dt > 0.1) {
+  if (state_ != "lost" && dt > max_tracking_dt_) {
     tools::logger()->warn("[Tracker] Large dt: {:.3f}s", dt);
     state_ = "lost";
   }
@@ -109,7 +110,7 @@ std::tuple<omniperception::DetectionResult, std::list<Target>> Tracker::track(
   last_timestamp_ = t;
 
   // 时间间隔过长，说明可能发生了相机离线
-  if (state_ != "lost" && dt > 0.1) {
+  if (state_ != "lost" && dt > max_tracking_dt_) {
     tools::logger()->warn("[Tracker] Large dt: {:.3f}s", dt);
     state_ = "lost";
   }

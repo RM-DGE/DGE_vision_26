@@ -35,6 +35,7 @@ max_rectangular_error: 25 # degree
 min_detect_count: 5
 max_temp_lost_count: 15
 outpost_max_temp_lost_count: 75
+max_tracking_dt: 0.25 # s 仿真渲染/CPU检测约6-8Hz，避免真实新帧0.12-0.17s被误判为相机离线
 
 #####-----aimer参数-----#####
 yaw_offset: 0 # degree 仿真内外参为解析精确值，无需补偿；实机值为 2

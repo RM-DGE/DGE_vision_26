@@ -6,7 +6,9 @@
 
 #include "io/camera.hpp"
 #include "io/gimbal/gimbal.hpp"
-#ifdef ENABLE_SIM_MODE
+#ifdef ENABLE_TALOS_MODE
+#include "io/talos/talos.hpp"
+#elif defined(ENABLE_SIM_MODE)
 #include "io/ros2/ros2.hpp"
 #endif
 #include "tasks/auto_aim/aimer.hpp"
@@ -40,7 +42,9 @@ int main(int argc, char * argv[])
   tools::Plotter plotter;
   // tools::Recorder recorder;
 
-#ifdef ENABLE_SIM_MODE
+#ifdef ENABLE_TALOS_MODE
+  io::Talos talos;
+#elif defined(ENABLE_SIM_MODE)
   io::ROS2 sim_ros2;
 #else
   io::CBoard cboard(config_path);
@@ -64,8 +68,10 @@ int main(int argc, char * argv[])
 
   // ===================== 主循环：单帧自瞄闭环 =====================
    while (!exiter.exit()) {
-#ifdef ENABLE_SIM_MODE
-     sim_ros2.read_image(img, t);
+#ifdef ENABLE_TALOS_MODE
+     if (!talos.read_image(img, t)) img.release();
+#elif defined(ENABLE_SIM_MODE)
+     if (!sim_ros2.read_image(img, t)) img.release();
 #else
      camera.read(img, t);
 #endif
@@ -83,8 +89,10 @@ int main(int argc, char * argv[])
 
      // --------------------- 获取 IMU 姿态并更新解算基准 ---------------------
      // 这里读取当前时刻的四元数姿态，并稍微回溯 1ms 来补偿延迟，避免控制时序偏差。
-#ifdef ENABLE_SIM_MODE
-     Eigen::Quaterniond q = sim_ros2.get_gimbal_quaternion(t - 1ms);
+#ifdef ENABLE_TALOS_MODE
+      Eigen::Quaterniond q = talos.get_gimbal_quaternion(t - 1ms);
+#elif defined(ENABLE_SIM_MODE)
+      Eigen::Quaterniond q = sim_ros2.get_gimbal_quaternion(t - 1ms);
 #else
      Eigen::Quaterniond q = gimbal.q(t - 1ms);
 #endif
@@ -95,8 +103,10 @@ int main(int argc, char * argv[])
       auto armors = detector.detect(img); //检测
       const auto detected_armor_count = armors.size();
       auto targets = tracker.track(armors, t);  //预测和滤波
-#ifdef ENABLE_SIM_MODE
-     io::GimbalState gimbal_state{.bullet_speed = 15.0};
+#ifdef ENABLE_TALOS_MODE
+      io::GimbalState gimbal_state{.bullet_speed = 25.0};
+#elif defined(ENABLE_SIM_MODE)
+      io::GimbalState gimbal_state{.bullet_speed = 15.0};
 #else
      auto gimbal_state = gimbal.state();
 #endif
@@ -120,8 +130,16 @@ int main(int argc, char * argv[])
      command.shoot = shooter.shoot(command, aimer, targets, current_ypr);
 
      // 发送控制命令给Gimbal（包含前馈速度和加速度）
-#ifdef ENABLE_SIM_MODE
-     sim_ros2.send_gimbal_command(command.control, command.shoot, command.yaw, 
+#ifdef ENABLE_TALOS_MODE
+      const auto aim_point = aimer.debug_aim_point;
+      const auto aim_delta = aim_point.xyza.head<3>();
+      const auto target_distance = aim_point.valid ? aim_delta.norm() : 0.0;
+      talos.send_gimbal_command(command.control, command.shoot, command.yaw,
+                                command.yaw_vel, command.yaw_acc, command.pitch,
+                                command.pitch_vel, command.pitch_acc,
+                                static_cast<float>(target_distance));
+#elif defined(ENABLE_SIM_MODE)
+      sim_ros2.send_gimbal_command(command.control, command.shoot, command.yaw,
                                    command.yaw_vel, command.yaw_acc, command.pitch, 
                                    command.pitch_vel, command.pitch_acc);
 #else

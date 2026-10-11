@@ -5,18 +5,27 @@ find_package(OpenCV REQUIRED)
 
 # 仿真模式选项
 option(ENABLE_SIM_MODE "Enable simulator mode (ROS2-based)" OFF)
+option(ENABLE_TALOS_MODE "Enable simulator mode (Talos shared memory)" OFF)
+if(ENABLE_SIM_MODE AND ENABLE_TALOS_MODE)
+    message(FATAL_ERROR "ENABLE_SIM_MODE and ENABLE_TALOS_MODE are mutually exclusive")
+endif()
 
 add_subdirectory(serial)
 
 # 创建目标 io
-add_library(io STATIC 
+set(IO_SOURCES
     hikrobot/hikrobot.cpp    
     usbcamera/usbcamera.cpp  
     camera.cpp
     cboard.cpp
     gimbal/gimbal.cpp
-    ros2/ros2.cpp
 )
+if(ENABLE_TALOS_MODE)
+    list(APPEND IO_SOURCES talos/talos.cpp)
+else()
+    list(APPEND IO_SOURCES ros2/ros2.cpp)
+endif()
+add_library(io STATIC ${IO_SOURCES})
 
 # hikrobot
 target_include_directories(io PUBLIC hikrobot/include)
@@ -61,4 +70,8 @@ if(ENABLE_SIM_MODE)
     target_compile_definitions(io PUBLIC ENABLE_SIM_MODE)
 else()
     message(STATUS "Simulator mode disabled (default: hardware mode)")
+endif()
+
+if(ENABLE_TALOS_MODE)
+    target_compile_definitions(io PUBLIC ENABLE_TALOS_MODE)
 endif()

@@ -122,16 +122,13 @@ std::chrono::steady_clock::time_point ROS2::ros2_time_to_steady_clock(const rclc
 
 bool ROS2::read_image(cv::Mat & img, std::chrono::steady_clock::time_point & t)
 {
-  static int call_count = 0;
-  if (++call_count % 30 == 0) {
-    std::cerr << "[ROS2::read_image] Called " << call_count << " times, image empty: " 
-              << last_image_.empty() << " size: " << last_image_.size() << std::endl;
-  }
-  
   std::lock_guard<std::mutex> lock(image_mutex_);
   if (last_image_.empty()) return false;
+  if (delivered_image_time_ && last_image_time_ <= *delivered_image_time_) return false;
+
   img = last_image_;
   t = last_image_time_;
+  delivered_image_time_ = last_image_time_;
   return true;
 }
 
