@@ -44,7 +44,7 @@ bool Shooter::shoot(
   // 2. 小陀螺动态容差放大
   if (abs_omega > 1.5) {
     double multiplier = 1.0 + 0.4 * (abs_omega - 1.5);
-    multiplier = std::min(multiplier, 2); // 为了安全，最高放大2.5倍即可
+    multiplier = std::min(multiplier, 2.); // 为了安全，最高放大2.5倍即可
     tolerance *= multiplier;
   }
 
