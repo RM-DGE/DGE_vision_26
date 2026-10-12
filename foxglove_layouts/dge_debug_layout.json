@@ -1,0 +1,206 @@
+{
+  "configById": {
+    "ImageViewPanel!dge_img": {
+      "cameraTopic": "/detector/result_img/compressed",
+      "enabledMarkerTopics": ["/camera/annotations"],
+      "mode": "fit",
+      "pan": { "x": 0, "y": 0 },
+      "rotation": 0,
+      "synchronize": false,
+      "transformMarkers": false,
+      "zoom": 1,
+      "title": "识别结果图像"
+    },
+    "3D!dge_3d": {
+      "cameraState": {
+        "distance": 4.5,
+        "perspective": true,
+        "phi": 55,
+        "target": [0, 0, 0],
+        "targetOffset": [0, 0, 0],
+        "targetOrientation": [0, 0, 0, 1],
+        "thetaOffset": -100,
+        "fovy": 40,
+        "near": 0.5,
+        "far": 5000
+      },
+      "followMode": "follow-pose",
+      "followTf": "gimbal_link",
+      "fixedFrame": "odom",
+      "scene": {
+        "backgroundColor": "#101118",
+        "transforms": { "showLabel": false },
+        "enableStats": false
+      },
+      "transforms": {
+        "frame:odom": { "visible": true },
+        "frame:gimbal_link": { "visible": true },
+        "frame:camera_optical_frame": { "visible": true }
+      },
+      "topics": {
+        "/dge/scene": { "visible": true },
+        "/dge/prediction": { "visible": true },
+        "/detector/marker": {
+          "visible": true,
+          "namespaces": {
+            "classification": { "visible": false },
+            "armors": { "visible": true }
+          },
+          "showOutlines": false
+        },
+        "/tracker/marker": {
+          "visible": true,
+          "showOutlines": false
+        },
+        "/camera_info": { "visible": false },
+        "/aiming_point": { "visible": true }
+      },
+      "layers": {
+        "dge-grid-0000-0000": {
+          "visible": true,
+          "frameLocked": true,
+          "label": "Grid",
+          "instanceId": "dge-grid-0000-0000",
+          "layerId": "foxglove.Grid",
+          "frameId": "odom",
+          "size": 10,
+          "divisions": 10,
+          "lineWidth": 1,
+          "color": "#248eff",
+          "position": [0, 0, -0.4],
+          "rotation": [0, 0, 0],
+          "order": 1
+        }
+      },
+      "publish": {
+        "type": "point",
+        "poseTopic": "/move_base_simple/goal",
+        "pointTopic": "/clicked_point",
+        "poseEstimateTopic": "/initialpose",
+        "poseEstimateXDeviation": 0.5,
+        "poseEstimateYDeviation": 0.5,
+        "poseEstimateThetaDeviation": 0.26179939
+      },
+      "imageMode": {},
+      "title": "3D 场景（检测 / 跟踪 / 预测 / 瞄准）"
+    },
+    "Plot!dge_quality": {
+      "title": "跟踪抖动（每帧位移 / yaw 变化）",
+      "paths": [
+        { "value": "/tracker/info.position_diff", "enabled": true, "color": "#fb923c", "timestampMethod": "receiveTime" },
+        { "value": "/tracker/info.yaw_diff", "enabled": true, "color": "#60a5fa", "timestampMethod": "receiveTime" }
+      ],
+      "showXAxisLabels": true,
+      "showYAxisLabels": true,
+      "showLegend": true,
+      "legendDisplay": "floating",
+      "showPlotValuesInLegend": true,
+      "isSynced": true,
+      "xAxisVal": "timestamp",
+      "sidebarDimension": 240,
+      "followingViewWidth": 5,
+      "yAxisLabel": "m / rad"
+    },
+    "Plot!dge_target": {
+      "title": "目标状态（v_yaw / 半径 / dz）",
+      "paths": [
+        { "value": "/tracker/target.v_yaw", "enabled": true, "color": "#00e5ff", "timestampMethod": "receiveTime" },
+        { "value": "/tracker/target.radius_1", "enabled": true, "color": "#fb923c", "timestampMethod": "receiveTime" },
+        { "value": "/tracker/target.radius_2", "enabled": true, "color": "#a78bfa", "timestampMethod": "receiveTime" },
+        { "value": "/tracker/target.dz", "enabled": true, "color": "#4ade80", "timestampMethod": "receiveTime" }
+      ],
+      "showXAxisLabels": true,
+      "showYAxisLabels": true,
+      "showLegend": true,
+      "legendDisplay": "floating",
+      "showPlotValuesInLegend": true,
+      "isSynced": true,
+      "xAxisVal": "timestamp",
+      "sidebarDimension": 240,
+      "followingViewWidth": 10
+    },
+    "Plot!dge_aim": {
+      "title": "云台指令 / 瞄准点",
+      "paths": [
+        { "value": "/dge/debug.yaw", "enabled": true, "color": "#facc15", "timestampMethod": "receiveTime" },
+        { "value": "/dge/debug.pitch", "enabled": true, "color": "#f472b6", "timestampMethod": "receiveTime" },
+        { "value": "/dge/debug.aim_x", "enabled": true, "color": "#4ade80", "timestampMethod": "receiveTime" }
+      ],
+      "showXAxisLabels": true,
+      "showYAxisLabels": true,
+      "showLegend": true,
+      "legendDisplay": "floating",
+      "showPlotValuesInLegend": false,
+      "isSynced": true,
+      "xAxisVal": "timestamp",
+      "sidebarDimension": 240,
+      "followingViewWidth": 10
+    },
+    "RawMessages!dge_target_raw": {
+      "diffEnabled": false,
+      "diffMethod": "custom",
+      "diffTopicPath": "",
+      "showFullMessageForDiff": false,
+      "topicPath": "/tracker/target",
+      "title": "/tracker/target"
+    },
+    "RawMessages!dge_debug_raw": {
+      "diffEnabled": false,
+      "diffMethod": "custom",
+      "diffTopicPath": "",
+      "showFullMessageForDiff": false,
+      "topicPath": "/dge/debug",
+      "title": "/dge/debug"
+    },
+    "ImageViewPanel!dge_number": {
+      "cameraTopic": "/detector/number_img",
+      "enabledMarkerTopics": [],
+      "mode": "fit",
+      "pan": { "x": 0, "y": 0 },
+      "rotation": 0,
+      "synchronize": false,
+      "transformMarkers": false,
+      "zoom": 1,
+      "title": "数字分类图案"
+    }
+  },
+  "globalVariables": {},
+  "userNodes": {},
+  "playbackConfig": { "speed": 1 },
+  "layout": {
+    "direction": "row",
+    "first": {
+      "first": "ImageViewPanel!dge_img",
+      "second": "3D!dge_3d",
+      "direction": "column",
+      "splitPercentage": 40
+    },
+    "second": {
+      "direction": "column",
+      "first": {
+        "first": "Plot!dge_quality",
+        "second": "Plot!dge_target",
+        "direction": "row",
+        "splitPercentage": 50
+      },
+      "second": {
+        "first": "Plot!dge_aim",
+        "second": {
+          "first": "ImageViewPanel!dge_number",
+          "second": {
+            "first": "RawMessages!dge_target_raw",
+            "second": "RawMessages!dge_debug_raw",
+            "direction": "column",
+            "splitPercentage": 50
+          },
+          "direction": "row",
+          "splitPercentage": 32
+        },
+        "direction": "row",
+        "splitPercentage": 46
+      },
+      "splitPercentage": 52
+    },
+    "splitPercentage": 42
+  }
+}

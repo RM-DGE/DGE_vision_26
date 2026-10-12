@@ -22,6 +22,7 @@
 #include <yaml-cpp/yaml.h>
 
 #include "tools/logger.hpp"
+#include "tools/math_tools.hpp"
 
 namespace tools
 {
@@ -51,17 +52,35 @@ Quaternion make_quaternion(const Eigen::Quaterniond & q)
   return Quaternion{q.x(), q.y(), q.z(), q.w()};
 }
 
+Vector3 make_vector3(double x, double y, double z) { return Vector3{x, y, z}; }
+
 // 绕 Z 轴 yaw 的位姿（DGE 世界系：x 前、y 左、z 上）
 Pose make_pose(double x, double y, double z, double yaw)
 {
   Pose pose;
-  pose.position = Vector3{x, y, z};
+  pose.position = make_vector3(x, y, z);
   const Eigen::Quaterniond q(Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()));
   pose.orientation = make_quaternion(q);
   return pose;
 }
 
-Vector3 make_vector3(double x, double y, double z) { return Vector3{x, y, z}; }
+// yaw + pitch（Rz*Ry，法线沿局部 +x），与 Solver::reproject_armor 的板面约定一致
+Pose make_pose_ypr(double x, double y, double z, double yaw, double pitch)
+{
+  Pose pose;
+  pose.position = make_vector3(x, y, z);
+  const Eigen::Quaterniond q =
+    Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()) *
+    Eigen::AngleAxisd(pitch, Eigen::Vector3d::UnitY());
+  pose.orientation = make_quaternion(q);
+  return pose;
+}
+
+// Solver 的板面俯仰约定：outpost -15°，其余 +15°
+double armor_pitch(auto_aim::ArmorName name)
+{
+  return (name == auto_aim::outpost) ? -15.0 * M_PI / 180.0 : 15.0 * M_PI / 180.0;
+}
 
 Color make_color(double r, double g, double b, double a = 1.0) { return Color{r, g, b, a}; }
 
@@ -419,6 +438,11 @@ struct FoxgloveServer::Impl
 
   uint64_t last_image_ns = 0;
 
+  // 上一帧跟踪状态（/tracker/info 的抖动指标 position_diff / yaw_diff）
+  bool has_last_target = false;
+  Eigen::Vector3d last_center = Eigen::Vector3d::Zero();
+  double last_yaw = 0.0;
+
   // 相机外参：gimbal_link -> camera_optical_frame
   Eigen::Vector3d camera_translation = Eigen::Vector3d::Zero();
   Eigen::Quaterniond camera_rotation = Eigen::Quaterniond::Identity();
@@ -699,9 +723,9 @@ void FoxgloveServer::publish_scene(
 
     for (const auto & armor : armors) {
       CubePrimitive cube;
-      cube.pose = make_pose(
+      cube.pose = make_pose_ypr(
         armor.xyz_in_world.x(), armor.xyz_in_world.y(), armor.xyz_in_world.z(),
-        armor.ypr_in_world[0]);
+        armor.ypr_in_world[0], armor.ypr_in_world[1]);
       cube.size = armor_size(armor.type);
       cube.color = armor_color(armor.color);
       entity.cubes.push_back(cube);
@@ -723,10 +747,10 @@ void FoxgloveServer::publish_scene(
       const auto xyza_list = target.armor_xyza_list();
       const Eigen::Vector3d center = target_center(x);
 
-      // 各装甲板位置（半透明立方体）
+      // 各装甲板位置（半透明立方体，带板面俯仰）
       for (const auto & xyza : xyza_list) {
         CubePrimitive cube;
-        cube.pose = make_pose(xyza[0], xyza[1], xyza[2], xyza[3]);
+        cube.pose = make_pose_ypr(xyza[0], xyza[1], xyza[2], xyza[3], armor_pitch(target.name));
         cube.size = armor_size(target.armor_type);
         cube.color = make_color(kTracked.r, kTracked.g, kTracked.b, 0.45);
         entity.cubes.push_back(cube);
@@ -739,21 +763,37 @@ void FoxgloveServer::publish_scene(
       center_sphere.color = kTracked;
       entity.spheres.push_back(center_sphere);
 
-      // 目标旋转圆（半径 r1，位于旋转中心高度）
+      // 旋转圆环：r1（蓝）位于下排装甲板高度，r2（橙）位于上排高度
       const double radius = x[8];
-      if (radius > 0.02) {
-        LinePrimitive circle;
-        circle.type = LinePrimitive::LineType::LINE_LOOP;
-        circle.thickness = 0.01;
-        circle.color = make_color(kTracked.r, kTracked.g, kTracked.b, 0.6);
-        constexpr int kSegments = 48;
+      const double radius_2 = (xyza_list.size() >= 4) ? x[8] + x[9] : x[8];
+      const double r1_z = x[4];
+      const double r2_z = x[4] + x[10];
+      constexpr int kSegments = 48;
+      const auto add_ring = [&](double r, double z, const Color & color) {
+        if (r <= 0.02) return;
+        LinePrimitive ring;
+        ring.type = LinePrimitive::LineType::LINE_LOOP;
+        ring.thickness = 0.01;
+        ring.color = color;
         for (int i = 0; i < kSegments; ++i) {
           const double a = i * 2.0 * M_PI / kSegments;
-          circle.points.push_back(
-            Point3{center.x() + radius * std::cos(a), center.y() + radius * std::sin(a),
-                   center.z()});
+          ring.points.push_back(
+            Point3{x[0] + r * std::cos(a), x[2] + r * std::sin(a), z});
         }
-        entity.lines.push_back(circle);
+        entity.lines.push_back(ring);
+      };
+      add_ring(radius, r1_z, make_color(0.38, 0.65, 1.0, 0.6));
+      if (radius_2 > radius + 0.005) add_ring(radius_2, r2_z, make_color(1.0, 0.57, 0.25, 0.6));
+
+      // 旋转中心到各估计装甲板的辐条（展示四板相对位置）
+      for (const auto & xyza : xyza_list) {
+        LinePrimitive spoke;
+        spoke.type = LinePrimitive::LineType::LINE_STRIP;
+        spoke.thickness = 0.005;
+        spoke.color = make_color(0.6, 0.65, 0.75, 0.35);
+        spoke.points.push_back(Point3{center.x(), center.y(), center.z()});
+        spoke.points.push_back(Point3{xyza[0], xyza[1], xyza[2]});
+        entity.lines.push_back(spoke);
       }
 
       // 线速度箭头
@@ -774,14 +814,14 @@ void FoxgloveServer::publish_scene(
 
       // 目标标签
       TextPrimitive text;
-      text.pose = make_pose(center.x(), center.y(), center.z() + 0.35, 0.0);
+      text.pose = make_pose(center.x(), center.y(), center.z() + 0.45, 0.0);
       text.billboard = true;
       text.scale_invariant = true;
       text.font_size = 14.0;
       text.color = kTracked;
       text.text = fmt::format(
-        "{} v_yaw={:.1f}rad/s r={:.2f}m",
-        auto_aim::ARMOR_NAMES.at(static_cast<size_t>(target.name)), v_yaw, radius);
+        "{} | v_yaw={:+.1f}rad/s\nr1={:.3f}m r2={:.3f}m",
+        auto_aim::ARMOR_NAMES.at(static_cast<size_t>(target.name)), v_yaw, radius, radius_2);
       entity.texts.push_back(std::move(text));
     }
     update.entities.push_back(std::move(entity));
@@ -1040,6 +1080,7 @@ void FoxgloveServer::publish_rmvision(
     const auto data = msg.dump();
     impl_->rm_armors_ch->log(reinterpret_cast<const std::byte *>(data.data()), data.size(), ns);
   }
+  nlohmann::json info_header = {{"stamp", {{"sec", ns / 1000000000ULL}, {"nanosec", ns % 1000000000ULL}}}};
   if (impl_->rm_target_ch) {
     nlohmann::json msg = {{"header", header}, {"tracking", false}, {"id", ""}, {"armors_num", 0},
       {"position", {{"x", 0.0}, {"y", 0.0}, {"z", 0.0}}},
@@ -1048,17 +1089,37 @@ void FoxgloveServer::publish_rmvision(
     if (!targets.empty()) {
       const auto & t = targets.front();
       const auto x = t.ekf_x();
+      const int armor_num = static_cast<int>(t.armor_xyza_list().size());
+      // 11 维 EKF：x[8]=r1，x[9]=l(r2-r1)，x[10]=dz；4 板目标 r2 = r1 + l
+      const double r1 = x[8];
+      const double r2 = (armor_num >= 4) ? x[8] + x[9] : x[8];
       msg["tracking"] = true;
-      msg["armors_num"] = static_cast<int>(t.armor_xyza_list().size());
+      msg["armors_num"] = armor_num;
       msg["position"] = {{"x", x[0]}, {"y", x[2]}, {"z", x[4]}};
       msg["velocity"] = {{"x", x[1]}, {"y", x[3]}, {"z", x[5]}};
       msg["yaw"] = x[6]; msg["v_yaw"] = x[7]; msg["id"] = auto_aim::ARMOR_NAMES.at(static_cast<size_t>(t.name));
+      msg["radius_1"] = r1; msg["radius_2"] = r2; msg["dz"] = x[10];
     }
     const auto data = msg.dump();
     impl_->rm_target_ch->log(reinterpret_cast<const std::byte *>(data.data()), data.size(), ns);
   }
   if (impl_->rm_info_ch) {
-    nlohmann::json msg = {{"position_diff", 0.0}, {"yaw_diff", 0.0},
+    // 帧间抖动指标：中心位移与 yaw 变化量（跟踪丢失时清零）
+    double position_diff = 0.0, yaw_diff = 0.0;
+    if (!targets.empty()) {
+      const auto x = targets.front().ekf_x();
+      const Eigen::Vector3d center(x[0], x[2], x[4]);
+      if (impl_->has_last_target) {
+        position_diff = (center - impl_->last_center).norm();
+        yaw_diff = tools::limit_rad(x[6] - impl_->last_yaw);
+      }
+      impl_->last_center = center;
+      impl_->last_yaw = x[6];
+      impl_->has_last_target = true;
+    } else {
+      impl_->has_last_target = false;
+    }
+    nlohmann::json msg = {{"header", info_header}, {"position_diff", position_diff}, {"yaw_diff", yaw_diff},
       {"position", {{"x", aim_xyza[0]}, {"y", aim_xyza[1]}, {"z", aim_xyza[2]}}},
       {"yaw", aim_xyza[3]}};
     const auto data = msg.dump();
@@ -1194,7 +1255,9 @@ void FoxgloveServer::publish_tracker_markers(const std::list<auto_aim::Target> &
       cube.action = 0;
       cube.position = xyza_list[i].head<3>();
       cube.orientation =
-        Eigen::Quaterniond(Eigen::AngleAxisd(xyza_list[i][3], Eigen::Vector3d::UnitZ()));
+        Eigen::Quaterniond(
+          Eigen::AngleAxisd(xyza_list[i][3], Eigen::Vector3d::UnitZ()) *
+          Eigen::AngleAxisd(armor_pitch(t.name), Eigen::Vector3d::UnitY()));
       cube.scale = {0.03, width, 0.125};
       cube.color = {1.0f, 0.0f, 0.0f, 1.0f};
       markers.push_back(std::move(cube));
