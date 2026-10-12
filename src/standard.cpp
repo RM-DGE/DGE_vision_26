@@ -8,8 +8,6 @@
 #include "io/gimbal/gimbal.hpp"
 #ifdef ENABLE_TALOS_MODE
 #include "io/talos/talos.hpp"
-#elif defined(ENABLE_SIM_MODE)
-#include "io/ros2/ros2.hpp"
 #endif
 #include "tasks/auto_aim/aimer.hpp"
 #include "tasks/auto_aim/shooter.hpp"
@@ -44,8 +42,6 @@ int main(int argc, char * argv[])
 
 #ifdef ENABLE_TALOS_MODE
   io::Talos talos;
-#elif defined(ENABLE_SIM_MODE)
-  io::ROS2 sim_ros2;
 #else
   io::CBoard cboard(config_path);
   io::Camera camera(config_path);
@@ -70,8 +66,6 @@ int main(int argc, char * argv[])
    while (!exiter.exit()) {
 #ifdef ENABLE_TALOS_MODE
      if (!talos.read_image(img, t)) img.release();
-#elif defined(ENABLE_SIM_MODE)
-     if (!sim_ros2.read_image(img, t)) img.release();
 #else
      camera.read(img, t);
 #endif
@@ -91,8 +85,6 @@ int main(int argc, char * argv[])
      // 这里读取当前时刻的四元数姿态，并稍微回溯 1ms 来补偿延迟，避免控制时序偏差。
 #ifdef ENABLE_TALOS_MODE
       Eigen::Quaterniond q = talos.get_gimbal_quaternion(t - 1ms);
-#elif defined(ENABLE_SIM_MODE)
-      Eigen::Quaterniond q = sim_ros2.get_gimbal_quaternion(t - 1ms);
 #else
      Eigen::Quaterniond q = gimbal.q(t - 1ms);
 #endif
@@ -101,33 +93,26 @@ int main(int argc, char * argv[])
 
      // --------------------- 检测、跟踪与瞄准计算 ---------------------
       auto armors = detector.detect(img); //检测
-      const auto detected_armor_count = armors.size();
       auto targets = tracker.track(armors, t);  //预测和滤波
 #ifdef ENABLE_TALOS_MODE
       io::GimbalState gimbal_state{.bullet_speed = 25.0};
-#elif defined(ENABLE_SIM_MODE)
-      io::GimbalState gimbal_state{.bullet_speed = 15.0};
 #else
      auto gimbal_state = gimbal.state();
 #endif
       auto command = aimer.aim(targets, t, gimbal_state.bullet_speed);
 
-#ifdef ENABLE_SIM_MODE
-      if (frame_count % 30 == 0) {
-        std::cerr << "[DEBUG] Vision: detected_armors=" << detected_armor_count
-                  << " tracked_armors=" << armors.size()
-                  << " targets=" << targets.size()
-                  << " tracker_state=" << tracker.state()
-                  << " command_control=" << command.control
-                  << " yaw=" << command.yaw
-                  << " pitch=" << command.pitch << std::endl;
-      }
-#endif
-
      // --------------------- 3.4 射击判定与下发控制 ---------------------
      // 通过当前云台欧拉角和目标瞄准结果决定是否发射，并将控制指令发送到底层控制器。
      Eigen::Vector3d current_ypr = tools::eulers(solver.R_gimbal2world(), 2, 1, 0);
      command.shoot = shooter.shoot(command, aimer, targets, current_ypr);
+
+#ifdef ENABLE_TALOS_MODE
+     std::cerr << fmt::format(
+       "[TALOS-DBG] frame={} control={} shoot={} yaw={:.4f} pitch={:.4f} "
+       "aim_valid={} targets={} tracker_state={}\n",
+       frame_count, command.control, command.shoot, command.yaw, command.pitch,
+       aimer.debug_aim_point.valid, targets.size(), tracker.state());
+#endif
 
      // 发送控制命令给Gimbal（包含前馈速度和加速度）
 #ifdef ENABLE_TALOS_MODE
@@ -138,10 +123,6 @@ int main(int argc, char * argv[])
                                 command.yaw_vel, command.yaw_acc, command.pitch,
                                 command.pitch_vel, command.pitch_acc,
                                 static_cast<float>(target_distance));
-#elif defined(ENABLE_SIM_MODE)
-      sim_ros2.send_gimbal_command(command.control, command.shoot, command.yaw,
-                                   command.yaw_vel, command.yaw_acc, command.pitch, 
-                                   command.pitch_vel, command.pitch_acc);
 #else
      gimbal.send(command.control, command.shoot, command.yaw, 
                  command.yaw_vel, command.yaw_acc, command.pitch, 

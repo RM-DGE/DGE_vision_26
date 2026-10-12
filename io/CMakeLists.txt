@@ -48,7 +48,10 @@ endif()
 # endif()
 
 find_library(SYSTEM_SERIAL_LIB serial PATHS /usr/lib /usr/lib/x86_64-linux-gnu)
-target_link_libraries(io PUBLIC usb-1.0 yaml-cpp serial ${SYSTEM_SERIAL_LIB} MvCameraControl ${OpenCV_LIBS})
+target_link_libraries(io PUBLIC usb-1.0 yaml-cpp serial MvCameraControl ${OpenCV_LIBS})
+if(SYSTEM_SERIAL_LIB)
+  target_link_libraries(io PUBLIC ${SYSTEM_SERIAL_LIB})
+endif()
 
 # ROS2 仿真模式
 if(ENABLE_SIM_MODE)
