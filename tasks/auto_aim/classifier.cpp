@@ -2,12 +2,17 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <filesystem>
+
+#include "tools/path.hpp"
+
 namespace auto_aim
 {
 Classifier::Classifier(const std::string & config_path)
 {
   auto yaml = YAML::LoadFile(config_path);
   auto model = yaml["classify_model"].as<std::string>();
+  model = tools::resolve_config_path(config_path, model);
   net_ = cv::dnn::readNetFromONNX(model);
   auto ovmodel = core_.read_model(model);
   compiled_model_ = core_.compile_model(

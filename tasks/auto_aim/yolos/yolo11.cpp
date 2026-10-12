@@ -6,6 +6,7 @@
 #include <filesystem>
 
 #include "tools/img_tools.hpp"
+#include "tools/path.hpp"
 #include "tools/logger.hpp"
 
 namespace auto_aim
@@ -16,6 +17,7 @@ YOLO11::YOLO11(const std::string & config_path, bool debug)
   auto yaml = YAML::LoadFile(config_path);
 
   model_path_ = yaml["yolo11_model_path"].as<std::string>();
+  model_path_ = tools::resolve_config_path(config_path, model_path_);
   device_ = yaml["device"].as<std::string>();
   binary_threshold_ = yaml["threshold"].as<double>();
   min_confidence_ = yaml["min_confidence"].as<double>();

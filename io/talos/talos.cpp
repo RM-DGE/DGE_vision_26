@@ -275,7 +275,12 @@ struct Talos::Impl
     auto & command = buffer.slots[command_write_idx];
     command.timestamp_ns = now_unix_ns();
     command.yaw_deg = yaw * static_cast<float>(kDegreesPerRadian);
-    command.pitch_deg = pitch * static_cast<float>(kDegreesPerRadian);
+    // 俯仰约定与仿真器消费端对齐（src/talos/plugin.rs:144）：
+    // 消费端会再取一次负，交给 GimbalAimTarget::from_solver_degrees，
+    // 该函数要求入参为“自竖直起算角”（90°=水平）。
+    // command.pitch 为自水平起算角（抬头为负），故此处发送 -(pitch度 + 90)，
+    // 使消费端取负后得到 90 + command.pitch。注意：仅 pitch 需要，yaw 直接透传。
+    command.pitch_deg = -(pitch * static_cast<float>(kDegreesPerRadian) + 90.0F);
     command.distance_m = control ? distance_m : -1.0F;
     command.fire_advice = static_cast<std::uint8_t>(fire ? 1 : 0);
 
