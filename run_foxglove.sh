@@ -59,6 +59,7 @@ for _ in $(seq 1 120); do
   sleep 0.5
 done
 [ -n "$ok" ] || { echo "---- 仿真器日志 ----"; tail -20 "$DAEDALUS_LOG"; die "等待共享内存超时"; }
+sleep 1.5
 info "共享内存就绪 ($SHM_META)"
 
 if [ -f "$OPENVINO_SETUP" ]; then

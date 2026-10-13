@@ -36,6 +36,14 @@ struct GroundTruthTarget
   int armor_label = 0;
 };
 
+struct HitEvent
+{
+  std::uint64_t timestamp_ns = 0;
+  std::uint8_t team = 0;
+  std::uint8_t label = 0;
+  std::uint8_t rune = 0;
+};
+
 class Talos
 {
 public:
@@ -57,6 +65,12 @@ public:
   // handshake, so read_ground_truth() uses a best-effort consistency check.
   bool read_poses(Poses & out) const;
   std::vector<GroundTruthTarget> read_ground_truth() const;
+
+  // Projectile hit events since the previous call (run>0 marks power-rune hits).
+  std::vector<HitEvent> read_hit_events() const;
+
+  // Total projectiles launched by the simulator so far (hit-rate denominator).
+  std::uint32_t launch_count() const;
 
   // Unix nanosecond timestamp of the most recent image (0 if no frame yet).
   std::uint64_t last_image_timestamp_ns() const;

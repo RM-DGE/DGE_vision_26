@@ -46,7 +46,7 @@ int main(int argc, char * argv[])
 #ifdef ENABLE_FOXGLOVE
   std::unique_ptr<tools::FoxglovePublisher> foxglove;
   try {
-    foxglove = std::make_unique<tools::FoxglovePublisher>("127.0.0.1", 8765, config_path);
+    foxglove = std::make_unique<tools::FoxglovePublisher>(8765, "sp25_learn", config_path);
   } catch (const std::exception & e) {
     std::cerr << "[FOXGLOVE] disabled: " << e.what() << std::endl;
   }
@@ -148,13 +148,45 @@ int main(int argc, char * argv[])
             cv::line(img, armor.points[i], armor.points[(i+1)%4], {0,255,0}, 2);
     }
 
+    auto current_time = std::chrono::steady_clock::now();
+    fps = 1.0 / std::chrono::duration<double>(current_time - last_time).count();
+    last_time = current_time;
+
 #ifdef ENABLE_FOXGLOVE
-    if (foxglove && !foxglove->publishFrame(
-                      img, command, target_distance, fps, talos,
-                      aimer.debug_aim_point.valid, aimer.debug_aim_point.xyza)) {
-      std::cerr << "[FOXGLOVE] publish failed" << std::endl;
+    if (foxglove) {
+      foxglove->observe(talos);
+      cv::putText(img, fmt::format("hit rate {:.0f}%", foxglove->total_hit_rate() * 100.0),
+                  {10, 45}, cv::FONT_HERSHEY_SIMPLEX, 1.4, {0, 255, 255}, 3);
+
+      int label_index = 0;
+      for (auto & armor : armors) {
+        solver.solve(armor);
+        const std::string armor_name = auto_aim::ARMOR_NAMES[armor.name];
+        const std::string label = fmt::format("{} {:.2f}", armor_name, armor.confidence);
+        cv::putText(img, label, {10, 100 + label_index * 40}, cv::FONT_HERSHEY_SIMPLEX, 1.1,
+                    {0, 255, 0}, 2);
+
+        float box_bottom = armor.points.front().y;
+        float box_left = armor.points.front().x;
+        for (const auto & point : armor.points) {
+          if (point.y > box_bottom) box_bottom = point.y;
+          if (point.x < box_left) box_left = point.x;
+        }
+        const std::string rate_text =
+          fmt::format("{:.0f}%", foxglove->armor_hit_rate(armor_name) * 100.0);
+        cv::putText(img, rate_text,
+                    cv::Point(static_cast<int>(box_left), static_cast<int>(box_bottom) + 34),
+                    cv::FONT_HERSHEY_SIMPLEX, 1.1, {0, 255, 0}, 2);
+        ++label_index;
+      }
+
+      const Eigen::Quaterniond gimbal_world_q(solver.R_gimbal2world());
+      const Eigen::Vector3d gimbal_ypr = tools::eulers(solver.R_gimbal2world(), 2, 1, 0);
+      foxglove->publish(
+        img, command, fps, armors, targets, aimer.debug_aim_point.valid,
+        aimer.debug_aim_point.xyza, gimbal_world_q, gimbal_ypr);
     }
-#endif
+#else
 
     // //红框
     // if (!targets.empty() && aimer.debug_aim_point.valid) {
@@ -181,11 +213,6 @@ int main(int argc, char * argv[])
     double scale = 0.7; // 字体大小
     int thickness = 1;  // 字体粗细
     
-    // 1. 第一行：FPS (青色)
-    auto current_time = std::chrono::steady_clock::now();
-    std::chrono::duration<double> diff = current_time - last_time;
-    fps = 1.0 / diff.count();
-    last_time = current_time;
     std::string text_fps = fmt::format("FPS: {:.1f}", fps);
     cv::putText(img, text_fps, cv::Point(10, 20), font, scale, cv::Scalar(255, 255, 255), thickness);
     // 2. 第二行：Yaw 和 Pitch (绿色)
@@ -198,6 +225,7 @@ int main(int argc, char * argv[])
 
     cv::imshow("Standard Test", img);
     if (cv::waitKey(1) == 'q') break;
+#endif
 
     // 保存每 300 帧一张截图用于调试
     static int save_count = 0;

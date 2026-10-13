@@ -18,10 +18,11 @@
 namespace
 {
 constexpr std::uint32_t kShmMagic = 0x54414C05;
-constexpr std::uint32_t kShmVersion = 2;
+constexpr std::uint32_t kShmVersion = 3;
 constexpr std::uint8_t kFlagNew = 0x80;
 constexpr std::uint8_t kIndexMask = 0x03;
-constexpr std::size_t kMetaSize = 3712;
+constexpr std::size_t kMetaSize = 4160;
+constexpr std::size_t kHitEventCapacity = 16;
 constexpr std::size_t kImageWidth = 1440;
 constexpr std::size_t kImageHeight = 1080;
 constexpr std::size_t kImageSize = kImageWidth * kImageHeight * 3;
@@ -79,6 +80,26 @@ struct alignas(32) GimbalCmd
   std::uint8_t padding[11];
 };
 
+struct HitEventWire
+{
+  std::uint64_t seq;
+  std::uint64_t timestamp_ns;
+  std::uint8_t team;
+  std::uint8_t label;
+  std::uint8_t rune;
+  std::uint8_t padding[5];
+};
+static_assert(sizeof(HitEventWire) == 24);
+
+struct alignas(64) HitEventRingWire
+{
+  std::uint64_t write_seq;
+  std::uint32_t launch_count;
+  std::uint32_t accurate_count;
+  HitEventWire events[16];
+};
+static_assert(sizeof(HitEventRingWire) == 448);
+
 struct ShmMetaRegion
 {
   ShmHeader header;
@@ -89,6 +110,7 @@ struct ShmMetaRegion
   std::uint8_t chassis_observation[128];
   std::uint8_t ground_truth[1664];
   std::uint8_t runtime_state[64];
+  HitEventRingWire hit_events;
 };
 
 static_assert(sizeof(ImageMeta) == 32);
@@ -104,6 +126,7 @@ static_assert(offsetof(ShmMetaRegion, camera_info) == 1728);
 static_assert(offsetof(ShmMetaRegion, chassis_observation) == 1856);
 static_assert(offsetof(ShmMetaRegion, ground_truth) == 1984);
 static_assert(offsetof(ShmMetaRegion, runtime_state) == 3648);
+static_assert(offsetof(ShmMetaRegion, hit_events) == 3712);
 static_assert(sizeof(ShmMetaRegion) == kMetaSize);
 
 // Wire layout for GroundTruthBatch (mirrors Rust crates/talos-ipc/src/layout.rs).
@@ -243,6 +266,7 @@ struct Talos::Impl
   Poses poses_{};
   std::uint64_t last_image_timestamp_ns_ = 0;
   bool have_poses_ = false;
+  mutable std::uint64_t last_hit_seq_ = 0;
 
   Impl()
   {
@@ -412,5 +436,33 @@ std::vector<GroundTruthTarget> Talos::read_ground_truth() const
 std::uint64_t Talos::last_image_timestamp_ns() const
 {
   return impl_->last_image_timestamp_ns_;
+}
+
+std::vector<HitEvent> Talos::read_hit_events() const
+{
+  std::vector<HitEvent> out;
+  const auto & ring = impl_->meta->hit_events;
+  const std::uint64_t write = ring.write_seq;
+  std::uint64_t start = impl_->last_hit_seq_;
+  if (write <= start) return out;
+  if (write - start > kHitEventCapacity) start = write - kHitEventCapacity;
+
+  for (std::uint64_t seq = start; seq < write; ++seq) {
+    const auto & wire = ring.events[seq % kHitEventCapacity];
+    if (wire.seq != seq) continue;
+    HitEvent event;
+    event.timestamp_ns = wire.timestamp_ns;
+    event.team = wire.team;
+    event.label = wire.label;
+    event.rune = wire.rune;
+    out.push_back(event);
+  }
+  impl_->last_hit_seq_ = write;
+  return out;
+}
+
+std::uint32_t Talos::launch_count() const
+{
+  return impl_->meta->hit_events.launch_count;
 }
 }
