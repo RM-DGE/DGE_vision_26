@@ -17,4 +17,6 @@ records_25/
 patterns/
 .omo/
 build-talos/
+build-talos-*/
 .cache/
+third_party/

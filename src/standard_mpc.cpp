@@ -3,7 +3,7 @@
 #include <thread>
 
 #include "io/camera.hpp"
-#include "io/gimbal/gimbal.hpp"
+#include "io/cboard.hpp"
 #include "tasks/auto_aim/aimer.hpp"
 #include "tasks/auto_aim/multithread/commandgener.hpp"
 #include "tasks/auto_aim/multithread/mt_detector.hpp"
@@ -67,8 +67,8 @@ int main(int argc, char * argv[])
 
   std::atomic<bool> quit = false;
 
-  std::atomic<io::GimbalMode> mode{io::GimbalMode::IDLE};
-  auto last_mode{io::GimbalMode::IDLE};
+  std::atomic<io::Mode> mode{io::Mode::idle};
+  auto last_mode{io::Mode::idle};
 
   // ===================== 规划线程：基于 MPC / Planner 生成控制指令 =====================
   // 这个线程独立于主循环，持续查看 target_queue 中有没有最新目标；一旦进入 AUTO_AIM 模式，
@@ -78,14 +78,11 @@ int main(int argc, char * argv[])
     uint16_t last_bullet_count = 0;
 
     while (!quit) {
-      if (!target_queue.empty() && mode == io::GimbalMode::AUTO_AIM) {
+      if (!target_queue.empty() && mode == io::Mode::auto_aim) {
         auto target = target_queue.front();
-        auto gs = gimbal.state();
-        auto plan = planner.plan(target, gs.bullet_speed);
+        auto plan = planner.plan(target, cboard.bullet_speed);
 
-        gimbal.send(
-          plan.control, plan.fire, plan.yaw, plan.yaw_vel, plan.yaw_acc, plan.pitch, plan.pitch_vel,
-          plan.pitch_acc);
+        cboard.send(io::Command{plan.control, plan.fire, plan.yaw, plan.pitch});
 
         std::this_thread::sleep_for(10ms);
       } else
@@ -97,21 +94,20 @@ int main(int argc, char * argv[])
   // 这里主线程主要负责：相机读图、获取 IMU/云台状态、更新世界坐标系、检测和跟踪目标，
   // 最后把跟踪到的目标压入 target_queue，供规划线程使用。
   while (!exiter.exit()) {
-    mode = gimbal.mode();
+    mode = cboard.mode;
 
     if (last_mode != mode) {
-      tools::logger()->info("Switch to {}", gimbal.str(mode));
+      tools::logger()->info("Switch to {}", io::MODES[mode.load()]);
       last_mode = mode.load();
     }
 
     camera.read(img, t);
-    auto q = gimbal.q(t);
-    auto gs = gimbal.state();
+    auto q = cboard.imu_at(t);
     recorder.record(img, q, t);
     solver.set_R_gimbal2world(q);
 
     /// 自瞄
-    if (mode.load() == io::GimbalMode::AUTO_AIM) {
+    if (mode.load() == io::Mode::auto_aim) {
       // 检测装甲板并进行目标跟踪
       auto armors = yolo.detect(img);
       auto targets = tracker.track(armors, t);
@@ -123,7 +119,7 @@ int main(int argc, char * argv[])
         target_queue.push(std::nullopt);
     } else {
       // 不在自瞄模式时，给云台一个清零或空闲控制命令，避免残留的指令继续使云台运动。
-      gimbal.send(false, false, 0, 0, 0, 0, 0, 0);
+      cboard.send(io::Command{false, false, 0, 0});
     }
 
     /// 打符
@@ -153,7 +149,7 @@ int main(int argc, char * argv[])
   // 在退出时，停止规划线程，并再次发送 0 控制以确保云台进入安全状态。
   quit = true;
   if (plan_thread.joinable()) plan_thread.join();
-  gimbal.send(false, false, 0, 0, 0, 0, 0, 0);
+  cboard.send(io::Command{false, false, 0, 0});
 
   return 0;
 }

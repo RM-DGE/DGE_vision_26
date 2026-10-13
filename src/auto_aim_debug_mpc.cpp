@@ -7,6 +7,7 @@
 #include <thread>
 
 #include "io/camera.hpp"
+#include "io/cboard.hpp"
 #include "io/gimbal/gimbal.hpp"
 #include "tasks/auto_aim/planner/planner.hpp"
 #include "tasks/auto_aim/solver.hpp"
@@ -38,6 +39,7 @@ int main(int argc, char * argv[])
   }
 
   io::CBoard cboard(config_path);
+  io::Gimbal gimbal(config_path);
   io::Camera camera(config_path);
 
   auto_aim::YOLO yolo(config_path, true);
@@ -64,11 +66,9 @@ int main(int argc, char * argv[])
       auto target = target_queue.front();
       auto gs = gimbal.state();
       //读取弹速，gs.bullet_speed后面可以改为具体的值
-      auto plan = planner.plan(target, gs.bullet_speed);
+      auto plan = planner.plan(target, cboard.bullet_speed);
 
-      gimbal.send(
-        plan.control, plan.fire, plan.yaw, plan.yaw_vel, plan.yaw_acc, plan.pitch, plan.pitch_vel,
-        plan.pitch_acc);
+      cboard.send(io::Command{plan.control, plan.fire, plan.yaw, plan.pitch});
 
       current_tx_yaw.store(plan.yaw);
       current_tx_pitch.store(plan.pitch);
@@ -124,7 +124,7 @@ int main(int argc, char * argv[])
   // 主线程负责：相机读图、IMU姿态更新、检测装甲、跟踪目标、重投影到图像中、显示调试信息。
   while (!exiter.exit()) {
     camera.read(img, t);
-    auto q = gimbal.q(t);
+    auto q = cboard.imu_at(t);
 
     solver.set_R_gimbal2world(q);
     auto armors = yolo.detect(img);
@@ -192,7 +192,7 @@ int main(int argc, char * argv[])
 
   quit = true;
   if (plan_thread.joinable()) plan_thread.join();
-  gimbal.send(false, false, 0, 0, 0, 0, 0, 0);
+  cboard.send(io::Command{false, false, 0, 0});
 
   return 0;
 }

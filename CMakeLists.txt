@@ -20,6 +20,7 @@ find_package(OpenVINO REQUIRED)
 # 检查仿真模式并查找 ROS2
 option(ENABLE_SIM_MODE "Enable simulator mode (ROS2-based)" OFF)
 option(ENABLE_TALOS_MODE "Enable simulator mode (Talos shared memory)" OFF)
+option(ENABLE_FOXGLOVE "Enable Foxglove visualization (Talos sim only)" OFF)
 if(ENABLE_SIM_MODE AND ENABLE_TALOS_MODE)
   message(FATAL_ERROR "ENABLE_SIM_MODE and ENABLE_TALOS_MODE are mutually exclusive")
 endif()
@@ -55,6 +56,19 @@ if(ENABLE_SIM_MODE)
 endif()
 if(ENABLE_TALOS_MODE)
   target_compile_definitions(standard PRIVATE ENABLE_TALOS_MODE)
+endif()
+
+# Optional Foxglove visualization: link the Foxglove C++ SDK only into `standard`.
+if(ENABLE_FOXGLOVE)
+  if(NOT ENABLE_TALOS_MODE)
+    message(FATAL_ERROR "ENABLE_FOXGLOVE requires ENABLE_TALOS_MODE")
+  endif()
+  find_package(foxglove-sdk CONFIG REQUIRED
+    HINTS "${CMAKE_SOURCE_DIR}/third_party/foxglove")
+  foxglove_sdk_add_cpp_library(foxglove_cpp TYPE STATIC)
+  target_sources(standard PRIVATE tools/foxglove_publisher.cpp)
+  target_compile_definitions(standard PRIVATE ENABLE_FOXGLOVE)
+  target_link_libraries(standard foxglove_cpp)
 endif()
 
 target_link_libraries(mt_standard ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)

@@ -1,6 +1,6 @@
 #include <fmt/format.h>
 
-#include "io/gimbal/gimbal.hpp"
+#include "io/cboard.hpp"
 #include "tools/exiter.hpp"
 #include "tools/img_tools.hpp"
 #include "tools/logger.hpp"
@@ -31,34 +31,25 @@ int main(int argc, char * argv[])
 
   // 初始化云台
   io::CBoard cboard(config_path);
-  io::VisionToGimbal plan;
   auto last_t = std::chrono::steady_clock::now();
-  plan.yaw = 0;
-  plan.yaw_vel = 0;
-  plan.yaw_acc = 0;
-  plan.pitch = 0;
-  plan.pitch_vel = 0;
-  plan.pitch_acc = 0;
+  bool fire = false;
 
   while (!exiter.exit()) {
     auto now = std::chrono::steady_clock::now();
-    auto gs = gimbal.state();
     if(tools::delta_time(now, last_t) > 1.600) {
-        plan.mode = 2;
+        fire = true;
         tools::logger()->debug("fire!");
         last_t = now;
-    } else plan.mode = 1;
+    } else fire = false;
 
 
-    gimbal.send(plan);
+    cboard.send(io::Command{true, fire, 0, 0});
 
     // -------------- 调试输出 --------------
 
     nlohmann::json data;
 
-    if (plan.mode != 0) {
-      data["shoot"] = plan.mode == 2 ? 1 : 0;
-    }
+    data["shoot"] = fire ? 1 : 0;
 
     plotter.plot(data);
 

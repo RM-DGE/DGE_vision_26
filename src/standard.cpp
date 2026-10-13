@@ -20,6 +20,9 @@
 #include "tools/math_tools.hpp"
 #include "tools/plotter.hpp"
 #include "tools/recorder.hpp"
+#ifdef ENABLE_FOXGLOVE
+#include "tools/foxglove_publisher.hpp"
+#endif
 
 using namespace std::chrono;
 
@@ -39,6 +42,15 @@ int main(int argc, char * argv[])
   tools::Exiter exiter;
   tools::Plotter plotter;
   // tools::Recorder recorder;
+
+#ifdef ENABLE_FOXGLOVE
+  std::unique_ptr<tools::FoxglovePublisher> foxglove;
+  try {
+    foxglove = std::make_unique<tools::FoxglovePublisher>("127.0.0.1", 8765, config_path);
+  } catch (const std::exception & e) {
+    std::cerr << "[FOXGLOVE] disabled: " << e.what() << std::endl;
+  }
+#endif
 
 #ifdef ENABLE_TALOS_MODE
   io::Talos talos;
@@ -135,6 +147,14 @@ int main(int argc, char * argv[])
         for(int i=0; i<4; i++) 
             cv::line(img, armor.points[i], armor.points[(i+1)%4], {0,255,0}, 2);
     }
+
+#ifdef ENABLE_FOXGLOVE
+    if (foxglove && !foxglove->publishFrame(
+                      img, command, target_distance, fps, talos,
+                      aimer.debug_aim_point.valid, aimer.debug_aim_point.xyza)) {
+      std::cerr << "[FOXGLOVE] publish failed" << std::endl;
+    }
+#endif
 
     // //红框
     // if (!targets.empty() && aimer.debug_aim_point.valid) {

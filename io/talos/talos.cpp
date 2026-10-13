@@ -10,6 +10,7 @@
 #include <fcntl.h>
 #include <stdexcept>
 #include <string>
+#include <vector>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -104,6 +105,40 @@ static_assert(offsetof(ShmMetaRegion, chassis_observation) == 1856);
 static_assert(offsetof(ShmMetaRegion, ground_truth) == 1984);
 static_assert(offsetof(ShmMetaRegion, runtime_state) == 3648);
 static_assert(sizeof(ShmMetaRegion) == kMetaSize);
+
+// Wire layout for GroundTruthBatch (mirrors Rust crates/talos-ipc/src/layout.rs).
+struct alignas(32) GroundTruthTargetWire
+{
+  std::uint64_t frame_seq;
+  std::uint64_t timestamp_ns;
+  std::uint8_t team;
+  std::uint8_t armor_label;
+  std::uint8_t is_outpost;
+  std::uint8_t padding1;
+  float position[3];
+  float vyaw;
+  float yaw;
+  std::uint8_t padding[24];
+};
+static_assert(sizeof(GroundTruthTargetWire) == 64);
+
+struct alignas(64) GroundTruthRuneWire
+{
+  std::uint8_t bytes[128];
+};
+static_assert(sizeof(GroundTruthRuneWire) == 128);
+
+struct alignas(64) GroundTruthBatchWire
+{
+  std::uint64_t frame_seq;
+  std::uint64_t timestamp_ns;
+  std::uint32_t target_count;
+  std::uint32_t rune_count;
+  GroundTruthTargetWire targets[16];
+  GroundTruthRuneWire runes[4];
+  std::uint8_t padding[64];
+};
+static_assert(sizeof(GroundTruthBatchWire) == 1664);
 
 std::uint8_t load_state(const std::uint8_t * state)
 {
@@ -205,6 +240,9 @@ struct Talos::Impl
   std::chrono::steady_clock::duration clock_offset{};
   bool clock_offset_initialized = false;
   std::uint64_t last_image_seq = 0;
+  Poses poses_{};
+  std::uint64_t last_image_timestamp_ns_ = 0;
+  bool have_poses_ = false;
 
   Impl()
   {
@@ -265,6 +303,24 @@ struct Talos::Impl
     gimbal_timestamp = frame_time;
     timestamp = frame_time;
     last_image_seq = image_meta.seq;
+
+    // Cache all four poses and the raw image timestamp as owned snapshots.
+    // PoseIndex order: 0=Gimbal, 1=Odom, 2=Muzzle, 3=Camera.
+    auto to_pose = [](const PoseMeta & p) {
+      Pose out;
+      out.position = Eigen::Vector3d(p.position[0], p.position[1], p.position[2]);
+      Eigen::Quaterniond q(
+        p.quaternion[0], p.quaternion[1], p.quaternion[2], p.quaternion[3]);
+      if (q.norm() > 0.0) q.normalize();
+      out.orientation = q;
+      return out;
+    };
+    poses_.gimbal = to_pose(poses[0]);
+    poses_.odom = to_pose(poses[1]);
+    poses_.muzzle = to_pose(poses[2]);
+    poses_.camera = to_pose(poses[3]);
+    have_poses_ = true;
+    last_image_timestamp_ns_ = image_meta.timestamp_ns;
     return true;
   }
 
@@ -316,5 +372,45 @@ void Talos::send_gimbal_command(
   (void)pitch_vel;
   (void)pitch_acc;
   impl_->publish_command(control, fire, yaw, pitch, distance_m);
+}
+
+bool Talos::read_poses(Poses & out) const
+{
+  if (!impl_->have_poses_) return false;
+  out = impl_->poses_;
+  return true;
+}
+
+std::vector<GroundTruthTarget> Talos::read_ground_truth() const
+{
+  const auto * batch =
+    reinterpret_cast<const GroundTruthBatchWire *>(impl_->meta->ground_truth);
+
+  GroundTruthBatchWire snapshot{};
+  for (int attempt = 0; attempt < 4; ++attempt) {
+    const std::uint64_t before = batch->frame_seq;
+    snapshot = *batch;
+    if (snapshot.frame_seq == before) break;
+  }
+
+  const std::uint32_t count = snapshot.target_count < 16 ? snapshot.target_count : 16;
+  std::vector<GroundTruthTarget> out;
+  out.reserve(count);
+  for (std::uint32_t i = 0; i < count; ++i) {
+    const auto & t = snapshot.targets[i];
+    GroundTruthTarget target;
+    target.position = Eigen::Vector3d(t.position[0], t.position[1], t.position[2]);
+    target.yaw = t.yaw;
+    target.vyaw = t.vyaw;
+    target.team = t.team;
+    target.armor_label = t.armor_label;
+    out.push_back(target);
+  }
+  return out;
+}
+
+std::uint64_t Talos::last_image_timestamp_ns() const
+{
+  return impl_->last_image_timestamp_ns_;
 }
 }

@@ -5,6 +5,7 @@
 #include <opencv2/opencv.hpp>
 #include <thread>
 
+#include "io/cboard.hpp"
 #include "io/gimbal/gimbal.hpp"
 #include "tools/exiter.hpp"
 #include "tools/logger.hpp"
@@ -34,6 +35,7 @@ int main(int argc, char * argv[])
   tools::Plotter plotter;
 
   io::CBoard cboard(config_path);
+  io::Gimbal gimbal(config_path);
   auto_aim::Planner planner(config_path);
   auto_aim::Target target(d, w, 0.2, 0.1);
 
@@ -43,11 +45,9 @@ int main(int argc, char * argv[])
     target.predict(0.01);
 
     auto gs = gimbal.state();
-    auto plan = planner.plan(target, gs.bullet_speed);
+    auto plan = planner.plan(target, cboard.bullet_speed);
 
-    gimbal.send(
-      plan.control, plan.fire, plan.yaw, plan.yaw_vel, plan.yaw_acc, plan.pitch, plan.pitch_vel,
-      plan.pitch_acc);
+    cboard.send(io::Command{plan.control, plan.fire, plan.yaw, plan.pitch});
 
     nlohmann::json data;
     data["t"] = tools::delta_time(std::chrono::steady_clock::now(), t0);
@@ -73,7 +73,7 @@ int main(int argc, char * argv[])
     std::this_thread::sleep_for(10ms);
   }
 
-  gimbal.send(false, false, 0, 0, 0, 0, 0, 0);
+  cboard.send(io::Command{false, false, 0, 0});
 
   return 0;
 }
