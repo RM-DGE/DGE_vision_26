@@ -159,7 +159,8 @@ int main(int argc, char * argv[])
 
     // Foxglove 调试曲线（Plot 面板可直接选字段）
     foxglove.publish_debug(
-      fps, command, targets, armors, aimer.debug_aim_point.valid, aimer.debug_aim_point.xyza);
+      fps, command, targets, armors, aimer.debug_aim_point.valid, aimer.debug_aim_point.xyza,
+      current_ypr);
 
     cv::imshow("Standard Test", img);
     if (cv::waitKey(1) == 'q') break;

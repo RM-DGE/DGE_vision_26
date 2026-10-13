@@ -13,19 +13,19 @@
     },
     "3D!dge_3d": {
       "cameraState": {
-        "distance": 4.5,
+        "distance": 1.6,
         "perspective": true,
-        "phi": 55,
+        "phi": 90,
         "target": [0, 0, 0],
         "targetOffset": [0, 0, 0],
         "targetOrientation": [0, 0, 0, 1],
-        "thetaOffset": -100,
-        "fovy": 40,
-        "near": 0.5,
+        "thetaOffset": 0,
+        "fovy": 55,
+        "near": 0.1,
         "far": 5000
       },
       "followMode": "follow-pose",
-      "followTf": "gimbal_link",
+      "followTf": "camera_optical_frame",
       "fixedFrame": "odom",
       "scene": {
         "backgroundColor": "#101118",

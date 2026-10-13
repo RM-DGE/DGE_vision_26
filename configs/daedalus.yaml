@@ -66,16 +66,37 @@ distort_coeffs: [0, 0, 0, 0, 0]
 
 R_gimbal2imubody: [1, 0, 0, 0, 1, 0, 0, 0, 1]
 
-# 仿真器相机相对云台的安装关系（Bevy 坐标系实测换算，误差影响极小）
+# ---- 仿真器相机外参（2026-10-13 实测修正，依据 probe2 共享内存数据 + 仿真器源码）----
+# 关键事实（均可实测复现）：
+#  1) Gimbal 通道四元数已由仿真器转成 DGE/ROS 轴系（talos/plugin.rs 的 to_ros_quat），
+#     DGE 侧不能再做轴变换（见下方 daedalus.imu_left/imu_right）。
+#  2) 发布的四元数基准是 gimbal_link = 原始云台 × Rx(-65°) × Rx(+90°) = 原始云台 × Rx(25°)
+#     （SHOT_DIRECTION 的 Rx(-65°) 取自 vehicle.glb；Rx(+90°) 来自 EulerRot::ZYX(0,0,π/2)，
+#      注意 ZYX 的参数顺序是 (z,y,x)，实际是绕 X 转 90°）。
+#     实测静止时 probe2 读到 w=0.9763 —— 正是 25° 抬头，可作校验。
+#  3) 发布的 POSE_CAMERA 位置 = 相机在“原始云台系”的杆臂 = (0.060, 0.002, 0.196)。
+# 本文件 R_camera2gimbal 的基准是 gimbal_link（相机光轴 z -> link +x，REP-105 约定），
+# 因此杆臂要换算到 link 系：t = Ry(+25°) · (0.060, 0.002, 0.196) ≈ (0.137, 0.002, 0.153)。
+# 旧值 (0.153, 0.137, 0.002) 是把该值按 (z,x,y) 轴序错排的结果，
+# 等效杆臂误差 ~0.2m（gimbal_link 系内）且随云台转动方向旋转 —— 这正是：
+#   · 锁定静止目标时云台偏向一边；
+#   · 移动/转动底盘时目标世界系绕圈 → EKF 发散（[Tracker] Target diverged!）→ 云台乱摆
+# 的根因。验证：锁定静止目标后缓慢转动云台，Foxglove /dge/scene 里装甲板方块应世界系原地不动。
 R_camera2gimbal: [0, 0, 1, -1, 0, 0, 0, -1, 0]
-t_camera2gimbal: [0.196, 0.06, 0.002]
+t_camera2gimbal: [0.1374, 0.0020, 0.1526]
 
 #####-----云台后端-----#####
 cboard_name: "daedalus"   # 走共享内存发云台指令（真机删掉此行用串口 CBoard）
 
-# Daedalus 适配参数：实测仿真器 yaw 正方向为向右转，与 DGE 相反，故 yaw_sign=-1（2026-10-11 标定）
+# Daedalus 适配参数。2026-10-13 实测修正：
+#  · imu_left/imu_right 必须为单位四元数：仿真器发布的四元数已是 DGE/ROS 轴系，
+#    DGE 再乘一次 (0.5,0.5,0.5,0.5) 会把 25° 抬头映射成 25° yaw
+#    （calib watch 打印的 V1 yaw=-25.0 就是此错），云台因此“一边偏”。
+#  · yaw_sign/pitch_sign 均为 +1：仿真器接受的是世界方位角（绕 +Z、+X 为前方）
+#    和“抬头为负”的 pitch（cmd.pitch_deg = -仰角），与 DGE aimer 输出同号。
+#    之前标出的 -1/-1 是在错误轴系下凑出来的，改正轴系后必须置 +1，否则云台反向。
 daedalus:
-  yaw_sign: -1
-  pitch_sign: -1
-  # imu_left: [0.5, 0.5, 0.5, 0.5]    # Bevy→DGE 轴变换四元数（一般不用动）
-  # imu_right: [0.5, 0.5, 0.5, 0.5]
+  yaw_sign: 1
+  pitch_sign: 1
+  imu_left: [1, 0, 0, 0]
+  imu_right: [1, 0, 0, 0]

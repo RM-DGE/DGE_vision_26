@@ -1272,7 +1272,8 @@ void FoxgloveServer::publish_tracker_markers(const std::list<auto_aim::Target> &
 
 void FoxgloveServer::publish_debug(
   double fps, const io::Command & command, const std::list<auto_aim::Target> & targets,
-  const std::list<auto_aim::Armor> & armors, bool aim_valid, const Eigen::Vector4d & aim_xyza)
+  const std::list<auto_aim::Armor> & armors, bool aim_valid, const Eigen::Vector4d & aim_xyza,
+  const Eigen::Vector3d & gimbal_ypr)
 {
   if (!impl_->debug_ch || !has_clients()) return;
 
@@ -1281,6 +1282,8 @@ void FoxgloveServer::publish_debug(
   dbg["fps"] = fps;
   dbg["yaw"] = command.yaw;
   dbg["pitch"] = command.pitch;
+  dbg["gimbal_yaw"] = gimbal_ypr[0];
+  dbg["gimbal_pitch"] = gimbal_ypr[1];
   dbg["shoot"] = command.shoot ? 1 : 0;
   dbg["armors"] = static_cast<int>(armors.size());
   dbg["targets"] = static_cast<int>(targets.size());

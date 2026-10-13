@@ -2,6 +2,9 @@
 
 本目录存放 Foxglove Studio 布局文件（Layout → Import layout 导入）。
 
+> 完整使用说明（连接、面板判读、调试工作流、FAQ）见
+> 完整使用说明见 simulation 工作区的《Foxglove使用说明.md》；本文件只讲布局文件本身与话题对照。
+
 | 文件 | 说明 |
 |---|---|
 | `dge_debug_layout.json` | **推荐日常调试布局**：识别图像 + 3D 场景（检测/跟踪/预测/瞄准）+ 三组调试曲线 + RawMessages |
@@ -28,6 +31,18 @@ Foxglove 连接方式：Studio → Open connection → **Foxglove WebSocket** �
 | `/dge/debug` | json | `fps` `yaw` `pitch` `shoot` `armors` `targets` `ekf[]` `aim_*` |
 
 坐标系：固定系 `odom`，3D 面板跟随 `gimbal_link`。
+
+## 3D 视角模式
+
+布局默认**第一人称（枪手视角）**：`followMode=follow-pose` + `followTf=camera_optical_frame`，视线沿相机光轴，目标保持在画面中央，无需手动转视角。在 3D 面板顶部下拉里可改：
+
+| 模式 | followTf | 效果 |
+|---|---|---|
+| 第一人称（默认） | `camera_optical_frame` | 沿光轴看出去，配 `/dge/scene`/`/dge/prediction` 看跟踪与预测最直观 |
+| 云台跟随 | `gimbal_link` | 相机绑定云台姿态，云台转视角跟着转（会甩） |
+| 只跟位置 | `follow-position` + `gimbal_link` | 相机随云台平移但朝向不变，观察整车运动不晕 |
+| 固定全景 | 不跟随（`followTf` 留空）+ 手动调 `distance`/`phi`/`thetaOffset` | 上帝视角看全场 |
+
 
 ## 布局三组曲线
 
