@@ -336,6 +336,48 @@ foxglove::Schema cdr_schema(const std::string & type_name, const std::string & t
     type_name, "ros2msg", reinterpret_cast<const std::byte *>(text.data()), text.size()};
 }
 
+foxglove::Schema json_schema(const std::string & name, const std::string & body)
+{
+  return foxglove::Schema{
+    name, "jsonschema", reinterpret_cast<const std::byte *>(body.data()), body.size()};
+}
+
+const std::string & debug_schema_body()
+{
+  static const std::string s = R"({"type":"object","properties":{
+"fps":{"type":"number"},"yaw":{"type":"number"},"pitch":{"type":"number"},
+"gimbal_yaw":{"type":"number"},"gimbal_pitch":{"type":"number"},
+"shoot":{"type":"number"},"armors":{"type":"number"},"targets":{"type":"number"},
+"aim_x":{"type":"number"},"aim_y":{"type":"number"},"aim_z":{"type":"number"},
+"aim_yaw":{"type":"number"},"ekf":{"type":"array","items":{"type":"number"}}}})";
+  return s;
+}
+
+const std::string & target_schema_body()
+{
+  static const std::string s = R"({"type":"object","properties":{
+"tracking":{"type":"boolean"},"id":{"type":"string"},"armors_num":{"type":"number"},
+"yaw":{"type":"number"},"v_yaw":{"type":"number"},
+"radius_1":{"type":"number"},"radius_2":{"type":"number"},"dz":{"type":"number"},
+"position":{"type":"object"},"velocity":{"type":"object"},"header":{"type":"object"}}})";
+  return s;
+}
+
+const std::string & info_schema_body()
+{
+  static const std::string s = R"({"type":"object","properties":{
+"position_diff":{"type":"number"},"yaw_diff":{"type":"number"},
+"yaw":{"type":"number"},"position":{"type":"object"},"header":{"type":"object"}}})";
+  return s;
+}
+
+const std::string & armors_schema_body()
+{
+  static const std::string s = R"({"type":"object","properties":{
+"header":{"type":"object"},"armors":{"type":"array","items":{"type":"object"}}}})";
+  return s;
+}
+
 void log_raw(std::optional<foxglove::RawChannel> & ch, const std::vector<std::byte> & data, uint64_t ns)
 {
   if (ch) ch->log(data.data(), data.size(), ns);
@@ -487,7 +529,8 @@ FoxglovePublisher::FoxglovePublisher(int port, std::string name, std::string con
     impl_->number_img_ch = std::move(*ch);
   if (auto ch = ImageAnnotationsChannel::create("/camera/annotations", impl_->context); ch)
     impl_->annotations_ch = std::move(*ch);
-  if (auto ch = foxglove::RawChannel::create("/dge/debug", "json", std::nullopt, impl_->context); ch)
+  if (auto ch = foxglove::RawChannel::create(
+        "/dge/debug", "json", json_schema("sp25.Debug", debug_schema_body()), impl_->context); ch)
     impl_->debug_ch = std::move(*ch);
   if (auto ch = CameraCalibrationChannel::create("/camera_info", impl_->context); ch)
     impl_->camera_info_ch = std::move(*ch);
@@ -498,20 +541,14 @@ FoxglovePublisher::FoxglovePublisher(int port, std::string name, std::string con
   if (auto ch = SceneUpdateChannel::create("/dge/prediction", impl_->context); ch)
     impl_->prediction_ch = std::move(*ch);
 
-  static const std::string object_schema_text = R"({"type":"object"})";
-  const auto json_schema = [](const char * n) {
-    return foxglove::Schema{
-      n, "jsonschema", reinterpret_cast<const std::byte *>(object_schema_text.data()),
-      object_schema_text.size()};
-  };
   if (auto ch = foxglove::RawChannel::create(
-        "/tracker/target", "json", json_schema("auto_aim_interfaces/msg/Target"),
+        "/tracker/target", "json", json_schema("auto_aim_interfaces/msg/Target", target_schema_body()),
         impl_->context); ch) impl_->rm_target_ch = std::move(*ch);
   if (auto ch = foxglove::RawChannel::create(
-        "/tracker/info", "json", json_schema("auto_aim_interfaces/msg/TrackerInfo"),
+        "/tracker/info", "json", json_schema("auto_aim_interfaces/msg/TrackerInfo", info_schema_body()),
         impl_->context); ch) impl_->rm_info_ch = std::move(*ch);
   if (auto ch = foxglove::RawChannel::create(
-        "/detector/armors", "json", json_schema("auto_aim_interfaces/msg/Armors"),
+        "/detector/armors", "json", json_schema("auto_aim_interfaces/msg/Armors", armors_schema_body()),
         impl_->context); ch) impl_->rm_armors_ch = std::move(*ch);
 
   const auto & ma_text = marker_array_schema();
