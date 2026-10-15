@@ -43,6 +43,7 @@ pitch_offset: -1.4 # degree 2
 comming_angle: 60 # degree
 leaving_angle: 20 # degree
 decision_speed: 8 # rad/s
+spin_threshold: 2 # rad/s 小陀螺判定阈值
 high_speed_delay_time: 0.030 # s
 low_speed_delay_time: 0.015 # s
 

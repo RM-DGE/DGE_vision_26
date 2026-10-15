@@ -43,6 +43,7 @@ pitch_offset: 0 # degree 仿真内外参为解析精确值，无需补偿；实�
 comming_angle: 60 # degree
 leaving_angle: 20 # degree
 decision_speed: 7 # rad/s
+spin_threshold: 2 # rad/s 小陀螺判定阈值
 high_speed_delay_time: 0.05 # s
 low_speed_delay_time: 0.05 # s planner use this value
 

@@ -70,6 +70,7 @@ leaving_angle: 20 # degree
 left_yaw_offset: -1
 right_yaw_offset: -0.6
 decision_speed: 10 # rad/s
+spin_threshold: 2 # rad/s 小陀螺判定阈值
 high_speed_delay_time: 0.026 # s
 low_speed_delay_time: 0.010 # s
 
