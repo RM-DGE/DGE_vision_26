@@ -15,6 +15,9 @@ public:
   explicit DaedalusCamera(const std::string & config_path);
 
   void read(cv::Mat & img, std::chrono::steady_clock::time_point & timestamp) override;
+
+  // 敌方真值（read() 时随帧刷新）；真机/未连接仿真器时返回空
+  std::vector<SimTargetTruth> ground_truth() override;
 };
 
 }  // namespace io

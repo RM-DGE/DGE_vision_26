@@ -116,6 +116,7 @@ int main(int argc, char * argv[])
     foxglove.publish_scene(
       armors, targets, aimer.debug_aim_point.valid, aimer.debug_aim_point.xyza, q);
     foxglove.publish_prediction(targets);
+    foxglove.publish_ground_truth(camera.ground_truth());
 
     // //红框
     // if (!targets.empty() && aimer.debug_aim_point.valid) {

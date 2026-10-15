@@ -28,7 +28,8 @@ Foxglove 连接方式：Studio → Open connection → **Foxglove WebSocket** �
 | `/tf` | `foxglove.FrameTransforms` | `odom → gimbal_link → camera_optical_frame` |
 | `/tracker/target` | json (`auto_aim_interfaces/msg/Target`) | 跟踪状态：`position` `velocity` `yaw` `v_yaw` `radius_1` `radius_2` `dz` |
 | `/tracker/info` | json (`auto_aim_interfaces/msg/TrackerInfo`) | 抖动指标：`position_diff`(m) `yaw_diff`(rad)，每帧差分 |
-| `/dge/debug` | json | `fps` `yaw` `pitch` `shoot` `armors` `targets` `ekf[]` `aim_*` |
+| `/dge/debug` | json | `fps` `yaw` `pitch` `gimbal_yaw` `gimbal_pitch` `shoot` `armors` `targets` `ekf[]` `aim_*`；EKF 一致性：`residual_yaw/pitch/distance/angle` `nis` `nees` `recent_nis_failures` |
+| `/sim/ground_truth` | json | 仿真器敌方真值（仅 daedalus 相机）：每目标 `x/y/z/yaw/vyaw/is_outpost`，坐标为仿真器世界系 |
 
 坐标系：固定系 `odom`，3D 面板跟随 `gimbal_link`。
 
@@ -44,11 +45,13 @@ Foxglove 连接方式：Studio → Open connection → **Foxglove WebSocket** �
 | 固定全景 | 不跟随（`followTf` 留空）+ 手动调 `distance`/`phi`/`thetaOffset` | 上帝视角看全场 |
 
 
-## 布局三组曲线
+## 布局五组曲线
 
 1. **跟踪抖动**：`/tracker/info.position_diff`、`/tracker/info.yaw_diff` —— EKF 状态帧间变化量，衡量跟踪平滑度（丢失后自动清零重新累计）。
 2. **目标状态**：`/tracker/target.v_yaw / radius_1 / radius_2 / dz` —— 小陀螺判断与半径估计。4 板目标 `radius_2 = r1 + l`（EKF 的 `x[8]+x[9]`）。
 3. **云台指令**：`/dge/debug.yaw / pitch / aim_x`。
+4. **EKF 一致性**：`/dge/debug.residual_yaw / residual_pitch / residual_distance`（新息）、`nis / nees`（越小越一致）、`recent_nis_failures`（窗口 NIS 超阈值比例，持续 ≥0.4 → tracker 判定 Bad Converge 丢目标）。稳态应能看到 `nis/nees` 小且平稳，换板/机动瞬间允许尖峰。
+5. **性能**：`/dge/debug.fps / armors / targets` —— 端到端帧率、识别板数、锁定目标数；做模型/参数 A/B 对比时以它为准。
 
 ## 修改布局时的注意事项
 

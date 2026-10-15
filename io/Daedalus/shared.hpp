@@ -44,6 +44,9 @@ struct DaedalusShared
   // 最近一次收到的云台位姿（Bevy 系原始四元数），位姿通道无新数据时沿用
   Eigen::Quaterniond last_gimbal_q = Eigen::Quaterniond::Identity();
 
+  // 最新一帧敌方真值（DaedalusCamera::read 时刷新；与主循环同线程，无需加锁）
+  ipc::GroundTruthBatch last_ground_truth{};
+
   // imu_at() 的游标状态（与 CBoard 的 data_ahead_/data_behind_ 等价）
   DaedalusImuSample last_imu_sample{
     Eigen::Quaterniond::Identity(), std::chrono::steady_clock::time_point::min()};

@@ -44,6 +44,8 @@ void DaedalusCamera::read(cv::Mat & img, std::chrono::steady_clock::time_point &
       timestamp = std::chrono::steady_clock::now();
 
       shared.push_imu(shared.last_gimbal_q);
+      // 随帧刷新敌方真值，供 EKF 对比（见 ground_truth()）
+      shared.last_ground_truth = shared.client->ground_truth();
       return;
     }
 
@@ -58,6 +60,20 @@ void DaedalusCamera::read(cv::Mat & img, std::chrono::steady_clock::time_point &
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
+}
+
+std::vector<SimTargetTruth> DaedalusCamera::ground_truth()
+{
+  auto & shared = DaedalusShared::instance("");
+  std::vector<SimTargetTruth> out;
+  const auto & batch = shared.last_ground_truth;
+  for (uint32_t i = 0;
+       i < batch.target_count && i < ipc::GROUND_TRUTH_MAX_TARGETS; ++i) {
+    const auto & t = batch.targets[i];
+    out.push_back(SimTargetTruth{
+      {t.position[0], t.position[1], t.position[2]}, t.yaw, t.vyaw, t.is_outpost != 0});
+  }
+  return out;
 }
 
 }  // namespace io

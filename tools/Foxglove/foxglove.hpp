@@ -8,6 +8,7 @@
 #include <Eigen/Dense>
 #include <opencv2/opencv.hpp>
 
+#include "io/camera.hpp"
 #include "io/command.hpp"
 #include "tasks/auto_aim/armor.hpp"
 #include "tasks/auto_aim/target.hpp"
@@ -58,6 +59,9 @@ public:
   // 每个图像帧：发布 /dge/prediction（跟踪目标未来一段时间的预测轨迹）
   void publish_prediction(
     const std::list<auto_aim::Target> & targets, double horizon_s = 0.6, double step_s = 0.02);
+
+  // 每个图像帧：发布 /sim/ground_truth（仿真器敌方真值，EKF 对比用；空向量跳过）
+  void publish_ground_truth(const std::vector<io::SimTargetTruth> & truths);
 
 private:
   struct Impl;

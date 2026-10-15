@@ -80,6 +80,12 @@ public:
     return reinterpret_cast<const ShmMetaRegion *>(meta_)->camera_info;
   }
 
+  // 读取最新真值批次（仿真器每帧直写普通内存，无三缓冲握手，直接拷贝）
+  GroundTruthBatch ground_truth() const
+  {
+    return reinterpret_cast<const ShmMetaRegion *>(meta_)->ground_truth;
+  }
+
   bool is_producer_alive(const uint64_t timeout_ns = 1'000'000'000) const
   {
     auto * meta = reinterpret_cast<const ShmMetaRegion *>(meta_);

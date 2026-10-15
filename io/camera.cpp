@@ -41,4 +41,6 @@ void Camera::read(cv::Mat & img, std::chrono::steady_clock::time_point & timesta
   camera_->read(img, timestamp);
 }
 
+std::vector<SimTargetTruth> Camera::ground_truth() { return camera_->ground_truth(); }
+
 }  // namespace io

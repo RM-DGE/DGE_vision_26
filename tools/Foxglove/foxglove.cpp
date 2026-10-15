@@ -434,6 +434,7 @@ struct FoxgloveServer::Impl
   std::optional<foxglove::RawChannel> detector_marker_ch;  // /detector/marker (cdr MarkerArray)
   std::optional<foxglove::RawChannel> tracker_marker_ch;   // /tracker/marker (cdr MarkerArray)
   std::optional<foxglove::RawChannel> aiming_point_ch;     // /aiming_point (cdr PointStamped)
+  std::optional<foxglove::RawChannel> gt_ch;               // /sim/ground_truth (json)
   std::vector<foxglove::Parameter> parameters;             // Parameters 面板
 
   uint64_t last_image_ns = 0;
@@ -587,6 +588,10 @@ FoxgloveServer::FoxgloveServer(int port, std::string name) : impl_(std::make_uni
   if (auto ch = foxglove::RawChannel::create(
         "/aiming_point", "cdr", cdr_schema("geometry_msgs/msg/PointStamped", ps_text),
         impl_->context); ch) impl_->aiming_point_ch = std::move(*ch);
+
+  if (auto ch = foxglove::RawChannel::create(
+        "/sim/ground_truth", "json", json_schema("dge.sim.GroundTruth"), impl_->context); ch)
+    impl_->gt_ch = std::move(*ch);
 
   logger()->info("foxglove: WebSocket server on ws://0.0.0.0:{}", port);
 }
@@ -958,6 +963,26 @@ void FoxgloveServer::publish_prediction(
   impl_->prediction_ch->log(update, ns);
 }
 
+void FoxgloveServer::publish_ground_truth(const std::vector<io::SimTargetTruth> & truths)
+{
+  if (!impl_->gt_ch || !has_clients() || truths.empty()) return;
+
+  const uint64_t ns = now_ns();
+  nlohmann::json msg = {{"targets", nlohmann::json::array()}};
+  for (const auto & t : truths) {
+    msg["targets"].push_back({
+      {"x", t.position[0]},
+      {"y", t.position[1]},
+      {"z", t.position[2]},
+      {"yaw", t.yaw},
+      {"vyaw", t.vyaw},
+      {"is_outpost", t.is_outpost},
+    });
+  }
+  const auto data = msg.dump();
+  impl_->gt_ch->log(reinterpret_cast<const std::byte *>(data.data()), data.size(), ns);
+}
+
 void FoxgloveServer::publish_image(const cv::Mat & bgr, int quality)
 {
   if (bgr.empty() || !impl_->image_ch) return;
@@ -1290,6 +1315,23 @@ void FoxgloveServer::publish_debug(
   if (!targets.empty()) {
     auto x = targets.front().ekf_x();
     dbg["ekf"] = std::vector<double>(x.data(), x.data() + x.size());
+
+    // EKF 一致性指标（卡方检验，见 tools/extended_kalman_filter.cpp）：
+    //   residual_*：新息（观测-预测）的 yaw/pitch/距离/角度分量
+    //   nis/nees  ：归一化新息平方 / 归一化误差平方（越小越一致）
+    //   recent_nis_failures：滑动窗口内 NIS 超阈值比例（≥0.4 时 tracker 判定 Bad Converge）
+    const auto & ekf_data = targets.front().ekf().data;
+    const auto ekf_get = [&ekf_data](const std::string & key) {
+      auto it = ekf_data.find(key);
+      return it == ekf_data.end() ? 0.0 : it->second;
+    };
+    dbg["residual_yaw"] = ekf_get("residual_yaw");
+    dbg["residual_pitch"] = ekf_get("residual_pitch");
+    dbg["residual_distance"] = ekf_get("residual_distance");
+    dbg["residual_angle"] = ekf_get("residual_angle");
+    dbg["nis"] = ekf_get("nis");
+    dbg["nees"] = ekf_get("nees");
+    dbg["recent_nis_failures"] = ekf_get("recent_nis_failures");
   }
   if (aim_valid) {
     dbg["aim_x"] = aim_xyza[0];

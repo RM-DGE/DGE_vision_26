@@ -105,6 +105,7 @@
       "title": "目标状态（v_yaw / 半径 / dz）",
       "paths": [
         { "value": "/tracker/target.v_yaw", "enabled": true, "color": "#00e5ff", "timestampMethod": "receiveTime" },
+        { "value": "/sim/ground_truth.targets[0].vyaw", "enabled": true, "color": "#ffffff", "timestampMethod": "receiveTime" },
         { "value": "/tracker/target.radius_1", "enabled": true, "color": "#fb923c", "timestampMethod": "receiveTime" },
         { "value": "/tracker/target.radius_2", "enabled": true, "color": "#a78bfa", "timestampMethod": "receiveTime" },
         { "value": "/tracker/target.dz", "enabled": true, "color": "#4ade80", "timestampMethod": "receiveTime" }
@@ -131,6 +132,43 @@
       "showLegend": true,
       "legendDisplay": "floating",
       "showPlotValuesInLegend": false,
+      "isSynced": true,
+      "xAxisVal": "timestamp",
+      "sidebarDimension": 240,
+      "followingViewWidth": 10
+    },
+    "Plot!dge_ekf": {
+      "title": "EKF 一致性（残差 / NIS / NEES）",
+      "paths": [
+        { "value": "/dge/debug.residual_yaw", "enabled": true, "color": "#f87171", "timestampMethod": "receiveTime" },
+        { "value": "/dge/debug.residual_pitch", "enabled": true, "color": "#38bdf8", "timestampMethod": "receiveTime" },
+        { "value": "/dge/debug.residual_distance", "enabled": true, "color": "#fbbf24", "timestampMethod": "receiveTime" },
+        { "value": "/dge/debug.nis", "enabled": true, "color": "#a78bfa", "timestampMethod": "receiveTime" },
+        { "value": "/dge/debug.nees", "enabled": true, "color": "#34d399", "timestampMethod": "receiveTime" },
+        { "value": "/dge/debug.recent_nis_failures", "enabled": true, "color": "#f472b6", "timestampMethod": "receiveTime" }
+      ],
+      "showXAxisLabels": true,
+      "showYAxisLabels": true,
+      "showLegend": true,
+      "legendDisplay": "floating",
+      "showPlotValuesInLegend": true,
+      "isSynced": true,
+      "xAxisVal": "timestamp",
+      "sidebarDimension": 240,
+      "followingViewWidth": 10
+    },
+    "Plot!dge_perf": {
+      "title": "性能（FPS / 检测数 / 目标数）",
+      "paths": [
+        { "value": "/dge/debug.fps", "enabled": true, "color": "#ffffff", "timestampMethod": "receiveTime" },
+        { "value": "/dge/debug.armors", "enabled": true, "color": "#00e5ff", "timestampMethod": "receiveTime" },
+        { "value": "/dge/debug.targets", "enabled": true, "color": "#fb923c", "timestampMethod": "receiveTime" }
+      ],
+      "showXAxisLabels": true,
+      "showYAxisLabels": true,
+      "showLegend": true,
+      "legendDisplay": "floating",
+      "showPlotValuesInLegend": true,
       "isSynced": true,
       "xAxisVal": "timestamp",
       "sidebarDimension": 240,
@@ -178,13 +216,23 @@
     "second": {
       "direction": "column",
       "first": {
-        "first": "Plot!dge_quality",
-        "second": "Plot!dge_target",
-        "direction": "row",
-        "splitPercentage": 50
+        "first": {
+          "first": "Plot!dge_quality",
+          "second": "Plot!dge_target",
+          "direction": "row",
+          "splitPercentage": 50
+        },
+        "second": "Plot!dge_perf",
+        "direction": "column",
+        "splitPercentage": 62
       },
       "second": {
-        "first": "Plot!dge_aim",
+        "first": {
+          "first": "Plot!dge_aim",
+          "second": "Plot!dge_ekf",
+          "direction": "column",
+          "splitPercentage": 50
+        },
         "second": {
           "first": "ImageViewPanel!dge_number",
           "second": {
