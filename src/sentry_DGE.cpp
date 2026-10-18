@@ -23,7 +23,8 @@
  *   - 配置中需要提供 camera_matrix、R_camera2gimbal、t_camera2gimbal、
  *     fov_h/fov_v、new_fov_h/new_fov_v、mode，以及工业相机/USB 相机参数；
  *   - 真机使用 io::CBoard（串口），仿真时在 yaml 中写 cboard_name: daedalus；
- *   - USB 设备名当前写死为 video0/video2，按实际设备修改。
+ *   - USB 设备名当前写死为 video2/video4（两路外接相机），不使用内置摄像头；
+ *     按实际设备修改。
  */
 
 #include <fmt/core.h>
@@ -46,6 +47,7 @@
 #include "tasks/auto_aim/yolo.hpp"
 #include "tasks/omniperception/decider.hpp"
 #include "tasks/omniperception/perceptron.hpp"
+#include "tools/Foxglove/foxglove.hpp"
 #include "tools/exiter.hpp"
 #include "tools/img_tools.hpp"
 #include "tools/logger.hpp"
@@ -205,6 +207,13 @@ int main(int argc, char * argv[])
 
   tools::Exiter exiter;
 
+  // 图像-IMU 时间补偿：真机需要按实际链路延迟调整，仿真默认 1 ms
+  double imu_delay_ms = 1.0;
+  {
+    auto yaml = YAML::LoadFile(config_path);
+    if (yaml["imu_delay_ms"]) imu_delay_ms = yaml["imu_delay_ms"].as<double>();
+  }
+
   // 真机使用 CBoard（串口），仿真使用 DaedalusCBoard（共享内存）
   std::unique_ptr<io::CBoardBase> cboard_ptr;
   {
@@ -221,8 +230,10 @@ int main(int argc, char * argv[])
   io::Camera camera(config_path);
 
   // 两路 USB：并行全向感知
-  io::USBCamera usbcam1("video0", config_path);
-  io::USBCamera usbcam2("video2", config_path);
+  // video0/video1 是电脑内置摄像头，这里不使用；
+  // 两路外接 RYS USB 相机当前对应 video2 和 video4。
+  io::USBCamera usbcam1("video2", config_path);
+  io::USBCamera usbcam2("video4", config_path);
 
   // USBCamera 默认根据 sharpness 判断左右，这里显式指定，避免硬件差异
   usbcam1.device_name = "left";
@@ -239,8 +250,14 @@ int main(int argc, char * argv[])
   omniperception::Decider decider(config_path);
   omniperception::Perceptron perceptron(&usbcam1, &usbcam2, config_path);
 
+  // Foxglove：主相机图像、识别框、TF、3D 场景和调试曲线
+  tools::FoxgloveServer foxglove(8765);
+  foxglove.configure_camera(config_path);
+
   cv::Mat img;
   std::chrono::steady_clock::time_point timestamp;
+  auto last_time = std::chrono::steady_clock::now();
+  double fps = 0.0;
 
   while (!exiter.exit()) {
     // 1. 工业相机取图
@@ -251,10 +268,17 @@ int main(int argc, char * argv[])
     }
 
     // 2. 取图像时刻的云台姿态
-    Eigen::Quaterniond q = cboard.imu_at(timestamp - 1ms);
+    Eigen::Quaterniond q = cboard.imu_at(
+      timestamp - std::chrono::microseconds(static_cast<int>(imu_delay_ms * 1000)));
     solver.set_R_gimbal2world(q);
 
     Eigen::Vector3d gimbal_pos = tools::eulers(solver.R_gimbal2world(), 2, 1, 0);
+
+    // 帧率统计，供 Foxglove 调试曲线使用
+    auto now = std::chrono::steady_clock::now();
+    auto dt = tools::delta_time(now, last_time);
+    last_time = now;
+    if (dt > 1e-6) fps = 1.0 / dt;
 
     /// 自瞄核心逻辑
     auto armors = yolo.detect(img);
@@ -298,6 +322,23 @@ int main(int argc, char * argv[])
 
     /// 下发云台/发射指令
     cboard.send(command);
+
+    /// Foxglove：图像、识别框、TF、3D 场景和调试曲线
+    const bool aim_valid = aimer.debug_aim_point.valid;
+    const Eigen::Vector4d aim_xyza =
+      aim_valid ? aimer.debug_aim_point.xyza : Eigen::Vector4d::Zero();
+
+    foxglove.publish_image(img);
+    foxglove.publish_annotations(armors);
+    foxglove.publish_number_image(armors);
+    foxglove.publish_rmvision(armors, targets, aim_xyza);
+    foxglove.publish_detector_markers(armors);
+    foxglove.publish_tracker_markers(targets);
+    foxglove.publish_tf(q);
+    foxglove.publish_scene(armors, targets, aim_valid, aim_xyza, q);
+    foxglove.publish_prediction(targets);
+    foxglove.publish_ground_truth(camera.ground_truth());
+    foxglove.publish_debug(fps, command, targets, armors, aim_valid, aim_xyza, gimbal_pos);
 
     /// 可视化
     if (display) {

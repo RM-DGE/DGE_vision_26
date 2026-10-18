@@ -39,6 +39,9 @@ exposure_ms: 0.8
 gain: 16.9
 vid_pid: "2bdf:0001"
 
+# 图像时间戳相对 IMU 的时间补偿（ms），真机按实际链路延迟调整
+imu_delay_ms: 1.0
+
 #####-----传统方法参数-----#####
 threshold: 150
 max_angle_error: 45 # degree
@@ -96,5 +99,5 @@ R_camera2gimbal: [0.01928451708725664, 0.00012696140743255463, 0.999814028348028
 t_camera2gimbal: [0.13089617453251859, 0.0038468007459533785, 0.094139945222010288]
 
 #####-----cboard串口参数-----#####
-serial_device: "/dev/gimbal"
+serial_device: "/dev/ttyACM0"
 serial_baudrate: 115200
