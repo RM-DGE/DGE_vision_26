@@ -31,7 +31,7 @@ endif()
 # 创建目标 io
 add_library(io STATIC 
     hikrobot/hikrobot.cpp
-    # usbcamera/usbcamera.cpp  
+    usbcamera/usbcamera.cpp
     camera.cpp
     cboard.cpp
     Daedalus/daedalus_camera.cpp

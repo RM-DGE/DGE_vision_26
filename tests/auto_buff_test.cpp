@@ -14,7 +14,7 @@
  *
  * 使用方法（先在 CMakeLists.txt 中取消 auto_buff_test 相关注释并重新编译）：
  *   cmake -B build && cmake --build build -j
- *   ./build/auto_buff_test assets/buff/buff -c configs/sentry.yaml
+ *   ./build/auto_buff_test assets/buff/buff -c=configs/sentry.yaml
  *   参数：-c 配置文件  -s 起始帧  -e 结束帧（0 表示到结尾）
  *
  * 操作：图像窗口按 q 退出；按空格暂停，暂停时再按 q 退出。

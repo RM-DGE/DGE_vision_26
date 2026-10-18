@@ -10,8 +10,8 @@
  *
  * 使用方法（先在 CMakeLists.txt 中取消 handeye_test 相关注释并重新编译）：
  *   cmake -B build && cmake --build build -j
- *   ./build/handeye_test -c configs/handeye.yaml         # 只计算并打印日志
- *   ./build/handeye_test -c configs/handeye.yaml -d      # 显示投影结果
+ *   ./build/handeye_test -c=configs/handeye.yaml         # 只计算并打印日志
+ *   ./build/handeye_test -c=configs/handeye.yaml -d      # 显示投影结果
  *
  * 操作：显示模式下按 q 或 Ctrl+C 退出。
  */
@@ -31,6 +31,8 @@
 #include "tools/exiter.hpp"
 #include "tools/img_tools.hpp"
 #include "tools/logger.hpp"
+
+using namespace std::chrono_literals;
 
 const std::string keys =
   "{help h usage ? |                     | 输出命令行参数说明}"

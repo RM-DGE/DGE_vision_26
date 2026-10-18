@@ -9,7 +9,7 @@
  *
  * 使用方法（先在 CMakeLists.txt 中取消 planner_test 相关注释并重新编译）：
  *   cmake -B build && cmake --build build -j
- *   ./build/planner_test configs/standard.yaml -d 3.0 -w 5.0
+ *   ./build/planner_test configs/standard.yaml -d=3.0 -w=5.0
  *
  * 参数：-d 目标距离(m)  -w 目标角速度(rad/s)
  * 注意：会驱动真实云台，请确保云台周围安全；按 q 或 Ctrl+C 退出并停止云台。

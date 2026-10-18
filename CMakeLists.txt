@@ -29,6 +29,7 @@ add_subdirectory(tasks/omniperception)
 
 ####################src###################
 add_executable(standard src/standard.cpp)
+add_executable(sentry_DGE src/sentry_DGE.cpp)
 # add_executable(mt_standard src/mt_standard.cpp)
 # add_executable(standard_mpc src/standard_mpc.cpp)
 # add_executable(auto_aim_debug_mpc src/auto_aim_debug_mpc.cpp)
@@ -38,6 +39,7 @@ add_executable(standard src/standard.cpp)
 
 
 target_link_libraries(standard ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
+target_link_libraries(sentry_DGE ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim omniperception tools io)
 # target_link_libraries(mt_standard ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim auto_buff tools io)
 # target_link_libraries(standard_mpc ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
 # target_link_libraries(standard_mpc ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim auto_buff tools io)
@@ -70,9 +72,10 @@ target_link_libraries(standard ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools i
 # add_executable(fire_test tests/fire_test.cpp)
 # add_executable(detector_video_test tests/detector_video_test.cpp)
 # add_executable(gimbal_response_test tests/gimbal_response_test.cpp)
-# add_executable(handeye_test tests/handeye_test.cpp)
+add_executable(handeye_test tests/handeye_test.cpp)
 # add_executable(dm_test tests/dm_test.cpp)
 # add_executable(minimum_vision_system tests/minimum_vision_system.cpp)
+add_executable(multi_usbcamera_test tests/multi_usbcamera_test.cpp)
 
 # target_link_libraries(auto_aim_test ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io auto_aim)
 # target_link_libraries(auto_buff_test ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_buff tools io)
@@ -83,9 +86,10 @@ target_link_libraries(standard ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools i
 # target_link_libraries(fire_test ${OpenCV_LIBS} fmt::fmt tools io)
 # target_link_libraries(detector_video_test ${OpenCV_LIBS} fmt::fmt yaml-cpp tools auto_aim)
 # target_link_libraries(gimbal_response_test ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io)
-# target_link_libraries(handeye_test ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io auto_aim)
+target_link_libraries(handeye_test ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io auto_aim)
 # target_link_libraries(dm_test ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io)
 # target_link_libraries(minimum_vision_system ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io auto_aim)
+target_link_libraries(multi_usbcamera_test ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io auto_aim)
 
 # add_executable(gimbal_test tests/gimbal_test.cpp)
 # target_link_libraries(gimbal_test ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)

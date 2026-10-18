@@ -9,9 +9,9 @@
  *
  * 使用方法（先在 CMakeLists.txt 中取消 gimbal_response_test 相关注释并重新编译）：
  *   cmake -B build && cmake --build build -j
- *   ./build/gimbal_response_test configs/sentry.yaml -a 8 -c 0.2 -m triangle_wave -x yaw
- *   ./build/gimbal_response_test configs/sentry.yaml -m step       -x pitch
- *   ./build/gimbal_response_test configs/sentry.yaml -m circle
+ *   ./build/gimbal_response_test configs/sentry.yaml -a=8 -c=0.2 -m=triangle_wave -x=yaw
+ *   ./build/gimbal_response_test configs/sentry.yaml -m=step -x=pitch
+ *   ./build/gimbal_response_test configs/sentry.yaml -m=circle
  *
  * 参数：-a delta角(度)  -c 周期(s)  -m 信号模式  -x 测试轴(yaw/pitch)
  * 操作：Ctrl+C 退出；数据通过 Plotter（Foxglove）查看。

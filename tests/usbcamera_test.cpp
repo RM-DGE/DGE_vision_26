@@ -9,7 +9,7 @@
  *
  * 使用方法（先在 CMakeLists.txt 中按需添加该测试目标并重新编译）：
  *   cmake -B build && cmake --build build -j
- *   ./build/usbcamera_test configs/sentry.yaml -n video0 -d
+ *   ./build/usbcamera_test configs/sentry.yaml -n=video0 -d
  *
  * 参数：-n 设备名（如 video0/video2）  -d 显示画面
  * 操作：显示模式下按 q 或 Ctrl+C 退出。

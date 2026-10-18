@@ -3,7 +3,7 @@
  * @brief 多相机同时取图测试：两路 USB 相机 + 一路主相机
  *
  * 测试内容：
- *   1. 分别打开 /dev/video0、/dev/video2 两个 USB 相机以及 configs/camera.yaml 中的主相机；
+ *   1. 分别打开 /dev/video0、/dev/video2 两个 USB 相机以及配置文件中 camera_name 指定的主相机；
  *   2. 顺序读取三路图像，统计整体循环的 fps；
  *   3. 可选 -d/--display 同屏显示三路画面，检查设备索引与画面是否正确。
  *
@@ -12,7 +12,7 @@
  *   ./build/multi_usbcamera_test configs/sentry.yaml -d
  *
  * 注意：设备名 "video0"/"video2" 写死在代码中，若实际设备不同请修改；
- *      主相机配置文件固定为 configs/camera.yaml。按 q 或 Ctrl+C 退出。
+ *      主相机使用命令行传入的配置文件。按 q 或 Ctrl+C 退出。
  */
 
 #include <opencv2/opencv.hpp>
@@ -45,7 +45,7 @@ int main(int argc, char * argv[])
 
   io::USBCamera usbcam1("video0", config_path);  // 第一路 USB 相机
   io::USBCamera usbcam2("video2", config_path);  // 第二路 USB 相机
-  io::Camera camera("configs/camera.yaml");      // 主相机
+  io::Camera camera(config_path);                // 主相机（配置中的 camera_name）
 
   cv::Mat img1, img2, img3;
   std::chrono::steady_clock::time_point timestamp;

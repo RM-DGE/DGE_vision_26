@@ -10,7 +10,7 @@
  *
  * 使用方法（先在 CMakeLists.txt 中取消 detector_video_test 相关注释并重新编译）：
  *   cmake -B build && cmake --build build -j
- *   ./build/detector_video_test assets/demo/demo.avi -c configs/sentry.yaml -s 0 -e 300
+ *   ./build/detector_video_test assets/demo/demo.avi -c=configs/sentry.yaml -s=0 -e=300
  *   ./build/detector_video_test assets/demo/demo.avi -t      # 使用传统视觉
  *
  * 参数：-c 配置文件  -s 起始帧  -e 结束帧（0 表示到结尾）  -t 使用传统方法

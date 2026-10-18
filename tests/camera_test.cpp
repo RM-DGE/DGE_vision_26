@@ -9,8 +9,8 @@
  *
  * 使用方法（先在 CMakeLists.txt 中取消 camera_test 相关注释并重新编译）：
  *   cmake -B build && cmake --build build -j
- *   ./build/camera_test -c configs/camera.yaml          # 只打印帧率
- *   ./build/camera_test -c configs/camera.yaml -d       # 同时显示画面
+ *   ./build/camera_test -c=configs/camera.yaml          # 只打印帧率
+ *   ./build/camera_test -c=configs/camera.yaml -d       # 同时显示画面
  *
  * 操作：显示模式下按 q 或 Ctrl+C 退出。
  */

@@ -101,7 +101,7 @@ std::tuple<omniperception::DetectionResult, std::list<Target>> Tracker::track(
 {
   omniperception::DetectionResult switch_target{std::list<Armor>(), t, 0, 0};
   omniperception::DetectionResult temp_target{std::list<Armor>(), t, 0, 0};
-  if (!detection_queue.empty()) {
+  if (!detection_queue.empty() && !detection_queue.front().armors.empty()) {
     temp_target = detection_queue.front();
   }
 

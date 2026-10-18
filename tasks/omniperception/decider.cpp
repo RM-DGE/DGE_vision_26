@@ -1,7 +1,23 @@
+/**
+ * @file decider.cpp
+ * @brief 多相机决策器的实现：轮询相机、过滤目标、换算云台角度
+ *
+ * 核心思路：
+ *   三路相机（左、右、后）固定安装在机器人上，各自有固定朝向。
+ *   每次 decide() 只读取其中一路，检测到装甲板后，用
+ *   “画面归一化坐标 -> 角度”的线性映射得到目标相对该相机的偏角，
+ *   再加上相机安装偏角和当前云台 yaw，得到云台需要转到的绝对角度。
+ *
+ * 注意：
+ *   - 相机安装角 62° / -62° / 170° 和部分 FOV 是写死的，换机器人必须修改；
+ *   - 本模块只输出瞄准指令（shoot=false），不负责开火和 EKF 跟踪。
+ */
+
 #include "decider.hpp"
 
 #include <yaml-cpp/yaml.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <opencv2/opencv.hpp>
 
@@ -13,15 +29,15 @@ namespace omniperception
 Decider::Decider(const std::string & config_path) : detector_(config_path), count_(0)
 {
   auto yaml = YAML::LoadFile(config_path);
-  img_width_ = yaml["image_width"].as<double>();
+  img_width_ = yaml["image_width"].as<double>();    // 原始图像尺寸
   img_height_ = yaml["image_height"].as<double>();
-  fov_h_ = yaml["fov_h"].as<double>();
-  fov_v_ = yaml["fov_v"].as<double>();
-  new_fov_h_ = yaml["new_fov_h"].as<double>();
+  fov_h_ = yaml["fov_h"].as<double>();              // 相机原始水平视场角
+  fov_v_ = yaml["fov_v"].as<double>();              // 相机原始垂直视场角
+  new_fov_h_ = yaml["new_fov_h"].as<double>();      // 裁剪/缩放后实际使用的视场角
   new_fov_v_ = yaml["new_fov_v"].as<double>();
-  enemy_color_ =
+  enemy_color_ =                                    // 只打配置指定的敌方颜色
     (yaml["enemy_color"].as<std::string>() == "red") ? auto_aim::Color::red : auto_aim::Color::blue;
-  mode_ = yaml["mode"].as<double>();
+  mode_ = yaml["mode"].as<double>();                // 1/2 选择不同优先级表
 }
 
 io::Command Decider::decide(
@@ -29,6 +45,7 @@ io::Command Decider::decide(
   io::USBCamera & usbcam2, io::Camera & back_camera)
 {
   Eigen::Vector2d delta_angle;
+  // count_ 轮询三路：0 -> 左 USB，1 -> 右 USB，2 -> 后置主相机
   io::USBCamera * cams[] = {&usbcam1, &usbcam2};
 
   cv::Mat usb_img;
@@ -36,15 +53,17 @@ io::Command Decider::decide(
   if (count_ < 0 || count_ > 2) {
     throw std::runtime_error("count_ out of valid range [0,2]");
   }
+  // 每次只取一路图像，三路轮流处理，避免同时推理拖慢帧率
   if (count_ == 2) {
     back_camera.read(usb_img, timestamp);
   } else {
     cams[count_]->read(usb_img, timestamp);
   }
   auto armors = yolo.detect(usb_img);
-  auto empty = armor_filter(armors);
+  auto empty = armor_filter(armors);  // true 表示过滤后没有可打目标
 
   if (!empty) {
+    // 根据当前相机名选择对应的安装偏角映射
     if (count_ == 2) {
       delta_angle = this->delta_angle(armors, "back");
     } else {
@@ -56,8 +75,9 @@ io::Command Decider::decide(
       (count_ == 2 ? "back" : cams[count_]->device_name), delta_angle[0], delta_angle[1],
       armors.size(), auto_aim::ARMOR_NAMES[armors.front().name]);
 
-    count_ = (count_ + 1) % 3;
+    count_ = (count_ + 1) % 3;  // 无论是否命中都切到下一路
 
+    // yaw 为绝对角度：当前 yaw + 目标相对相机的偏角；pitch 直接使用偏角
     return io::Command{
       true, false, tools::limit_rad(gimbal_pos[0] + delta_angle[0] / 57.3),
       tools::limit_rad(delta_angle[1] / 57.3)};
@@ -68,6 +88,7 @@ io::Command Decider::decide(
   return io::Command{false, false, 0, 0};
 }
 
+// 只用后置相机的版本：用于只装一个后置相机的简化配置
 io::Command Decider::decide(
   auto_aim::YOLO & yolo, const Eigen::Vector3d & gimbal_pos, io::Camera & back_cammera)
 {
@@ -83,6 +104,7 @@ io::Command Decider::decide(
       "[back camera] delta yaw:{:.2f},target pitch:{:.2f},armor number:{},armor name:{}",
       delta_angle[0], delta_angle[1], armors.size(), auto_aim::ARMOR_NAMES[armors.front().name]);
 
+    // 与三路版本相同：yaw 为云台绝对角，pitch 为偏角
     return io::Command{
       true, false, tools::limit_rad(gimbal_pos[0] + delta_angle[0] / 57.3),
       tools::limit_rad(delta_angle[1] / 57.3)};
@@ -91,6 +113,11 @@ io::Command Decider::decide(
   return io::Command{false, false, 0, 0};
 }
 
+// 使用 Perceptron 预先算好的结果：delta_yaw/delta_pitch 是相对相机光轴的角度（弧度）。
+// 注意：本函数只返回相对角，调用方需要再叠加当前云台 yaw。
+// 旧版 sentry_multithread.cpp 的用法是：
+//   command = decider.decide(detection_queue);
+//   command.yaw = tools::limit_rad(command.yaw + gimbal_pos[0]);
 io::Command Decider::decide(const std::vector<DetectionResult> & detection_queue)
 {
   if (detection_queue.empty()) {
@@ -106,29 +133,37 @@ io::Command Decider::decide(const std::vector<DetectionResult> & detection_queue
   return io::Command{true, false, dr.delta_yaw, dr.delta_pitch};
 };
 
+// 把检测框中心的归一化坐标（0~1）映射成相对相机光轴的角度。
+// 安装偏角写死为：左 +62°、右 -62°、后 +170°，换机器人必须重新标定。
 Eigen::Vector2d Decider::delta_angle(
   const std::list<auto_aim::Armor> & armors, const std::string & camera)
 {
   Eigen::Vector2d delta_angle;
   if (camera == "left") {
+    // 左相机：+62° 安装角；x 越大目标越靠右，因此 yaw 偏角减小
     delta_angle[0] = 62 + (new_fov_h_ / 2) - armors.front().center_norm.x * new_fov_h_;
+    // center_norm.y 向下为正，pitch 偏角相应向下
     delta_angle[1] = armors.front().center_norm.y * new_fov_v_ - new_fov_v_ / 2;
     return delta_angle;
   }
 
   else if (camera == "right") {
+    // 右相机：-62° 安装角，映射方式与左相机对称
     delta_angle[0] = -62 + (new_fov_h_ / 2) - armors.front().center_norm.x * new_fov_h_;
     delta_angle[1] = armors.front().center_norm.y * new_fov_v_ - new_fov_v_ / 2;
     return delta_angle;
   }
 
   else {
+    // 后置相机：安装角 170°，这里直接写死水平/垂直视场角 54.2°/44.5°
     delta_angle[0] = 170 + (54.2 / 2) - armors.front().center_norm.x * 54.2;
     delta_angle[1] = armors.front().center_norm.y * 44.5 - 44.5 / 2;
     return delta_angle;
   }
 }
 
+// 目标过滤：返回 true 表示过滤后没有可打目标。
+// 过滤条件依次为：非敌方颜色、5 号装甲板、前哨站、当前无敌目标。
 bool Decider::armor_filter(std::list<auto_aim::Armor> & armors)
 {
   if (armors.empty()) return true;
@@ -152,6 +187,7 @@ bool Decider::armor_filter(std::list<auto_aim::Armor> & armors)
   return armors.empty();
 }
 
+// 按配置的 mode 给每个装甲板写入优先级，供后续排序使用
 void Decider::set_priority(std::list<auto_aim::Armor> & armors)
 {
   if (armors.empty()) return;
@@ -165,6 +201,8 @@ void Decider::set_priority(std::list<auto_aim::Armor> & armors)
   }
 }
 
+// 对多路相机的检测结果统一做过滤、优先级排序：
+// 先按目标优先级对每帧内的装甲板排序，再按帧首装甲板的优先级对帧排序。
 void Decider::sort(std::vector<DetectionResult> & detection_queue)
 {
   if (detection_queue.empty()) return;
@@ -179,6 +217,16 @@ void Decider::sort(std::vector<DetectionResult> & detection_queue)
       [](const auto_aim::Armor & a, const auto_aim::Armor & b) { return a.priority < b.priority; });
   }
 
+  // 过滤后可能整帧没有可打目标，先移除空结果，
+  // 否则下面的排序比较器会访问空 list 的 front()，导致段错误。
+  detection_queue.erase(
+    std::remove_if(
+      detection_queue.begin(), detection_queue.end(),
+      [](const DetectionResult & dr) { return dr.armors.empty(); }),
+    detection_queue.end());
+
+  if (detection_queue.empty()) return;
+
   // 根据优先级对 DetectionResult 进行排序
   std::sort(
     detection_queue.begin(), detection_queue.end(),
@@ -187,6 +235,8 @@ void Decider::sort(std::vector<DetectionResult> & detection_queue)
     });
 }
 
+// 取跟踪目标对应装甲板在云台系下的位置，末尾附带“装甲板编号+1”。
+// 编号 +1 是为了和通信协议中的 1-based 编码保持一致。
 Eigen::Vector4d Decider::get_target_info(
   const std::list<auto_aim::Armor> & armors, const std::list<auto_aim::Target> & targets)
 {
@@ -205,6 +255,7 @@ Eigen::Vector4d Decider::get_target_info(
   return Eigen::Vector4d::Zero();
 }
 
+// 裁判系统/导航发来的 id 是 1-based，转成 ArmorName 时需要减 1
 void Decider::get_invincible_armor(const std::vector<int8_t> & invincible_enemy_ids)
 {
   invincible_armor_.clear();
@@ -217,6 +268,7 @@ void Decider::get_invincible_armor(const std::vector<int8_t> & invincible_enemy_
   }
 }
 
+// 只保留导航指定要打的目标编号；输入同样使用 1-based 编码
 void Decider::get_auto_aim_target(
   std::list<auto_aim::Armor> & armors, const std::vector<int8_t> & auto_aim_target)
 {

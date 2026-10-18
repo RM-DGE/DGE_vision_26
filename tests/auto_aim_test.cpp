@@ -13,7 +13,7 @@
  *
  * 使用方法（先在 CMakeLists.txt 中取消 auto_aim_test 相关注释并重新编译）：
  *   cmake -B build && cmake --build build -j
- *   ./build/auto_aim_test assets/demo/demo -c configs/demo.yaml -s 0 -e 500
+ *   ./build/auto_aim_test assets/demo/demo -c=configs/demo.yaml -s=0 -e=500
  *   参数：-c 配置文件  -s 起始帧  -e 结束帧（0 表示播放到结尾）
  *
  * 操作：图像窗口按 q 或 Ctrl+C 退出。
