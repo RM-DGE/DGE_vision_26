@@ -6,6 +6,7 @@
 #include <opencv2/core/eigen.hpp>
 
 #include "armor.hpp"
+#include "rmcs_ekf/rmcs_ekf.hpp"
 
 namespace auto_aim
 {
@@ -17,6 +18,10 @@ public:
   Eigen::Matrix3d R_gimbal2world() const;
 
   void set_R_gimbal2world(const Eigen::Quaterniond & q);
+
+  // Camera intrinsics + camera pose in the current world frame, for the
+  // rmcs pixel-domain EKF.
+  auto camera_feature() const -> rmcs_ekf::CameraFeature;
 
   void solve(Armor & armor) const;
 

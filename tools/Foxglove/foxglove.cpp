@@ -1,5 +1,6 @@
 #include "foxglove.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <chrono>
@@ -12,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include <Eigen/Eigenvalues>
 #include <fmt/format.h>
 
 #include <foxglove/channel.hpp>
@@ -133,10 +135,10 @@ ArrowPrimitive make_arrow(
   return arrow;
 }
 
-// 目标旋转中心（x[0],x[2],x[4]）+ 高度差中点
-Eigen::Vector3d target_center(const Eigen::VectorXd & x)
+// 目标旋转中心 + 上下排高度中点
+Eigen::Vector3d target_center(const rmcs_ekf::State & state)
 {
-  return Eigen::Vector3d(x[0], x[2], x[4] + x[10] / 2.0);
+  return Eigen::Vector3d(state.x, state.y, state.z + state.height_lateral / 2.0);
 }
 
 // 当前离云台最近的那块装甲板中心（瞄准器实际跟随的装甲板）
@@ -144,7 +146,7 @@ Eigen::Vector3d nearest_armor_xyz(const auto_aim::Target & target)
 {
   Eigen::Vector3d best = Eigen::Vector3d::Zero();
   double best_dist = 1e18;
-  for (const auto & xyza : target.armor_xyza_list()) {
+  for (const auto & xyza : target.xyza_list()) {
     const double dist = xyza.head<2>().norm();
     if (dist < best_dist) {
       best_dist = dist;
@@ -443,6 +445,10 @@ struct FoxgloveServer::Impl
   bool has_last_target = false;
   Eigen::Vector3d last_center = Eigen::Vector3d::Zero();
   double last_yaw = 0.0;
+
+  // 仿真真值位置与 odom 之间存在固定平移；首次锁定时对齐，之后只比较相对误差。
+  bool has_gt_offset = false;
+  Eigen::Vector2d gt_offset = Eigen::Vector2d::Zero();
 
   // 相机外参：gimbal_link -> camera_optical_frame
   Eigen::Vector3d camera_translation = Eigen::Vector3d::Zero();
@@ -748,9 +754,9 @@ void FoxgloveServer::publish_scene(
 
     if (!targets.empty()) {
       const auto & target = targets.front();
-      const auto x = target.ekf_x();
-      const auto xyza_list = target.armor_xyza_list();
-      const Eigen::Vector3d center = target_center(x);
+      const auto state = target.state();
+      const auto xyza_list = target.xyza_list();
+      const Eigen::Vector3d center = target_center(state);
 
       // 各装甲板位置（半透明立方体，带板面俯仰）
       for (const auto & xyza : xyza_list) {
@@ -769,10 +775,10 @@ void FoxgloveServer::publish_scene(
       entity.spheres.push_back(center_sphere);
 
       // 旋转圆环：r1（蓝）位于下排装甲板高度，r2（橙）位于上排高度
-      const double radius = x[8];
-      const double radius_2 = (xyza_list.size() >= 4) ? x[8] + x[9] : x[8];
-      const double r1_z = x[4];
-      const double r2_z = x[4] + x[10];
+      const double radius = state.radius_forward;
+      const double radius_2 = (xyza_list.size() >= 4) ? state.radius_lateral : state.radius_forward;
+      const double r1_z = state.z;
+      const double r2_z = state.z + state.height_lateral;
       constexpr int kSegments = 48;
       const auto add_ring = [&](double r, double z, const Color & color) {
         if (r <= 0.02) return;
@@ -783,12 +789,44 @@ void FoxgloveServer::publish_scene(
         for (int i = 0; i < kSegments; ++i) {
           const double a = i * 2.0 * M_PI / kSegments;
           ring.points.push_back(
-            Point3{x[0] + r * std::cos(a), x[2] + r * std::sin(a), z});
+            Point3{state.x + r * std::cos(a), state.y + r * std::sin(a), z});
         }
         entity.lines.push_back(ring);
       };
       add_ring(radius, r1_z, make_color(0.38, 0.65, 1.0, 0.6));
       if (radius_2 > radius + 0.005) add_ring(radius_2, r2_z, make_color(1.0, 0.57, 0.25, 0.6));
+
+      // EKF XY 协方差椭圆（1σ / 2σ），直接看滤波器的不确定性和一致性。
+      {
+        const auto diag = target.diagnostics();
+        Eigen::SelfAdjointEigenSolver<Eigen::Matrix2d> eig(diag.covariance_xy);
+        if (eig.info() == Eigen::Success) {
+          const auto & evalues = eig.eigenvalues();
+          const auto & evectors = eig.eigenvectors();
+          const double l1 = std::max(0.0, evalues[1]);
+          const double l2 = std::max(0.0, evalues[0]);
+          const Eigen::Vector2d v1 = evectors.col(1);
+          const Eigen::Vector2d v2 = evectors.col(0);
+
+          const auto add_cov_ellipse = [&](double nsigma, const Color & color) {
+            LinePrimitive ellipse;
+            ellipse.type = LinePrimitive::LineType::LINE_LOOP;
+            ellipse.thickness = 0.006;
+            ellipse.color = color;
+            constexpr int kEllipseSegments = 48;
+            for (int i = 0; i < kEllipseSegments; ++i) {
+              const double t = 2.0 * M_PI * i / kEllipseSegments;
+              const double a = std::min(2.0, nsigma * std::sqrt(l1)) * std::cos(t);
+              const double b = std::min(2.0, nsigma * std::sqrt(l2)) * std::sin(t);
+              const Eigen::Vector2d p = Eigen::Vector2d(state.x, state.y) + a * v1 + b * v2;
+              ellipse.points.push_back(Point3{p.x(), p.y(), center.z()});
+            }
+            entity.lines.push_back(std::move(ellipse));
+          };
+          add_cov_ellipse(2.0, make_color(1.0, 0.4, 1.0, 0.35));
+          add_cov_ellipse(1.0, make_color(1.0, 0.4, 1.0, 0.65));
+        }
+      }
 
       // 旋转中心到各估计装甲板的辐条（展示四板相对位置）
       for (const auto & xyza : xyza_list) {
@@ -802,14 +840,14 @@ void FoxgloveServer::publish_scene(
       }
 
       // 线速度箭头
-      const Eigen::Vector3d vel(x[1], x[3], x[5]);
+      const Eigen::Vector3d vel(state.vx, state.vy, state.vz);
       if (vel.norm() > 0.05) {
         entity.arrows.push_back(
           make_arrow(center, center + vel, 0.03, make_color(1.0, 0.9, 0.1, 1.0)));
       }
 
       // 角速度箭头（沿 +z，长度随 |v_yaw| 变化）
-      const double v_yaw = x[7];
+      const double v_yaw = state.rotation_speed;
       if (std::abs(v_yaw) > 0.2) {
         const double len = std::min(1.0, std::abs(v_yaw) * 0.1);
         const Eigen::Vector3d tip = center + Eigen::Vector3d(0.0, 0.0, std::copysign(len, v_yaw));
@@ -929,7 +967,7 @@ void FoxgloveServer::publish_prediction(
 
     const auto add_sample = [&](double frac) {
       const Eigen::Vector3d armor_xyz = nearest_armor_xyz(predictor);
-      const Eigen::Vector3d center = target_center(predictor.ekf_x());
+      const Eigen::Vector3d center = target_center(predictor.state());
       armor_path.points.push_back(Point3{armor_xyz.x(), armor_xyz.y(), armor_xyz.z()});
       center_path.points.push_back(Point3{center.x(), center.y(), center.z()});
     };
@@ -949,7 +987,7 @@ void FoxgloveServer::publish_prediction(
     for (int i = 1; i <= steps; i += ghost_stride) {
       ghost.predict(step_s * ghost_stride);
       const double frac = static_cast<double>(i) / steps;
-      for (const auto & xyza : ghost.armor_xyza_list()) {
+      for (const auto & xyza : ghost.xyza_list()) {
         CubePrimitive cube;
         cube.pose = make_pose(xyza[0], xyza[1], xyza[2], xyza[3]);
         cube.size = armor_size(ghost.armor_type);
@@ -1113,17 +1151,17 @@ void FoxgloveServer::publish_rmvision(
       {"radius_1", 0.0}, {"radius_2", 0.0}, {"dz", 0.0}};
     if (!targets.empty()) {
       const auto & t = targets.front();
-      const auto x = t.ekf_x();
-      const int armor_num = static_cast<int>(t.armor_xyza_list().size());
-      // 11 维 EKF：x[8]=r1，x[9]=l(r2-r1)，x[10]=dz；4 板目标 r2 = r1 + l
-      const double r1 = x[8];
-      const double r2 = (armor_num >= 4) ? x[8] + x[9] : x[8];
+      const auto state = t.state();
+      const int armor_num = static_cast<int>(t.armor_count());
+      const double r1 = state.radius_forward;
+      const double r2 = (armor_num >= 4) ? state.radius_lateral : state.radius_forward;
       msg["tracking"] = true;
       msg["armors_num"] = armor_num;
-      msg["position"] = {{"x", x[0]}, {"y", x[2]}, {"z", x[4]}};
-      msg["velocity"] = {{"x", x[1]}, {"y", x[3]}, {"z", x[5]}};
-      msg["yaw"] = x[6]; msg["v_yaw"] = x[7]; msg["id"] = auto_aim::ARMOR_NAMES.at(static_cast<size_t>(t.name));
-      msg["radius_1"] = r1; msg["radius_2"] = r2; msg["dz"] = x[10];
+      msg["position"] = {{"x", state.x}, {"y", state.y}, {"z", state.z}};
+      msg["velocity"] = {{"x", state.vx}, {"y", state.vy}, {"z", state.vz}};
+      msg["yaw"] = state.rotation_angle; msg["v_yaw"] = state.rotation_speed;
+      msg["id"] = auto_aim::ARMOR_NAMES.at(static_cast<size_t>(t.name));
+      msg["radius_1"] = r1; msg["radius_2"] = r2; msg["dz"] = state.height_lateral;
     }
     const auto data = msg.dump();
     impl_->rm_target_ch->log(reinterpret_cast<const std::byte *>(data.data()), data.size(), ns);
@@ -1132,14 +1170,14 @@ void FoxgloveServer::publish_rmvision(
     // 帧间抖动指标：中心位移与 yaw 变化量（跟踪丢失时清零）
     double position_diff = 0.0, yaw_diff = 0.0;
     if (!targets.empty()) {
-      const auto x = targets.front().ekf_x();
-      const Eigen::Vector3d center(x[0], x[2], x[4]);
+      const auto state = targets.front().state();
+      const Eigen::Vector3d center(state.x, state.y, state.z);
       if (impl_->has_last_target) {
         position_diff = (center - impl_->last_center).norm();
-        yaw_diff = tools::limit_rad(x[6] - impl_->last_yaw);
+        yaw_diff = tools::limit_rad(state.rotation_angle - impl_->last_yaw);
       }
       impl_->last_center = center;
-      impl_->last_yaw = x[6];
+      impl_->last_yaw = state.rotation_angle;
       impl_->has_last_target = true;
     } else {
       impl_->has_last_target = false;
@@ -1229,11 +1267,11 @@ void FoxgloveServer::publish_tracker_markers(const std::list<auto_aim::Target> &
   std::vector<RosMarker> markers;
   if (!targets.empty()) {
     const auto & t = targets.front();
-    const auto x = t.ekf_x();
-    const double xc = x[0], yc = x[2], za = x[4];
-    const double vx = x[1], vy = x[3], vz = x[5];
-    const double v_yaw = x[7];
-    const double dz = x[10];
+    const auto state = t.state();
+    const double xc = state.x, yc = state.y, za = state.z;
+    const double vx = state.vx, vy = state.vy, vz = state.vz;
+    const double v_yaw = state.rotation_speed;
+    const double dz = state.height_lateral;
     const Eigen::Vector3d center(xc, yc, za + dz / 2.0);
 
     {
@@ -1271,7 +1309,7 @@ void FoxgloveServer::publish_tracker_markers(const std::list<auto_aim::Target> &
     }
 
     const double width = (t.armor_type == auto_aim::big) ? 0.230 : 0.135;
-    const auto xyza_list = t.armor_xyza_list();
+    const auto xyza_list = t.xyza_list();
     for (size_t i = 0; i < xyza_list.size(); ++i) {
       RosMarker cube;
       cube.ns = "armors";
@@ -1298,7 +1336,7 @@ void FoxgloveServer::publish_tracker_markers(const std::list<auto_aim::Target> &
 void FoxgloveServer::publish_debug(
   double fps, const io::Command & command, const std::list<auto_aim::Target> & targets,
   const std::list<auto_aim::Armor> & armors, bool aim_valid, const Eigen::Vector4d & aim_xyza,
-  const Eigen::Vector3d & gimbal_ypr)
+  const Eigen::Vector3d & gimbal_ypr, const std::vector<io::SimTargetTruth> & truths)
 {
   if (!impl_->debug_ch || !has_clients()) return;
 
@@ -1313,25 +1351,99 @@ void FoxgloveServer::publish_debug(
   dbg["armors"] = static_cast<int>(armors.size());
   dbg["targets"] = static_cast<int>(targets.size());
   if (!targets.empty()) {
-    auto x = targets.front().ekf_x();
-    dbg["ekf"] = std::vector<double>(x.data(), x.data() + x.size());
+    const auto & target = targets.front();
+    const auto state = target.state();
 
-    // EKF 一致性指标（卡方检验，见 tools/extended_kalman_filter.cpp）：
-    //   residual_*：新息（观测-预测）的 yaw/pitch/距离/角度分量
-    //   nis/nees  ：归一化新息平方 / 归一化误差平方（越小越一致）
-    //   recent_nis_failures：滑动窗口内 NIS 超阈值比例（≥0.4 时 tracker 判定 Bad Converge）
-    const auto & ekf_data = targets.front().ekf().data;
-    const auto ekf_get = [&ekf_data](const std::string & key) {
-      auto it = ekf_data.find(key);
-      return it == ekf_data.end() ? 0.0 : it->second;
+    dbg["state"] = std::vector<double>{
+      state.x, state.y, state.z, state.vx, state.vy, state.vz,
+      state.rotation_angle, state.rotation_speed, state.radius_forward,
+      state.radius_lateral, state.height_lateral};
+
+    const auto diag = target.diagnostics();
+    const auto sigma = [](double variance) {
+      return std::sqrt(std::max(0.0, variance));
     };
-    dbg["residual_yaw"] = ekf_get("residual_yaw");
-    dbg["residual_pitch"] = ekf_get("residual_pitch");
-    dbg["residual_distance"] = ekf_get("residual_distance");
-    dbg["residual_angle"] = ekf_get("residual_angle");
-    dbg["nis"] = ekf_get("nis");
-    dbg["nees"] = ekf_get("nees");
-    dbg["recent_nis_failures"] = ekf_get("recent_nis_failures");
+
+    // 协方差对角线（与 state 同序）及 1σ，便于 Foxglove Plot 直接选字段。
+    dbg["cov"] = std::vector<double>{
+      diag.variance[0], diag.variance[1], diag.variance[2],
+      diag.variance[3], diag.variance[4], diag.variance[5],
+      diag.variance[6], diag.variance[7], diag.variance[8],
+      diag.variance[9], diag.variance[10]};
+    dbg["sigma_x"] = sigma(diag.variance[0]);
+    dbg["sigma_y"] = sigma(diag.variance[1]);
+    dbg["sigma_z"] = sigma(diag.variance[2]);
+    dbg["sigma_vx"] = sigma(diag.variance[3]);
+    dbg["sigma_vy"] = sigma(diag.variance[4]);
+    dbg["sigma_vz"] = sigma(diag.variance[5]);
+    dbg["sigma_a"] = sigma(diag.variance[6]);
+    dbg["sigma_w"] = sigma(diag.variance[7]);
+    dbg["sigma_rf"] = sigma(diag.variance[8]);
+    dbg["sigma_rl"] = sigma(diag.variance[9]);
+    dbg["sigma_hl"] = sigma(diag.variance[10]);
+
+    dbg["nis"] = diag.nis;
+    dbg["nis_threshold"] = diag.nis_threshold;
+    dbg["nis_gate_enabled"] = diag.nis_gate_enabled ? 1.0 : 0.0;
+    dbg["nis_gate_threshold"] = diag.nis_gate_threshold;
+    dbg["nis_fail_rate"] = diag.nis_fail_rate;
+    dbg["residual_norm"] = diag.residual_norm;
+    dbg["ekf_updates"] = static_cast<double>(diag.update_count);
+    dbg["ekf_frame_updates"] = static_cast<double>(diag.frame_update_count);
+    dbg["ekf_frame_rejected"] = static_cast<double>(diag.frame_rejected_count);
+    dbg["nis_rejected"] = static_cast<double>(diag.nis_rejected_count);
+    dbg["nis_consecutive_rejects"] = static_cast<double>(diag.nis_consecutive_rejects);
+    dbg["ekf_last_update_accepted"] = diag.last_update_accepted ? 1.0 : 0.0;
+    dbg["ekf_dt"] = diag.dt;
+    dbg["converged"] = diag.converged ? 1.0 : 0.0;
+    dbg["diverged"] = diag.diverged ? 1.0 : 0.0;
+    dbg["last_id"] = diag.last_observed_id;
+    dbg["uses_rmcs_ekf"] = target.uses_rmcs() ? 1.0 : 0.0;
+
+    // rmcs-style validation: compare against simulator ground truth.
+    // Position has a fixed odom offset; align it on first lock, then report
+    // relative error. yaw / vyaw are directly comparable.
+    if (!truths.empty()) {
+      const Eigen::Vector2d estimate(state.x, state.y);
+
+      const io::SimTargetTruth * reference = nullptr;
+      for (const auto & truth : truths) {
+        if (!truth.is_outpost) {
+          reference = &truth;
+          break;
+        }
+      }
+      if (!reference) return;
+
+      if (!impl_->has_gt_offset) {
+        impl_->gt_offset =
+          estimate - Eigen::Vector2d(reference->position[0], reference->position[1]);
+        impl_->has_gt_offset = true;
+      }
+
+      const io::SimTargetTruth * best = nullptr;
+      auto best_distance = std::numeric_limits<double>::max();
+
+      for (const auto & truth : truths) {
+        if (truth.is_outpost) continue;
+        const Eigen::Vector2d gt(truth.position[0], truth.position[1]);
+        const auto distance = (gt + impl_->gt_offset - estimate).squaredNorm();
+        if (distance < best_distance) {
+          best_distance = distance;
+          best = &truth;
+        }
+      }
+
+      if (best) {
+        dbg["center_err"] = std::sqrt(best_distance);
+        dbg["yaw_err"] = tools::limit_rad(state.rotation_angle - best->yaw);
+        dbg["vyaw_err"] = state.rotation_speed - best->vyaw;
+        dbg["gt_yaw"] = best->yaw;
+        dbg["gt_vyaw"] = best->vyaw;
+      }
+    }
+  } else {
+    impl_->has_gt_offset = false;
   }
   if (aim_valid) {
     dbg["aim_x"] = aim_xyza[0];

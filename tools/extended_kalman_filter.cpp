@@ -14,8 +14,11 @@ ExtendedKalmanFilter::ExtendedKalmanFilter(
   data["residual_distance"] = 0.0;
   data["residual_angle"] = 0.0;
   data["nis"] = 0.0;
-  data["nees"] = 0.0;
+  data["nis_threshold"] = nis_threshold;
   data["nis_fail"] = 0.0;
+  data["residual_norm"] = 0.0;
+  // NEES 需要真值，实车不可计算；保留字段仅为兼容旧日志。
+  data["nees"] = 0.0;
   data["nees_fail"] = 0.0;
   data["recent_nis_failures"] = 0.0;
 }
@@ -46,47 +49,60 @@ Eigen::VectorXd ExtendedKalmanFilter::update(
   std::function<Eigen::VectorXd(const Eigen::VectorXd &)> h,
   std::function<Eigen::VectorXd(const Eigen::VectorXd &, const Eigen::VectorXd &)> z_subtract)
 {
-  Eigen::VectorXd x_prior = x;
-  Eigen::MatrixXd K = P * H.transpose() * (H * P * H.transpose() + R).inverse();
+  const Eigen::VectorXd x_prior = x;
+  const Eigen::MatrixXd P_prior = P;
 
-  // Stable Compution of the Posterior Covariance
-  // https://github.com/rlabbe/Kalman-and-Bayesian-Filters-in-Python/blob/master/07-Kalman-Filter-Math.ipynb
-  P = (I - K * H) * P * (I - K * H).transpose() + K * R * K.transpose();
+  // 标准 EKF：
+  //   r = z - h(x_prior)
+  //   S = H P_prior H^T + R
+  //   K = P_prior H^T S^-1
+  // NIS 必须在状态/协方差更新之前用先验计算，否则不是新息一致性指标。
+  const Eigen::MatrixXd S = H * P_prior * H.transpose() + R;
+  const Eigen::VectorXd residual = z_subtract(z, h(x_prior));
 
-  x = x_add(x, K * z_subtract(z, h(x)));
-
-  /// 卡方检验
-  Eigen::VectorXd residual = z_subtract(z, h(x));
-  // 新增检验
-  Eigen::MatrixXd S = H * P * H.transpose() + R;
-  double nis = residual.transpose() * S.inverse() * residual;
-  double nees = (x - x_prior).transpose() * P.inverse() * (x - x_prior);
-
-  // 卡方检验阈值（自由度=4，取置信水平95%）
-  constexpr double nis_threshold = 0.711;
-  constexpr double nees_threshold = 0.711;
-
-  if (nis > nis_threshold) nis_count_++, data["nis_fail"] = 1;
-  if (nees > nees_threshold) nees_count_++, data["nees_fail"] = 1;
-  total_count_++;
-  last_nis = nis;
-
-  recent_nis_failures.push_back(nis > nis_threshold ? 1 : 0);
-
-  if (recent_nis_failures.size() > window_size) {
-    recent_nis_failures.pop_front();
+  const Eigen::LDLT<Eigen::MatrixXd> S_ldlt(S);
+  if (S_ldlt.info() != Eigen::Success) {
+    last_update_accepted = false;
+    return x;
   }
 
-  int recent_failures = std::accumulate(recent_nis_failures.begin(), recent_nis_failures.end(), 0);
-  double recent_rate = static_cast<double>(recent_failures) / recent_nis_failures.size();
+  const Eigen::MatrixXd K =
+    P_prior * H.transpose() * S_ldlt.solve(Eigen::MatrixXd::Identity(S.rows(), S.cols()));
+
+  // Stable computation of the posterior covariance (Joseph form).
+  P = (I - K * H) * P_prior * (I - K * H).transpose() + K * R * K.transpose();
+  x = x_add(x_prior, K * residual);
+
+  const double nis = residual.transpose() * S_ldlt.solve(residual);
+  last_nis = nis;
+  last_residual_norm = residual.norm();
+  last_update_accepted = nis <= nis_threshold;
+
+  if (!last_update_accepted) nis_count_++;
+  total_count_++;
+
+  recent_nis_failures.push_back(last_update_accepted ? 0 : 1);
+  while (recent_nis_failures.size() > window_size) recent_nis_failures.pop_front();
+
+  const int recent_failures =
+    std::accumulate(recent_nis_failures.begin(), recent_nis_failures.end(), 0);
+  const double recent_rate = recent_nis_failures.empty()
+                               ? 0.0
+                               : static_cast<double>(recent_failures) /
+                                   static_cast<double>(recent_nis_failures.size());
 
   data["residual_yaw"] = residual[0];
   data["residual_pitch"] = residual[1];
   data["residual_distance"] = residual[2];
   data["residual_angle"] = residual[3];
   data["nis"] = nis;
-  data["nees"] = nees;
+  data["nis_threshold"] = nis_threshold;
+  data["nis_fail"] = last_update_accepted ? 0.0 : 1.0;
+  data["residual_norm"] = last_residual_norm;
   data["recent_nis_failures"] = recent_rate;
+  // NEES 需要真值；实车/离线无真值时不要把它当作滤波器指标。
+  data["nees"] = 0.0;
+  data["nees_fail"] = 0.0;
 
   return x;
 }

@@ -34,7 +34,7 @@ Plan Planner::plan(Target target, double bullet_speed)
   // 1. Predict fly_time
   Eigen::Vector3d xyz;
   auto min_dist = 1e10;
-  for (auto & xyza : target.armor_xyza_list()) {
+  for (auto & xyza : target.xyza_list()) {
     auto dist = xyza.head<2>().norm();
     if (dist < min_dist) {
       min_dist = dist;
@@ -98,7 +98,7 @@ Plan Planner::plan(std::optional<Target> target, double bullet_speed)
   if (!target.has_value()) return {false};
 
   double delay_time =
-    std::abs(target->ekf_x()[7]) > decision_speed_ ? high_speed_delay_time_ : low_speed_delay_time_;
+    std::abs(target->state().rotation_speed) > decision_speed_ ? high_speed_delay_time_ : low_speed_delay_time_;
 
   auto future = std::chrono::steady_clock::now() + std::chrono::microseconds(int(delay_time * 1e6));
 
@@ -159,7 +159,7 @@ Eigen::Matrix<double, 2, 1> Planner::aim(const Target & target, double bullet_sp
   double yaw;
   auto min_dist = 1e10;
 
-  for (auto & xyza : target.armor_xyza_list()) {
+  for (auto & xyza : target.xyza_list()) {
     auto dist = xyza.head<2>().norm();
     if (dist < min_dist) {
       min_dist = dist;

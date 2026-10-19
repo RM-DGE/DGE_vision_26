@@ -42,7 +42,8 @@ public:
   void publish_debug(                                                   // /dge/debug
     double fps, const io::Command & command, const std::list<auto_aim::Target> & targets,
     const std::list<auto_aim::Armor> & armors, bool aim_valid, const Eigen::Vector4d & aim_xyza,
-    const Eigen::Vector3d & gimbal_ypr = Eigen::Vector3d::Zero());
+    const Eigen::Vector3d & gimbal_ypr = Eigen::Vector3d::Zero(),
+    const std::vector<io::SimTargetTruth> & truths = {});
 
   // 一次性：读取配置里的相机内参/外参，并发布 /camera_info
   void configure_camera(const std::string & config_path);

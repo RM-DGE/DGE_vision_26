@@ -165,7 +165,7 @@ void draw_main_view(
 
   if (!targets.empty()) {
     auto target = targets.front();
-    for (const auto & xyza : target.armor_xyza_list()) {
+    for (const auto & xyza : target.xyza_list()) {
       auto image_points =
         solver.reproject_armor(xyza.head(3), xyza[3], target.armor_type, target.name);
       tools::draw_points(canvas, image_points, {255, 255, 0});

@@ -1,0 +1,36 @@
+# 用法：
+#   1) 采集内参/手眼图片： ./build/capture configs/calibration.yaml -o=assets/img_with_q
+#   2) 内参：             ./build/calibrate_camera assets/img_with_q -c=configs/calibration.yaml
+#   3) 手眼：             ./build/calibrate_robotworld_handeye assets/img_with_q -c=configs/calibration.yaml
+#   4) 验证：             ./build/calibrate_validate assets/img_with_q -c=configs/calibration.yaml
+
+
+pattern_cols: 9
+pattern_rows: 6
+square_size_mm: 25.0
+
+#####-----机械安装先验-----#####
+# R_gimbal2imubody：gimbal 系 -> IMU body 系的旋转，必须按机械安装/CAD 填写。
+R_gimbal2imubody: [1, 0, 0, 0, 1, 0, 0, 0, 1]
+
+#####-----相机-----#####
+camera_name: "hikrobot"
+exposure_ms: 3.0
+gain: 10.0
+vid_pid: "2bdf:0001"
+
+#####-----CBoard 串口-----#####
+capture_imu: true
+serial_device: "/dev/ttyACM0"
+serial_baudrate: 115200
+
+#####-----相机内参-----#####
+camera_matrix: [1, 0, 0, 0, 1, 0, 0, 0, 1]
+distort_coeffs: [0, 0, 0, 0, 0]
+
+#####-----相机安装外参（手眼/机械测量结果）-----#####
+# R_camera2gimbal：OpenCV 相机系 -> gimbal 系（行优先 9 个数）。
+# t_camera2gimbal：相机光心在 gimbal 系下的平移，单位 m。
+# 机械测量给出 t 的初值；R 以棋盘格手眼结果为准。
+R_camera2gimbal: [1, 0, 0, 0, 1, 0, 0, 0, 1]
+t_camera2gimbal: [0, 0, 0]

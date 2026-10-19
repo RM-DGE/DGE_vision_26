@@ -50,17 +50,17 @@ target_link_libraries(sentry_DGE ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim omnip
 # target_link_libraries(sentry_debug ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim auto_buff tools io ${CERES_LIBRARIES})
 
 ##################calibration################
-# add_executable(capture calibration/capture.cpp)
-# add_executable(calibrate_camera calibration/calibrate_camera.cpp)
-# add_executable(calibrate_handeye calibration/calibrate_handeye.cpp)
-# add_executable(calibrate_robotworld_handeye calibration/calibrate_robotworld_handeye.cpp)
-# add_executable(split_video calibration/split_video.cpp)
+add_executable(capture calibration/capture.cpp)
+add_executable(calibrate_camera calibration/calibrate_camera.cpp)
+add_executable(calibrate_handeye calibration/calibrate_handeye.cpp)
+add_executable(calibrate_robotworld_handeye calibration/calibrate_robotworld_handeye.cpp)
+add_executable(calibrate_validate calibration/calibrate_validate.cpp)
 
-# target_link_libraries(capture ${OpenCV_LIBS} fmt::fmt tools io)
-# target_link_libraries(calibrate_camera ${OpenCV_LIBS} fmt::fmt yaml-cpp tools)
-# target_link_libraries(calibrate_handeye ${OpenCV_LIBS} fmt::fmt yaml-cpp tools)
-# target_link_libraries(calibrate_robotworld_handeye ${OpenCV_LIBS} fmt::fmt yaml-cpp tools)
-# target_link_libraries(split_video ${OpenCV_LIBS} fmt::fmt tools)
+target_link_libraries(capture ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io auto_aim)
+target_link_libraries(calibrate_camera ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io auto_aim)
+target_link_libraries(calibrate_handeye ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io auto_aim)
+target_link_libraries(calibrate_robotworld_handeye ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io auto_aim)
+target_link_libraries(calibrate_validate ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io auto_aim)
 
 ##################tests##################
 # add_executable(auto_aim_test tests/auto_aim_test.cpp)

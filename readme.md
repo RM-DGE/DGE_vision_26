@@ -162,6 +162,21 @@ IMU型号：使用C板内置BMI088作为IMU\
    `foxglove_layouts/dge_3d_layout.json` 即可看到 3D 场景。
    发布的 3D 话题、坐标系与布局说明见 `foxglove_layouts/README.md`。
 
+   **标定与 EKF 调试：**
+
+   - 标定教程（棋盘格 + 机械测量，参考 QD_Vision2026 的外参/自动 pitch 方法）：[`doc/标定程序.md`](doc/标定程序.md)
+   - EKF 可视化（协方差、NIS、真值误差、调参流程）：[`doc/EKF调试.md`](doc/EKF调试.md)
+   - 融合说明（同济 × rmcs 改了哪些东西）：[`doc/融合说明.md`](doc/融合说明.md)
+
+   标定快捷命令：
+
+   ```bash
+   ./build/capture configs/calibration.yaml -o=assets/img_with_q
+   ./build/calibrate_camera assets/img_with_q -c=configs/calibration.yaml
+   ./build/calibrate_robotworld_handeye assets/img_with_q -c=configs/calibration.yaml
+   ./build/calibrate_validate assets/img_with_q -c=configs/calibration.yaml
+   ```
+
 4. 注册自启：
     1. 确保已安装`screen`:
         ```
@@ -269,10 +284,16 @@ sp_vision_25
 │   ├── calibrate_camera.cpp             // 相机内参标定程序
 │   ├── calibrate_handeye.cpp            // 手眼标定程序
 │   ├── calibrate_robotworld_handeye.cpp // 手眼标定程序（同时计算标定板位置）
-│   └── capture.cpp                      // 相机标定数据采集程序
+│   ├── calibrate_validate.cpp           // 外参验收（世界系板位姿重复性）
+│   ├── chessboard.hpp                   // 棋盘格检测与 3D 角点
+│   └── capture.cpp                      // 相机标定数据采集程序
 ├── CMakeLists.txt // CMake配置文件
 ├── configs        // 每台机器人的YAML配置文件
 │   └── ...
+├── doc            // 标定 / EKF 调试 / 融合说明
+│   ├── 标定程序.md
+│   ├── EKF调试.md
+│   └── 融合说明.md
 ├── io             // 硬件抽象层，见3.4软件架构
 │   └── ...
 ├── src            // 应用层，见3.4软件架构

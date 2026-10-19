@@ -36,6 +36,17 @@ min_detect_count: 5 # 最小确认帧数
 max_temp_lost_count: 15 #最大暂存丢失帧数
 outpost_max_temp_lost_count: 75
 
+#####-----4板 rmcs 像素 EKF-----#####
+ekf:
+  noise_observation: 40.0
+  nis_threshold: 9.488
+  nis_window: 100
+  nis_gate_enabled: true
+  nis_gate_threshold: 13.277
+  nis_gate_warmup_updates: 10
+  nis_max_consecutive_rejects: 5
+  nis_reject_cov_inflation: 0.01
+
 #####-----aimer数-----#####
 yaw_offset: 2.5 # degree -2.5
 pitch_offset: 2.4 # degree 2

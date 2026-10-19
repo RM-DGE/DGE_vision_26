@@ -51,6 +51,35 @@ void Solver::set_R_gimbal2world(const Eigen::Quaterniond & q)
   R_gimbal2world_ = R_gimbal2imubody_.transpose() * R_imubody2imuabs * R_gimbal2imubody_;
 }
 
+auto Solver::camera_feature() const -> rmcs_ekf::CameraFeature
+{
+  rmcs_ekf::CameraFeature feature;
+
+  for (int row = 0; row < 3; ++row) {
+    for (int col = 0; col < 3; ++col) {
+      feature.camera_matrix[row][col] = camera_matrix_.at<double>(row, col);
+    }
+  }
+  for (int col = 0; col < 5; ++col) {
+    feature.distort_coeff[col] = distort_coeffs_.at<double>(0, col);
+  }
+
+  // rmcs' CameraFeature expects the ROS camera frame (x forward, y left, z up),
+  // while R_camera2gimbal_ maps the OpenCV camera frame (x right, y down,
+  // z forward) to the gimbal. Convert the optical axes to ROS axes first.
+  static const Eigen::Matrix3d kOpencvToRos{
+    { +0, +0, +1 },
+    { -1, +0, +0 },
+    { +0, -1, +0 },
+  };
+
+  const Eigen::Matrix3d r_world_camera_opencv = R_gimbal2world_ * R_camera2gimbal_;
+  feature.orientation =
+    Eigen::Quaterniond{ r_world_camera_opencv * kOpencvToRos.transpose() }.normalized();
+  feature.translation = R_gimbal2world_ * t_camera2gimbal_;
+  return feature;
+}
+
 //solvePnP（获得姿态）
 void Solver::solve(Armor & armor) const
 {

@@ -65,6 +65,20 @@ min_detect_count: 5
 max_temp_lost_count: 25
 outpost_max_temp_lost_count: 75
 
+#####-----4板 rmcs 像素 EKF-----#####
+# 真机检测角点噪声通常比仿真小；先用 rmcs 默认 40 px^2，再按 NIS/残差调。
+ekf:
+  noise_observation: 40.0
+  # 监控用：chi-square(4) 95%
+  nis_threshold: 9.488
+  nis_window: 100
+  # 门控用：chi-square(4) 99%，只拒绝明显离群的新息；前 10 帧不门控
+  nis_gate_enabled: true
+  nis_gate_threshold: 13.277
+  nis_gate_warmup_updates: 10
+  nis_max_consecutive_rejects: 5
+  nis_reject_cov_inflation: 0.01
+
 #####-----aimer参数-----#####
 yaw_offset: -0.8 # degree -2.5
 pitch_offset: -1  # degree 2

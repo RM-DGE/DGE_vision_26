@@ -38,10 +38,15 @@ public:
     std::function<Eigen::VectorXd(const Eigen::VectorXd &, const Eigen::VectorXd &)> z_subtract =
       [](const Eigen::VectorXd & a, const Eigen::VectorXd & b) { return a - b; });
 
-  std::map<std::string, double> data;  //卡方检验数据
-  std::deque<int> recent_nis_failures{0};
+  std::map<std::string, double> data;  // 卡方检验/新息数据
+  std::deque<int> recent_nis_failures{};
   size_t window_size = 100;
-  double last_nis;
+
+  // chi-square(4) 95% quantile = 9.488, 99% = 13.277
+  double nis_threshold = 9.488;
+  double last_nis = 0.0;
+  double last_residual_norm = 0.0;
+  bool last_update_accepted = true;
 
 private:
   Eigen::MatrixXd I;

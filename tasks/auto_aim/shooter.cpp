@@ -28,14 +28,14 @@ bool Shooter::shoot(
   }
 
   auto target = targets.front();
-  auto target_x = target.ekf_x()[0];
-  auto target_y = target.ekf_x()[2];
+  auto target_x = target.state().x;
+  auto target_y = target.state().y;
   
   // 计算目标距离
   double distance = std::sqrt(tools::square(target_x) + tools::square(target_y));
   
   // 获取目标的旋转角速度 (omega)
-  double omega = target.ekf_x()[7]; 
+  double omega = target.state().rotation_speed; 
   double abs_omega = std::abs(omega);
 
   // 1. 基础宽容度判定

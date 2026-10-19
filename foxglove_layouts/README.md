@@ -19,7 +19,7 @@ Foxglove 连接方式：Studio → Open connection → **Foxglove WebSocket** �
 | `/detector/result_img/compressed` | `foxglove.CompressedImage` | 带识别框的图像 |
 | `/detector/number_img` | `foxglove.CompressedImage` | 数字分类图案拼接图 |
 | `/camera/annotations` | `foxglove.ImageAnnotations` | 装甲板四点框叠加 |
-| `/dge/scene` | `foxglove.SceneUpdate` | 3D 实体：`detections` / `tracked_target`(估计装甲板+旋转中心+旋转圆+速度箭头) / `self`(云台+光轴) / `aiming_point` |
+| `/dge/scene` | `foxglove.SceneUpdate` | 3D 实体：`detections` / `tracked_target`(估计装甲板+旋转中心+旋转圆+速度箭头+**1σ/2σ XY 协方差椭圆**) / `self`(云台+光轴) / `aiming_point` |
 | `/dge/prediction` | `foxglove.SceneUpdate` | 目标未来约 0.6s 预测轨迹 + 幽灵装甲板 |
 | `/detector/marker` | `visualization_msgs/MarkerArray` (cdr) | 识别装甲板 CUBE + TEXT |
 | `/tracker/marker` | `visualization_msgs/MarkerArray` (cdr) | 跟踪目标 SPHERE + 速度/角速度 ARROW + 装甲板 CUBE |
@@ -28,7 +28,7 @@ Foxglove 连接方式：Studio → Open connection → **Foxglove WebSocket** �
 | `/tf` | `foxglove.FrameTransforms` | `odom → gimbal_link → camera_optical_frame` |
 | `/tracker/target` | json (`auto_aim_interfaces/msg/Target`) | 跟踪状态：`position` `velocity` `yaw` `v_yaw` `radius_1` `radius_2` `dz` |
 | `/tracker/info` | json (`auto_aim_interfaces/msg/TrackerInfo`) | 抖动指标：`position_diff`(m) `yaw_diff`(rad)，每帧差分 |
-| `/dge/debug` | json | `fps` `yaw` `pitch` `gimbal_yaw` `gimbal_pitch` `shoot` `armors` `targets` `ekf[]` `aim_*`；EKF 一致性：`residual_yaw/pitch/distance/angle` `nis` `nees` `recent_nis_failures` |
+| `/dge/debug` | json | `fps` `yaw` `pitch` `gimbal_yaw` `gimbal_pitch` `shoot` `armors` `targets` `state[11]` `aim_*`；EKF 一致性：`cov[11]` `sigma_*` `nis` `nis_threshold` `nis_fail_rate` `residual_norm` `ekf_updates` `ekf_frame_updates` `ekf_dt` `converged` `diverged` `uses_rmcs_ekf`；真值误差：`center_err` `yaw_err` `vyaw_err` |
 | `/sim/ground_truth` | json | 仿真器敌方真值（仅 daedalus 相机）：每目标 `x/y/z/yaw/vyaw/is_outpost`，坐标为仿真器世界系 |
 
 坐标系：固定系 `odom`，3D 面板跟随 `gimbal_link`。
@@ -50,7 +50,7 @@ Foxglove 连接方式：Studio → Open connection → **Foxglove WebSocket** �
 1. **跟踪抖动**：`/tracker/info.position_diff`、`/tracker/info.yaw_diff` —— EKF 状态帧间变化量，衡量跟踪平滑度（丢失后自动清零重新累计）。
 2. **目标状态**：`/tracker/target.v_yaw / radius_1 / radius_2 / dz` —— 小陀螺判断与半径估计。4 板目标 `radius_2 = r1 + l`（EKF 的 `x[8]+x[9]`）。
 3. **云台指令**：`/dge/debug.yaw / pitch / aim_x`。
-4. **EKF 一致性**：`/dge/debug.residual_yaw / residual_pitch / residual_distance`（新息）、`nis / nees`（越小越一致）、`recent_nis_failures`（窗口 NIS 超阈值比例，持续 ≥0.4 → tracker 判定 Bad Converge 丢目标）。稳态应能看到 `nis/nees` 小且平稳，换板/机动瞬间允许尖峰。
+4. **EKF 一致性**：`/dge/debug.nis`（4 维像素新息的卡方统计量）、`nis_threshold`（χ²(4) 95% = 9.488）、`nis_fail_rate`（滑动窗口超阈值比例）、`residual_norm`（新息范数）、`sigma_*`（状态 1σ）。稳态 `nis_fail_rate` 应 < 5%～10%，换板/机动瞬间允许尖峰；`sigma_*` 应收敛而不是持续增大。3D 场景里的 1σ/2σ XY 椭圆是同一协方差的几何表示。
 5. **性能**：`/dge/debug.fps / armors / targets` —— 端到端帧率、识别板数、锁定目标数；做模型/参数 A/B 对比时以它为准。
 
 ## 修改布局时的注意事项

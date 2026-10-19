@@ -24,6 +24,7 @@ Tracker::Tracker(const std::string & config_path, Solver & solver)
   max_temp_lost_count_ = yaml["max_temp_lost_count"].as<int>();
   outpost_max_temp_lost_count_ = yaml["outpost_max_temp_lost_count"].as<int>();
   normal_temp_lost_count_ = max_temp_lost_count_;
+  ekf_config_ = rmcs_ekf::load_config(yaml["ekf"]);
 }
 
 std::string Tracker::state() const { return state_; }
@@ -74,17 +75,9 @@ std::list<Target> Tracker::track(
 
   // 发散检测
   if (state_ != "lost" && target_.diverged()) {
-    tools::logger()->debug("[Tracker] Target diverged!");
-    state_ = "lost";
-    return {};
-  }
-
-  // 收敛效果检测：
-  if (
-    std::accumulate(
-      target_.ekf().recent_nis_failures.begin(), target_.ekf().recent_nis_failures.end(), 0) >=
-    (0.4 * target_.ekf().window_size)) {
-    tools::logger()->debug("[Target] Bad Converge Found!");
+    tools::logger()->debug(
+      "[Tracker] Target diverged! name={} rmcs={}",
+      ARMOR_NAMES.at(static_cast<size_t>(target_.name)), target_.uses_rmcs() ? 1 : 0);
     state_ = "lost";
     return {};
   }
@@ -139,7 +132,7 @@ std::tuple<omniperception::DetectionResult, std::list<Target>> Tracker::track(
   // 此时全向感知相机画面中出现了优先级更高的装甲板，切换目标
   else if (
     state_ == "tracking" && !temp_target.armors.empty() &&
-    temp_target.armors.front().priority < target_.priority && target_.convergened()) {
+    temp_target.armors.front().priority < target_.priority && target_.converge()) {
     state_ = "switching";
     switch_target = omniperception::DetectionResult{
       temp_target.armors, t, temp_target.delta_yaw, temp_target.delta_pitch};
@@ -166,7 +159,9 @@ std::tuple<omniperception::DetectionResult, std::list<Target>> Tracker::track(
 
   // 发散检测
   if (state_ != "lost" && target_.diverged()) {
-    tools::logger()->debug("[Tracker] Target diverged!");
+    tools::logger()->debug(
+      "[Tracker] Target diverged! name={} rmcs={}",
+      ARMOR_NAMES.at(static_cast<size_t>(target_.name)), target_.uses_rmcs() ? 1 : 0);
     state_ = "lost";
     return {switch_target, {}};  // 返回switch_target和空的targets
   }
@@ -242,22 +237,22 @@ bool Tracker::set_target(std::list<Armor> & armors, std::chrono::steady_clock::t
 
   if (is_balance) {
     Eigen::VectorXd P0_dig{{1, 64, 1, 64, 1, 64, 0.4, 100, 1, 1, 1}};
-    target_ = Target(armor, t, 0.2, 2, P0_dig);
+    target_ = Target(armor, t, 0.2, 2, P0_dig, ekf_config_, solver_.camera_feature());
   }
 
-  // else if (armor.name == ArmorName::outpost) {
-  //   Eigen::VectorXd P0_dig{{1, 64, 1, 64, 1, 81, 0.4, 100, 1e-4, 0, 0}};
-  //   target_ = Target(armor, t, 0.2765, 3, P0_dig);
-  // }
+  else if (armor.name == ArmorName::outpost) {
+    Eigen::VectorXd P0_dig{{1, 64, 1, 64, 1, 81, 0.4, 100, 1e-4, 0, 0}};
+    target_ = Target(armor, t, 0.2765, 3, P0_dig, ekf_config_, solver_.camera_feature());
+  }
 
   else if (armor.name == ArmorName::base) {
     Eigen::VectorXd P0_dig{{1, 64, 1, 64, 1, 64, 0.4, 100, 1e-4, 0, 0}};
-    target_ = Target(armor, t, 0.3205, 3, P0_dig);
+    target_ = Target(armor, t, 0.3205, 3, P0_dig, ekf_config_, solver_.camera_feature());
   }
 
   else {
     Eigen::VectorXd P0_dig{{1, 64, 1, 64, 1, 64, 0.4, 100, 1, 1, 1}};
-    target_ = Target(armor, t, 0.2, 4, P0_dig);
+    target_ = Target(armor, t, 0.2, 4, P0_dig, ekf_config_, solver_.camera_feature());
   }
 
   return true;
@@ -277,18 +272,15 @@ bool Tracker::update_target(std::list<Armor> & armors, std::chrono::steady_clock
 
   if (found_count == 0) return false;
 
+  std::list<Armor> matched_armors;
   for (auto & armor : armors) {
-    if (
-      armor.name != target_.name || armor.type != target_.armor_type
-      //  || armor.center.x != min_x
-    )
-      continue;
+    if (armor.name != target_.name || armor.type != target_.armor_type) continue;
 
     solver_.solve(armor);
-
-    target_.update(armor);
+    matched_armors.push_back(armor);
   }
 
+  target_.update(matched_armors, solver_.camera_feature());
   return true;
 }
 

@@ -35,8 +35,70 @@ max_rectangular_error: 25 # degree
 
 #####-----tracker参数-----#####
 min_detect_count: 5 # 最小确认帧数
-max_temp_lost_count: 15 #最大暂存丢失帧数
+max_temp_lost_count: 75 #最大暂存丢失帧数（仿真检测偶发丢帧，放宽）
 outpost_max_temp_lost_count: 75
+
+#####-----rmcs 4板 EKF 参数（像素域观测）-----#####
+# 27 赛季全兵种 4 块小装甲板；仅 4 板目标走该 EKF。
+# 状态顺序：[x, y, z, vx, vy, vz, a, w, rf, rl, hl]
+ekf:
+  # 过程噪声（对角线）
+  noise_x: 1e-4
+  noise_y: 1e-4
+  noise_z: 1e-8
+  noise_vx: 2e-1
+  noise_vy: 2e-1
+  noise_vz: 1e-8
+  noise_rotation_angle: 1e-3
+  noise_rotation_speed: 1.0
+  noise_radius_forward: 1e-8
+  noise_radius_lateral: 1e-8
+  noise_height_lateral: 1e-8
+
+  # 观测噪声（像素^2）
+  # 仿真调参：DGE YOLO 的角点噪声比 rmcs 实机检测更大，故比 rmcs 默认 40 放宽
+  noise_observation: 100.0
+
+  # 状态夹紧
+  radius_forward_min: 0.1
+  radius_forward_max: 0.4
+  radius_lateral_min: 0.1
+  radius_lateral_max: 0.4
+  height_lateral_min: -0.2
+  height_lateral_max: 0.2
+  velocity_min: -10.0
+  velocity_max: 10.0
+
+  # 可见性模型（度）：< full 为双灯条，< part 为单灯条
+  yaw_full_max_deg: 70.0
+  yaw_part_max_deg: 90.0
+
+  # PnP pitch 先验（4 板普通机器人保持 false）
+  fixed_outpost_pitch: false
+  fixed_normal_pitch: false
+
+  # rmcs 收敛/发散判据
+  converge_min_update: 10
+  converge_max_cov_xy: 1.0
+  converge_delay_s: 0.1
+  diverge_cov: 150.0
+  diverge_xy: 15.0
+  diverge_z: 2.0
+  diverge_w: 31.41592653589793
+  # 仿真假人移动/角点抖动较大，速度阈值比 rmcs 默认 (5/1) 放宽
+  diverge_v: 15.0
+  diverge_vz: 5.0
+
+  # EKF 一致性监控：NIS 为 4 维像素新息的卡方统计量。
+  # chi-square(4) 95% = 9.488, 99% = 13.277。
+  nis_threshold: 9.488
+  nis_window: 100
+  # 门控：超过 99% 阈值的新息直接拒绝，避免错误关联/遮挡把状态拉飞。
+  nis_gate_enabled: true
+  nis_gate_threshold: 13.277
+  nis_gate_warmup_updates: 10
+  nis_max_consecutive_rejects: 5
+  nis_reject_cov_inflation: 0.01
 
 #####-----aimer参数-----#####
 # 仿真下真机标定偏置清零，方向不对时优先调 daedalus.yaw_sign/pitch_sign

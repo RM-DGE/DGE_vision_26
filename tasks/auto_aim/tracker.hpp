@@ -7,6 +7,7 @@
 #include <string>
 
 #include "armor.hpp"
+#include "rmcs_ekf/rmcs_ekf.hpp"
 #include "solver.hpp"
 #include "target.hpp"
 #include "tasks/omniperception/perceptron.hpp"
@@ -40,6 +41,7 @@ private:
   int normal_temp_lost_count_;
   std::string state_, pre_state_;
   Target target_;
+  rmcs_ekf::Config ekf_config_;
   std::chrono::steady_clock::time_point last_timestamp_;
   ArmorPriority omni_target_priority_;
 

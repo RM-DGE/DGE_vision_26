@@ -52,8 +52,8 @@ void CommandGener::generate_command()
       command.horizon_distance = input->targets_.empty()
                                    ? 0
                                    : std::sqrt(
-                                       tools::square(input->targets_.front().ekf_x()[0]) +
-                                       tools::square(input->targets_.front().ekf_x()[2]));
+                                       tools::square(input->targets_.front().state().x) +
+                                       tools::square(input->targets_.front().state().y));
       cboard_.send(command);
       if (debug_) {
         nlohmann::json data;

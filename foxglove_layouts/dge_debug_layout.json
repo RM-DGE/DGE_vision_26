@@ -2,9 +2,14 @@
   "configById": {
     "ImageViewPanel!dge_img": {
       "cameraTopic": "/detector/result_img/compressed",
-      "enabledMarkerTopics": ["/camera/annotations"],
+      "enabledMarkerTopics": [
+        "/camera/annotations"
+      ],
       "mode": "fit",
-      "pan": { "x": 0, "y": 0 },
+      "pan": {
+        "x": 0,
+        "y": 0
+      },
       "rotation": 0,
       "synchronize": false,
       "transformMarkers": false,
@@ -16,9 +21,22 @@
         "distance": 1.6,
         "perspective": true,
         "phi": 90,
-        "target": [0, 0, 0],
-        "targetOffset": [0, 0, 0],
-        "targetOrientation": [0, 0, 0, 1],
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOffset": [
+          0,
+          0,
+          0
+        ],
+        "targetOrientation": [
+          0,
+          0,
+          0,
+          1
+        ],
         "thetaOffset": 0,
         "fovy": 55,
         "near": 0.1,
@@ -29,22 +47,38 @@
       "fixedFrame": "odom",
       "scene": {
         "backgroundColor": "#101118",
-        "transforms": { "showLabel": false },
+        "transforms": {
+          "showLabel": false
+        },
         "enableStats": false
       },
       "transforms": {
-        "frame:odom": { "visible": true },
-        "frame:gimbal_link": { "visible": true },
-        "frame:camera_optical_frame": { "visible": true }
+        "frame:odom": {
+          "visible": true
+        },
+        "frame:gimbal_link": {
+          "visible": true
+        },
+        "frame:camera_optical_frame": {
+          "visible": true
+        }
       },
       "topics": {
-        "/dge/scene": { "visible": true },
-        "/dge/prediction": { "visible": true },
+        "/dge/scene": {
+          "visible": true
+        },
+        "/dge/prediction": {
+          "visible": true
+        },
         "/detector/marker": {
           "visible": true,
           "namespaces": {
-            "classification": { "visible": false },
-            "armors": { "visible": true }
+            "classification": {
+              "visible": false
+            },
+            "armors": {
+              "visible": true
+            }
           },
           "showOutlines": false
         },
@@ -52,8 +86,12 @@
           "visible": true,
           "showOutlines": false
         },
-        "/camera_info": { "visible": false },
-        "/aiming_point": { "visible": true }
+        "/camera_info": {
+          "visible": false
+        },
+        "/aiming_point": {
+          "visible": true
+        }
       },
       "layers": {
         "dge-grid-0000-0000": {
@@ -67,8 +105,16 @@
           "divisions": 10,
           "lineWidth": 1,
           "color": "#248eff",
-          "position": [0, 0, -0.4],
-          "rotation": [0, 0, 0],
+          "position": [
+            0,
+            0,
+            -0.4
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
           "order": 1
         }
       },
@@ -87,8 +133,18 @@
     "Plot!dge_quality": {
       "title": "跟踪抖动（每帧位移 / yaw 变化）",
       "paths": [
-        { "value": "/tracker/info.position_diff", "enabled": true, "color": "#fb923c", "timestampMethod": "receiveTime" },
-        { "value": "/tracker/info.yaw_diff", "enabled": true, "color": "#60a5fa", "timestampMethod": "receiveTime" }
+        {
+          "value": "/tracker/info.position_diff",
+          "enabled": true,
+          "color": "#fb923c",
+          "timestampMethod": "receiveTime"
+        },
+        {
+          "value": "/tracker/info.yaw_diff",
+          "enabled": true,
+          "color": "#60a5fa",
+          "timestampMethod": "receiveTime"
+        }
       ],
       "showXAxisLabels": true,
       "showYAxisLabels": true,
@@ -104,11 +160,48 @@
     "Plot!dge_target": {
       "title": "目标状态（v_yaw / 半径 / dz）",
       "paths": [
-        { "value": "/tracker/target.v_yaw", "enabled": true, "color": "#00e5ff", "timestampMethod": "receiveTime" },
-        { "value": "/sim/ground_truth.targets[0].vyaw", "enabled": true, "color": "#ffffff", "timestampMethod": "receiveTime" },
-        { "value": "/tracker/target.radius_1", "enabled": true, "color": "#fb923c", "timestampMethod": "receiveTime" },
-        { "value": "/tracker/target.radius_2", "enabled": true, "color": "#a78bfa", "timestampMethod": "receiveTime" },
-        { "value": "/tracker/target.dz", "enabled": true, "color": "#4ade80", "timestampMethod": "receiveTime" }
+        {
+          "value": "/tracker/target.v_yaw",
+          "enabled": true,
+          "color": "#00e5ff",
+          "timestampMethod": "receiveTime"
+        },
+        {
+          "value": "/sim/ground_truth.targets[0].vyaw",
+          "enabled": true,
+          "color": "#ffffff",
+          "timestampMethod": "receiveTime"
+        },
+        {
+          "value": "/tracker/target.radius_1",
+          "enabled": true,
+          "color": "#fb923c",
+          "timestampMethod": "receiveTime"
+        },
+        {
+          "value": "/tracker/target.radius_2",
+          "enabled": true,
+          "color": "#a78bfa",
+          "timestampMethod": "receiveTime"
+        },
+        {
+          "value": "/tracker/target.dz",
+          "enabled": true,
+          "color": "#4ade80",
+          "timestampMethod": "receiveTime"
+        },
+        {
+          "value": "/dge/debug.sigma_x",
+          "enabled": true,
+          "color": "#f472b6",
+          "timestampMethod": "receiveTime"
+        },
+        {
+          "value": "/dge/debug.sigma_y",
+          "enabled": true,
+          "color": "#38bdf8",
+          "timestampMethod": "receiveTime"
+        }
       ],
       "showXAxisLabels": true,
       "showYAxisLabels": true,
@@ -123,9 +216,24 @@
     "Plot!dge_aim": {
       "title": "云台指令 / 瞄准点",
       "paths": [
-        { "value": "/dge/debug.yaw", "enabled": true, "color": "#facc15", "timestampMethod": "receiveTime" },
-        { "value": "/dge/debug.pitch", "enabled": true, "color": "#f472b6", "timestampMethod": "receiveTime" },
-        { "value": "/dge/debug.aim_x", "enabled": true, "color": "#4ade80", "timestampMethod": "receiveTime" }
+        {
+          "value": "/dge/debug.yaw",
+          "enabled": true,
+          "color": "#facc15",
+          "timestampMethod": "receiveTime"
+        },
+        {
+          "value": "/dge/debug.pitch",
+          "enabled": true,
+          "color": "#f472b6",
+          "timestampMethod": "receiveTime"
+        },
+        {
+          "value": "/dge/debug.aim_x",
+          "enabled": true,
+          "color": "#4ade80",
+          "timestampMethod": "receiveTime"
+        }
       ],
       "showXAxisLabels": true,
       "showYAxisLabels": true,
@@ -138,14 +246,62 @@
       "followingViewWidth": 10
     },
     "Plot!dge_ekf": {
-      "title": "EKF 一致性（残差 / NIS / NEES）",
+      "title": "EKF 验证（真值误差 / NIS / 收敛状态）",
       "paths": [
-        { "value": "/dge/debug.residual_yaw", "enabled": true, "color": "#f87171", "timestampMethod": "receiveTime" },
-        { "value": "/dge/debug.residual_pitch", "enabled": true, "color": "#38bdf8", "timestampMethod": "receiveTime" },
-        { "value": "/dge/debug.residual_distance", "enabled": true, "color": "#fbbf24", "timestampMethod": "receiveTime" },
-        { "value": "/dge/debug.nis", "enabled": true, "color": "#a78bfa", "timestampMethod": "receiveTime" },
-        { "value": "/dge/debug.nees", "enabled": true, "color": "#34d399", "timestampMethod": "receiveTime" },
-        { "value": "/dge/debug.recent_nis_failures", "enabled": true, "color": "#f472b6", "timestampMethod": "receiveTime" }
+        {
+          "value": "/dge/debug.center_err",
+          "enabled": true,
+          "color": "#f87171",
+          "timestampMethod": "receiveTime"
+        },
+        {
+          "value": "/dge/debug.yaw_err",
+          "enabled": true,
+          "color": "#38bdf8",
+          "timestampMethod": "receiveTime"
+        },
+        {
+          "value": "/dge/debug.vyaw_err",
+          "enabled": true,
+          "color": "#fbbf24",
+          "timestampMethod": "receiveTime"
+        },
+        {
+          "value": "/dge/debug.converged",
+          "enabled": true,
+          "color": "#34d399",
+          "timestampMethod": "receiveTime"
+        },
+        {
+          "value": "/dge/debug.diverged",
+          "enabled": true,
+          "color": "#f472b6",
+          "timestampMethod": "receiveTime"
+        },
+        {
+          "value": "/dge/debug.nis",
+          "enabled": true,
+          "color": "#f87171",
+          "timestampMethod": "receiveTime"
+        },
+        {
+          "value": "/dge/debug.nis_threshold",
+          "enabled": true,
+          "color": "#fbbf24",
+          "timestampMethod": "receiveTime"
+        },
+        {
+          "value": "/dge/debug.nis_fail_rate",
+          "enabled": true,
+          "color": "#a78bfa",
+          "timestampMethod": "receiveTime"
+        },
+        {
+          "value": "/dge/debug.residual_norm",
+          "enabled": true,
+          "color": "#34d399",
+          "timestampMethod": "receiveTime"
+        }
       ],
       "showXAxisLabels": true,
       "showYAxisLabels": true,
@@ -160,9 +316,24 @@
     "Plot!dge_perf": {
       "title": "性能（FPS / 检测数 / 目标数）",
       "paths": [
-        { "value": "/dge/debug.fps", "enabled": true, "color": "#ffffff", "timestampMethod": "receiveTime" },
-        { "value": "/dge/debug.armors", "enabled": true, "color": "#00e5ff", "timestampMethod": "receiveTime" },
-        { "value": "/dge/debug.targets", "enabled": true, "color": "#fb923c", "timestampMethod": "receiveTime" }
+        {
+          "value": "/dge/debug.fps",
+          "enabled": true,
+          "color": "#ffffff",
+          "timestampMethod": "receiveTime"
+        },
+        {
+          "value": "/dge/debug.armors",
+          "enabled": true,
+          "color": "#00e5ff",
+          "timestampMethod": "receiveTime"
+        },
+        {
+          "value": "/dge/debug.targets",
+          "enabled": true,
+          "color": "#fb923c",
+          "timestampMethod": "receiveTime"
+        }
       ],
       "showXAxisLabels": true,
       "showYAxisLabels": true,
@@ -194,7 +365,10 @@
       "cameraTopic": "/detector/number_img",
       "enabledMarkerTopics": [],
       "mode": "fit",
-      "pan": { "x": 0, "y": 0 },
+      "pan": {
+        "x": 0,
+        "y": 0
+      },
       "rotation": 0,
       "synchronize": false,
       "transformMarkers": false,
@@ -204,7 +378,9 @@
   },
   "globalVariables": {},
   "userNodes": {},
-  "playbackConfig": { "speed": 1 },
+  "playbackConfig": {
+    "speed": 1
+  },
   "layout": {
     "direction": "row",
     "first": {
