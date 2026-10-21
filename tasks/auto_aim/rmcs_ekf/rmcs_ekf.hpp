@@ -274,6 +274,11 @@ struct Config
   // Observation noise (pixel^2)
   double noise_observation = 40.0;
 
+  // Rate-aware process noise. When true, the noise_* diagonal above is
+  // interpreted as a per-second density and scaled by dt inside predict().
+  // false reproduces rmcs' per-frame behavior (kept for A/B tests).
+  bool q_rate_aware = true;
+
   // State clamps
   double radius_forward_min = 0.1;
   double radius_forward_max = 0.4;
@@ -283,6 +288,7 @@ struct Config
   double height_lateral_max = +0.2;
   double velocity_min = -10.0;
   double velocity_max = +10.0;
+  double rotation_speed_limit = 8.0 * kPi;  // |w| clamp, rad/s; <= 0 disables
 
   // Visibility model (full plate < yaw_full, partial < yaw_part)
   double yaw_full_max = 70.0 * kPi / 180.0;
@@ -294,7 +300,10 @@ struct Config
 
   // Convergence
   int converge_min_update = 10;
-  double converge_max_cov_xy = 1.0;
+  double converge_max_cov_xy = 0.04;   // x/y variance, m^2
+  double converge_max_cov_v = 1.0;     // vx/vy variance, (m/s)^2
+  double converge_max_cov_w = 1.0;     // w variance, (rad/s)^2
+  int converge_max_no_update_frames = 5;
   double converge_delay_s = 0.1;
 
   // Divergence
@@ -304,6 +313,31 @@ struct Config
   double diverge_w = 10.0 * kPi;
   double diverge_v = 5.0;
   double diverge_vz = 1.0;
+
+  // Initial covariance diagonal (state order). The defaults are tighter than
+  // rmcs' 64/64/0.4/100 because the state already comes from a solved PnP:
+  // a loose position prior lets one noisy plate drag the center by meters.
+  double initial_cov_position = 0.04;       // x, y (m^2)
+  double initial_cov_z = 0.01;              // m^2
+  double initial_cov_velocity = 4.0;        // vx, vy ((m/s)^2)
+  double initial_cov_vz = 0.01;             // (m/s)^2
+  double initial_cov_angle = 0.1;           // rad^2
+  double initial_cov_rotation_speed = 4.0;  // (rad/s)^2
+  double initial_cov_radius = 1e-3;         // rf, rl (m^2)
+  double initial_cov_height = 1e-3;         // hl (m^2)
+
+  // Association / recovery
+  // Gross-error gate on the anchor plate: mean corner error in pixels, and a
+  // scale-aware floor relative to the predicted plate width. <= 0 disables.
+  double anchor_max_corner_error = 40.0;
+  double anchor_max_relative_error = 0.5;
+
+  // If detections keep arriving but no lightbar is accepted for this many
+  // frames, re-initialize from the current detections (0 disables).
+  int auto_reinit_after_no_update = 10;
+
+  // Hard divergence: too many frames without an accepted update (0 disables).
+  int max_no_update_frames = 30;
 
   // Consistency monitoring (NIS, 4-D pixel innovation)
   // chi-square(4) 95% quantile = 9.488; 99% = 13.277.
@@ -338,11 +372,13 @@ struct Diagnostics
   Eigen::Matrix<double, 11, 1> variance{ Eigen::Matrix<double, 11, 1>::Zero() };
   Eigen::Matrix2d covariance_xy{ Eigen::Matrix2d::Zero() };
 
-  double nis = 0.0;                // 当前帧归一化新息平方（4 维）
+  double nis = 0.0;                // 当前帧单条最大 NIS（4 维；与 9.488 同口径）
   double nis_threshold = 9.488;    // chi-square(4) 95%
   bool nis_gate_enabled = false;   // 是否启用 NIS 门控
   double nis_gate_threshold = 0.0; // 门控阈值；<=0 时使用 nis_threshold
   double nis_fail_rate = 0.0;      // 最近 nis_window 次更新的失败比例
+  double nis_mean = 0.0;           // 当前帧 NIS 均值（仅参考，阈值判读用 nis）
+  double anchor_error = 0.0;       // 当前帧 anchor 平均角点误差（像素）
   double residual_norm = 0.0;      // 当前帧新息向量平均范数（像素）
   double dt = 0.0;                 // 最近一次 predict 的 dt
 
@@ -351,6 +387,8 @@ struct Diagnostics
   std::size_t frame_rejected_count = 0;  // 当前帧因 NIS/投影无效被拒绝的灯条数
   std::size_t nis_rejected_count = 0;    // 累计 NIS 拒绝次数
   int nis_consecutive_rejects = 0;       // 连续 NIS 拒绝次数
+  int no_update_frames = 0;              // 连续“有检测但 0 次接受更新”的帧数
+  int reinit_count = 0;                  // 累计自动重初始化次数
   int last_observed_id = -1;
   bool converged = false;
   bool diverged = false;
@@ -438,6 +476,8 @@ private:
   auto set_noise() -> void;
   auto finish_initialize(
     const CameraFeature & camera, const Eigen::Vector3d & center, double yaw, bool large) -> bool;
+  auto maybe_reinitialize(const CameraFeature & camera, const std::vector<Armor2d> & armors)
+    -> bool;
 
   auto make_observation_jacobian(int lightbar_id) const -> Eigen::Matrix<double, 4, 11>;
   auto update_one(const Eigen::Vector2d & upper, const Eigen::Vector2d & lower, int lightbar_id)
@@ -462,12 +502,14 @@ private:
   double last_nis_ = 0.0;
   double last_residual_norm_ = 0.0;
   double last_frame_nis_ = 0.0;
+  double last_frame_nis_mean_ = 0.0;
   double last_frame_residual_norm_ = 0.0;
   std::size_t last_frame_update_count_ = 0;
   std::size_t last_frame_rejected_count_ = 0;
   bool last_update_accepted_ = false;
 
   double frame_nis_sum_ = 0.0;
+  double frame_nis_max_ = 0.0;
   double frame_residual_sum_ = 0.0;
   std::size_t frame_nis_count_ = 0;
   std::size_t frame_update_count_ = 0;
@@ -475,6 +517,11 @@ private:
 
   std::size_t nis_rejected_count_ = 0;
   int consecutive_nis_rejects_ = 0;
+
+  // Association / recovery diagnostics
+  double last_anchor_error_ = 0.0;
+  int no_update_frames_ = 0;
+  int reinit_count_ = 0;
 
   std::deque<int> recent_nis_failures_;
 };

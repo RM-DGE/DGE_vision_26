@@ -9,6 +9,8 @@
 
 #include <opencv2/core/eigen.hpp>
 
+#include "tools/logger.hpp"
+
 namespace rmcs_ekf
 {
 
@@ -326,6 +328,7 @@ auto load_config(const YAML::Node & node) -> Config
   config.noise_height_lateral = read_or(node, "noise_height_lateral", config.noise_height_lateral);
 
   config.noise_observation = read_or(node, "noise_observation", config.noise_observation);
+  config.q_rate_aware = read_or(node, "q_rate_aware", config.q_rate_aware);
 
   config.radius_forward_min = read_or(node, "radius_forward_min", config.radius_forward_min);
   config.radius_forward_max = read_or(node, "radius_forward_max", config.radius_forward_max);
@@ -336,6 +339,8 @@ auto load_config(const YAML::Node & node) -> Config
 
   config.velocity_min = read_or(node, "velocity_min", config.velocity_min);
   config.velocity_max = read_or(node, "velocity_max", config.velocity_max);
+  config.rotation_speed_limit =
+    read_or(node, "rotation_speed_limit", config.rotation_speed_limit);
 
   config.yaw_full_max = read_or(node, "yaw_full_max_deg", 70.0) * kPi / 180.0;
   config.yaw_part_max = read_or(node, "yaw_part_max_deg", 90.0) * kPi / 180.0;
@@ -345,6 +350,10 @@ auto load_config(const YAML::Node & node) -> Config
 
   config.converge_min_update = read_or(node, "converge_min_update", config.converge_min_update);
   config.converge_max_cov_xy = read_or(node, "converge_max_cov_xy", config.converge_max_cov_xy);
+  config.converge_max_cov_v = read_or(node, "converge_max_cov_v", config.converge_max_cov_v);
+  config.converge_max_cov_w = read_or(node, "converge_max_cov_w", config.converge_max_cov_w);
+  config.converge_max_no_update_frames = read_or(
+    node, "converge_max_no_update_frames", config.converge_max_no_update_frames);
   config.converge_delay_s = read_or(node, "converge_delay_s", config.converge_delay_s);
 
   config.diverge_cov = read_or(node, "diverge_cov", config.diverge_cov);
@@ -353,6 +362,25 @@ auto load_config(const YAML::Node & node) -> Config
   config.diverge_w = read_or(node, "diverge_w", config.diverge_w);
   config.diverge_v = read_or(node, "diverge_v", config.diverge_v);
   config.diverge_vz = read_or(node, "diverge_vz", config.diverge_vz);
+
+  config.initial_cov_position = read_or(node, "initial_cov_position", config.initial_cov_position);
+  config.initial_cov_z = read_or(node, "initial_cov_z", config.initial_cov_z);
+  config.initial_cov_velocity = read_or(node, "initial_cov_velocity", config.initial_cov_velocity);
+  config.initial_cov_vz = read_or(node, "initial_cov_vz", config.initial_cov_vz);
+  config.initial_cov_angle = read_or(node, "initial_cov_angle", config.initial_cov_angle);
+  config.initial_cov_rotation_speed =
+    read_or(node, "initial_cov_rotation_speed", config.initial_cov_rotation_speed);
+  config.initial_cov_radius = read_or(node, "initial_cov_radius", config.initial_cov_radius);
+  config.initial_cov_height = read_or(node, "initial_cov_height", config.initial_cov_height);
+
+  config.anchor_max_corner_error =
+    read_or(node, "anchor_max_corner_error", config.anchor_max_corner_error);
+  config.anchor_max_relative_error =
+    read_or(node, "anchor_max_relative_error", config.anchor_max_relative_error);
+  config.auto_reinit_after_no_update =
+    read_or(node, "auto_reinit_after_no_update", config.auto_reinit_after_no_update);
+  config.max_no_update_frames =
+    read_or(node, "max_no_update_frames", config.max_no_update_frames);
 
   config.nis_threshold = read_or(node, "nis_threshold", config.nis_threshold);
   config.nis_window = read_or(node, "nis_window", config.nis_window);
@@ -403,11 +431,14 @@ auto RobotModel::set_noise() -> void
 auto RobotModel::reset_covariance() -> void
 {
   StateVector diagonal;
-  diagonal << 64.0, 64.0, 64.0, // x, y, z
-    64.0, 64.0, 64.0, // vx, vy, vz
-    0.4, // a
-    100.0, // w
-    1e-2, 1e-2, 1e-2; // rf, rl, hl
+  diagonal << config_.initial_cov_position, config_.initial_cov_position, config_.initial_cov_z,
+    config_.initial_cov_velocity, config_.initial_cov_velocity, config_.initial_cov_vz,
+    config_.initial_cov_angle, config_.initial_cov_rotation_speed,
+    config_.initial_cov_radius, config_.initial_cov_radius, config_.initial_cov_height;
+  // Never allow a zero variance: it would make the covariance singular.
+  for (Eigen::Index index = 0; index < diagonal.size(); ++index) {
+    diagonal[index] = std::max(diagonal[index], 1e-12);
+  }
   covariance_ = diagonal.asDiagonal();
 }
 
@@ -506,6 +537,15 @@ auto RobotModel::finish_initialize(
   nis_rejected_count_ = 0;
   consecutive_nis_rejects_ = 0;
   recent_nis_failures_.clear();
+
+  last_frame_nis_ = 0.0;
+  last_frame_nis_mean_ = 0.0;
+  last_frame_residual_norm_ = 0.0;
+  frame_nis_max_ = 0.0;
+  frame_nis_sum_ = 0.0;
+  frame_nis_count_ = 0;
+  last_anchor_error_ = 0.0;
+  no_update_frames_ = 0;
   return true;
 }
 
@@ -523,6 +563,10 @@ auto RobotModel::predict(double dt) -> void
   next[kStateY] += next[kStateVy] * dt;
   next[kStateZ] += next[kStateVz] * dt;
   next[kStateA] = normalize_angle(next[kStateA] + next[kStateW] * dt);
+  if (config_.rotation_speed_limit > 0.0) {
+    next[kStateW] = std::clamp(
+      next[kStateW], -config_.rotation_speed_limit, config_.rotation_speed_limit);
+  }
 
   Covariance jacobian = Covariance::Identity();
   jacobian(kStateX, kStateVx) = dt;
@@ -531,7 +575,14 @@ auto RobotModel::predict(double dt) -> void
   jacobian(kStateA, kStateW) = dt;
 
   state_ = next;
-  covariance_ = jacobian * covariance_ * jacobian.transpose() + process_noise_;
+
+  // rmcs adds the same Q every predict (per-frame noise). DGE runs at a
+  // different frame rate, so q_rate_aware interprets the configured diagonal
+  // as a per-second density and scales it by dt. Set q_rate_aware=false to
+  // reproduce the original per-frame behavior for A/B tests.
+  auto q = process_noise_;
+  if (config_.q_rate_aware) q *= dt;
+  covariance_ = jacobian * covariance_ * jacobian.transpose() + q;
 
   observable_.update(state_);
 }
@@ -544,15 +595,32 @@ auto RobotModel::correct(const std::vector<Armor2d> & armors,
   observable_.update(state_);
 
   frame_nis_sum_ = 0.0;
+  frame_nis_max_ = 0.0;
   frame_residual_sum_ = 0.0;
   frame_nis_count_ = 0;
   frame_update_count_ = 0;
   frame_rejected_count_ = 0;
   last_frame_update_count_ = 0;
   last_frame_rejected_count_ = 0;
+  last_anchor_error_ = 0.0;
   last_update_accepted_ = false;
 
-  if (armors.empty() && lightbars.empty()) return;
+  if (armors.empty() && lightbars.empty()) {
+    last_frame_nis_ = 0.0;
+    last_frame_nis_mean_ = 0.0;
+    last_frame_residual_norm_ = 0.0;
+    return;
+  }
+
+  const auto mark_no_update = [this]() {
+    ++frame_rejected_count_;
+    last_frame_update_count_ = 0;
+    last_frame_rejected_count_ = frame_rejected_count_;
+    last_frame_nis_ = 0.0;
+    last_frame_nis_mean_ = 0.0;
+    last_frame_residual_norm_ = 0.0;
+    ++no_update_frames_;
+  };
 
   struct SortedEntry
   {
@@ -601,7 +669,30 @@ auto RobotModel::correct(const std::vector<Armor2d> & armors,
     }
   }
 
-  if (!anchor_armor) return;
+  if (!anchor_armor) {
+    // No geometrically plausible plate at all (e.g. the state drifted behind
+    // the camera). Treat the frame as rejected and let the recovery logic run.
+    mark_no_update();
+    maybe_reinitialize(camera, armors);
+    return;
+  }
+
+  last_anchor_error_ = std::sqrt(best_error_sum / 4.0);
+  {
+    // Gross-error gate: a wrong plate / wrong id must not pull the state.
+    // The threshold is scale-aware so a close, fast-spinning plate is not
+    // rejected only because its pixel prediction lags by a few dozen pixels.
+    const auto left_id = anchor_armor_id * 2;
+    const auto right_id = left_id + 1;
+    const auto plate_width = (observable_.upper2d[left_id] - observable_.upper2d[right_id]).norm();
+    const auto max_error = std::max(
+      config_.anchor_max_corner_error, config_.anchor_max_relative_error * plate_width);
+    if (max_error > 0.0 && last_anchor_error_ > max_error) {
+      mark_no_update();
+      maybe_reinitialize(camera, armors);
+      return;
+    }
+  }
 
   // Step 2: collect all observed lightbars (2 per full armor + extras).
   std::vector<SortedEntry> sorted;
@@ -678,19 +769,58 @@ auto RobotModel::correct(const std::vector<Armor2d> & armors,
   last_frame_update_count_ = frame_update_count_;
   last_frame_rejected_count_ = frame_rejected_count_;
   if (frame_nis_count_ > 0) {
-    last_frame_nis_ = frame_nis_sum_ / static_cast<double>(frame_nis_count_);
+    // nis 取单条最大值，和 chi-square(4) 阈值同口径；均值另发字段。
+    last_frame_nis_ = frame_nis_max_;
+    last_frame_nis_mean_ = frame_nis_sum_ / static_cast<double>(frame_nis_count_);
     last_frame_residual_norm_ = frame_residual_sum_ / static_cast<double>(frame_nis_count_);
   } else {
     last_frame_nis_ = 0.0;
+    last_frame_nis_mean_ = 0.0;
     last_frame_residual_norm_ = 0.0;
   }
+
+  if (frame_update_count_ == 0) {
+    // Detections arrived but every lightbar was gated/projection-invalid.
+    ++no_update_frames_;
+    maybe_reinitialize(camera, armors);
+  } else {
+    no_update_frames_ = 0;
+  }
+}
+
+auto RobotModel::maybe_reinitialize(
+    const CameraFeature & camera, const std::vector<Armor2d> & armors) -> bool
+{
+  const auto threshold = config_.auto_reinit_after_no_update;
+  if (threshold <= 0 || armors.empty()) return false;
+  if (no_update_frames_ < threshold) return false;
+
+  // Retry every `threshold` frames while the state stays unusable, instead of
+  // running another robust PnP on every single frame.
+  if (no_update_frames_ % threshold != 0) return false;
+
+  const auto frames = no_update_frames_;
+  if (!initialize(camera, armors)) {
+    tools::logger()->warn(
+      "[rmcs_ekf] auto re-init failed after {} frames without accepted update", frames);
+    return false;
+  }
+
+  ++reinit_count_;
+  tools::logger()->warn(
+    "[rmcs_ekf] auto re-init after {} frames without accepted update (total={})", frames,
+    reinit_count_);
+  return true;
 }
 
 auto RobotModel::update_one(const Eigen::Vector2d & upper, const Eigen::Vector2d & lower,
   int lightbar_id) -> void
 {
   if (lightbar_id < 0 || lightbar_id >= 8) return;
-  if (!observable_.visible[lightbar_id]) return;
+  if (!observable_.visible[lightbar_id]) {
+    last_update_accepted_ = false;
+    return;
+  }
 
   // Skip measurements whose predicted endpoints are behind the camera or
   // failed to project. Feeding (0, 0) into the EKF would corrupt the state.
@@ -710,6 +840,7 @@ auto RobotModel::update_one(const Eigen::Vector2d & upper, const Eigen::Vector2d
   const auto jacobian = make_observation_jacobian(lightbar_id);
   if (jacobian.hasNaN() || !jacobian.allFinite()) {
     last_update_accepted_ = false;
+    ++frame_rejected_count_;
     return;
   }
 
@@ -718,6 +849,7 @@ auto RobotModel::update_one(const Eigen::Vector2d & upper, const Eigen::Vector2d
   const auto innovation_covariance_inv = innovation_covariance.inverse();
   if (innovation_covariance_inv.hasNaN() || !innovation_covariance_inv.allFinite()) {
     last_update_accepted_ = false;
+    ++frame_rejected_count_;
     return;
   }
 
@@ -729,6 +861,7 @@ auto RobotModel::update_one(const Eigen::Vector2d & upper, const Eigen::Vector2d
 
   // Diagnostics count every valid measurement attempt, including rejected ones.
   frame_nis_sum_ += nis;
+  frame_nis_max_ = std::max(frame_nis_max_, nis);
   frame_residual_sum_ += last_residual_norm_;
   ++frame_nis_count_;
 
@@ -789,6 +922,10 @@ auto RobotModel::update_one(const Eigen::Vector2d & upper, const Eigen::Vector2d
     std::clamp(posterior_state[kStateVy], config_.velocity_min, config_.velocity_max);
   posterior_state[kStateVz] =
     std::clamp(posterior_state[kStateVz], config_.velocity_min, config_.velocity_max);
+  if (config_.rotation_speed_limit > 0.0) {
+    posterior_state[kStateW] = std::clamp(
+      posterior_state[kStateW], -config_.rotation_speed_limit, config_.rotation_speed_limit);
+  }
 
   const Covariance complement = Covariance::Identity() - kalman_gain * jacobian;
   Covariance posterior_covariance =
@@ -818,6 +955,8 @@ auto RobotModel::diagnostics() const -> Diagnostics
   result.covariance_xy = covariance_.topLeftCorner<2, 2>();
 
   result.nis = last_frame_nis_;
+  result.nis_mean = last_frame_nis_mean_;
+  result.anchor_error = last_anchor_error_;
   result.nis_threshold = config_.nis_threshold;
   result.nis_gate_enabled = config_.nis_gate_enabled;
   result.nis_gate_threshold =
@@ -830,6 +969,8 @@ auto RobotModel::diagnostics() const -> Diagnostics
   result.frame_rejected_count = last_frame_rejected_count_;
   result.nis_rejected_count = nis_rejected_count_;
   result.nis_consecutive_rejects = consecutive_nis_rejects_;
+  result.no_update_frames = no_update_frames_;
+  result.reinit_count = reinit_count_;
   result.last_observed_id = last_observed_id_;
   result.converged = converge();
   result.diverged = diverged();
@@ -978,8 +1119,15 @@ auto RobotModel::converge() const -> bool
   if (update_count_ < static_cast<std::size_t>(std::max(0, config_.converge_min_update)))
     return false;
 
+  // A filter that has not accepted any measurement for a few frames is not
+  // converged, no matter how small its covariance looks.
+  if (no_update_frames_ > std::max(0, config_.converge_max_no_update_frames)) return false;
+
   if (covariance_(kStateX, kStateX) > config_.converge_max_cov_xy) return false;
   if (covariance_(kStateY, kStateY) > config_.converge_max_cov_xy) return false;
+  if (covariance_(kStateVx, kStateVx) > config_.converge_max_cov_v) return false;
+  if (covariance_(kStateVy, kStateVy) > config_.converge_max_cov_v) return false;
+  if (covariance_(kStateW, kStateW) > config_.converge_max_cov_w) return false;
 
   const auto elapsed = std::chrono::duration<double>(
     std::chrono::steady_clock::now() - init_timestamp_);
@@ -990,12 +1138,18 @@ auto RobotModel::converge() const -> bool
 
 auto RobotModel::diverged() const -> bool
 {
+  if (state_.hasNaN() || !state_.allFinite() || covariance_.hasNaN()
+    || !covariance_.allFinite())
+    return true;
+
+  // A deadlock where detections keep arriving but nothing is accepted is just
+  // as bad as a state blow-up; let the tracker drop and re-acquire the target.
+  if (config_.max_no_update_frames > 0 && no_update_frames_ > config_.max_no_update_frames)
+    return true;
+
   // Let the filter settle for a few frames after initialization; the first
   // sequential updates can legitimately produce large velocity corrections.
-  if (update_count_ < 5) {
-    return state_.hasNaN() || !state_.allFinite() || covariance_.hasNaN()
-      || !covariance_.allFinite();
-  }
+  if (update_count_ < 5) return false;
 
   return covariance_(kStateX, kStateX) > config_.diverge_cov
     || covariance_(kStateY, kStateY) > config_.diverge_cov
@@ -1005,9 +1159,7 @@ auto RobotModel::diverged() const -> bool
     || std::abs(state_[kStateW]) > config_.diverge_w
     || std::abs(state_[kStateVx]) > config_.diverge_v
     || std::abs(state_[kStateVy]) > config_.diverge_v
-    || std::abs(state_[kStateVz]) > config_.diverge_vz
-    || state_.hasNaN() || !state_.allFinite() || covariance_.hasNaN()
-    || !covariance_.allFinite();
+    || std::abs(state_[kStateVz]) > config_.diverge_vz;
 }
 
 auto RobotModel::Observable::update(const StateVector & state) -> void

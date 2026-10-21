@@ -69,6 +69,25 @@ outpost_max_temp_lost_count: 75
 # 真机检测角点噪声通常比仿真小；先用 rmcs 默认 40 px^2，再按 NIS/残差调。
 ekf:
   noise_observation: 40.0
+  # v0.3：Q 按 dt 归一；P0 收紧；坏关联/失锁自动重初始化
+  q_rate_aware: true
+  initial_cov_position: 0.04
+  initial_cov_z: 0.01
+  initial_cov_velocity: 4.0
+  initial_cov_vz: 0.01
+  initial_cov_angle: 0.1
+  initial_cov_rotation_speed: 4.0
+  initial_cov_radius: 0.001
+  initial_cov_height: 0.001
+  anchor_max_corner_error: 40.0
+  anchor_max_relative_error: 0.5
+  auto_reinit_after_no_update: 10
+  max_no_update_frames: 30
+  converge_max_cov_xy: 0.04
+  converge_max_cov_v: 1.0
+  converge_max_cov_w: 1.0
+  converge_max_no_update_frames: 5
+  rotation_speed_limit: 25.132741228718345
   # 监控用：chi-square(4) 95%
   nis_threshold: 9.488
   nis_window: 100

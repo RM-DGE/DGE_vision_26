@@ -285,6 +285,12 @@
           "timestampMethod": "receiveTime"
         },
         {
+          "value": "/dge/debug.nis_mean",
+          "enabled": true,
+          "color": "#22d3ee",
+          "timestampMethod": "receiveTime"
+        },
+        {
           "value": "/dge/debug.nis_threshold",
           "enabled": true,
           "color": "#fbbf24",
@@ -312,6 +318,39 @@
       "xAxisVal": "timestamp",
       "sidebarDimension": 240,
       "followingViewWidth": 10
+    },
+    "Plot!dge_health": {
+      "title": "关联/恢复（anchor 误差 / 连续无更新 / 重初始化）",
+      "paths": [
+        {
+          "value": "/dge/debug.anchor_err_px",
+          "enabled": true,
+          "color": "#f97316",
+          "timestampMethod": "receiveTime"
+        },
+        {
+          "value": "/dge/debug.ekf_no_update_frames",
+          "enabled": true,
+          "color": "#ef4444",
+          "timestampMethod": "receiveTime"
+        },
+        {
+          "value": "/dge/debug.ekf_reinits",
+          "enabled": true,
+          "color": "#a3e635",
+          "timestampMethod": "receiveTime"
+        }
+      ],
+      "showXAxisLabels": true,
+      "showYAxisLabels": true,
+      "showLegend": true,
+      "legendDisplay": "floating",
+      "showPlotValuesInLegend": true,
+      "isSynced": true,
+      "xAxisVal": "timestamp",
+      "sidebarDimension": 240,
+      "followingViewWidth": 10,
+      "yAxisLabel": "px / frames / count"
     },
     "Plot!dge_perf": {
       "title": "性能（FPS / 检测数 / 目标数）",
@@ -405,7 +444,12 @@
       "second": {
         "first": {
           "first": "Plot!dge_aim",
-          "second": "Plot!dge_ekf",
+          "second": {
+            "first": "Plot!dge_ekf",
+            "second": "Plot!dge_health",
+            "direction": "column",
+            "splitPercentage": 50
+          },
           "direction": "column",
           "splitPercentage": 50
         },

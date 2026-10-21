@@ -1383,6 +1383,7 @@ void FoxgloveServer::publish_debug(
     dbg["sigma_hl"] = sigma(diag.variance[10]);
 
     dbg["nis"] = diag.nis;
+    dbg["nis_mean"] = diag.nis_mean;
     dbg["nis_threshold"] = diag.nis_threshold;
     dbg["nis_gate_enabled"] = diag.nis_gate_enabled ? 1.0 : 0.0;
     dbg["nis_gate_threshold"] = diag.nis_gate_threshold;
@@ -1398,6 +1399,9 @@ void FoxgloveServer::publish_debug(
     dbg["converged"] = diag.converged ? 1.0 : 0.0;
     dbg["diverged"] = diag.diverged ? 1.0 : 0.0;
     dbg["last_id"] = diag.last_observed_id;
+    dbg["anchor_err_px"] = diag.anchor_error;
+    dbg["ekf_no_update_frames"] = diag.no_update_frames;
+    dbg["ekf_reinits"] = diag.reinit_count;
     dbg["uses_rmcs_ekf"] = target.uses_rmcs() ? 1.0 : 0.0;
 
     // rmcs-style validation: compare against simulator ground truth.

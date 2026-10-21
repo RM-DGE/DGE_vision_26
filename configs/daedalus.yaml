@@ -59,6 +59,10 @@ ekf:
   # 仿真调参：DGE YOLO 的角点噪声比 rmcs 实机检测更大，故比 rmcs 默认 40 放宽
   noise_observation: 100.0
 
+  # v0.3：Q 按 dt 归一（噪声值按“每秒方差”解释），换帧率不用重调
+  # 设为 false 可回到 rmcs 原来的“每帧常量 Q”做 A/B
+  q_rate_aware: true
+
   # 状态夹紧
   radius_forward_min: 0.1
   radius_forward_max: 0.4
@@ -68,6 +72,7 @@ ekf:
   height_lateral_max: 0.2
   velocity_min: -10.0
   velocity_max: 10.0
+  rotation_speed_limit: 25.132741228718345
 
   # 可见性模型（度）：< full 为双灯条，< part 为单灯条
   yaw_full_max_deg: 70.0
@@ -77,9 +82,28 @@ ekf:
   fixed_outpost_pitch: false
   fixed_normal_pitch: false
 
+  # 初始协方差（v0.3 收紧；rmcs 原值 64/64/0.4/100 会让首帧被单板噪声拖飞）
+  initial_cov_position: 0.04
+  initial_cov_z: 0.01
+  initial_cov_velocity: 4.0
+  initial_cov_vz: 0.01
+  initial_cov_angle: 0.1
+  initial_cov_rotation_speed: 4.0
+  initial_cov_radius: 0.001
+  initial_cov_height: 0.001
+
+  # 关联/恢复
+  anchor_max_corner_error: 40.0
+  anchor_max_relative_error: 0.5
+  auto_reinit_after_no_update: 10
+  max_no_update_frames: 30
+
   # rmcs 收敛/发散判据
   converge_min_update: 10
-  converge_max_cov_xy: 1.0
+  converge_max_cov_xy: 0.04
+  converge_max_cov_v: 1.0
+  converge_max_cov_w: 1.0
+  converge_max_no_update_frames: 5
   converge_delay_s: 0.1
   diverge_cov: 150.0
   diverge_xy: 15.0
