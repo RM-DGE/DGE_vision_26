@@ -330,7 +330,24 @@ auto load_config(const YAML::Node & node) -> Config
   config.noise_height_lateral = read_or(node, "noise_height_lateral", config.noise_height_lateral);
 
   config.noise_observation = read_or(node, "noise_observation", config.noise_observation);
-  config.q_rate_aware = read_or(node, "q_rate_aware", config.q_rate_aware);
+
+  config.q_accel_xy = read_or(node, "q_accel_xy", config.q_accel_xy);
+  config.q_accel_z = read_or(node, "q_accel_z", config.q_accel_z);
+  config.q_alpha = read_or(node, "q_alpha", config.q_alpha);
+  if (node && node["process_model"]) {
+    const auto model = node["process_model"].as<std::string>();
+    if (model == "cwna") {
+      config.process_model = ProcessModel::CWNA;
+    } else if (model == "dwna") {
+      config.process_model = ProcessModel::DWNA;
+    } else if (model == "diag_rate") {
+      config.process_model = ProcessModel::DIAG_RATE;
+    } else {
+      tools::logger()->warn(
+        "[rmcs_ekf] unknown process_model '{}', falling back to cwna", model);
+      config.process_model = ProcessModel::CWNA;
+    }
+  }
 
   config.radius_forward_min = read_or(node, "radius_forward_min", config.radius_forward_min);
   config.radius_forward_max = read_or(node, "radius_forward_max", config.radius_forward_max);
@@ -500,6 +517,33 @@ auto RobotModel::initialize_from_pose(const CameraFeature & camera,
   return finish_initialize(camera, center, yaw, large);
 }
 
+auto RobotModel::initialize_synthetic(const State & state) -> void
+{
+  state_.setZero();
+  state_[kStateX] = state.x;
+  state_[kStateY] = state.y;
+  state_[kStateZ] = state.z;
+  state_[kStateVx] = state.vx;
+  state_[kStateVy] = state.vy;
+  state_[kStateVz] = state.vz;
+  state_[kStateA] = normalize_angle(state.rotation_angle);
+  state_[kStateW] = state.rotation_speed;
+  state_[kStateRF] = state.radius_forward;
+  state_[kStateRL] = state.radius_lateral;
+  state_[kStateHL] = state.height_lateral;
+
+  large_ = false;
+  set_noise();
+  reset_covariance();
+  observable_dirty_ = true;
+
+  init_timestamp_ = std::chrono::steady_clock::now();
+  jumped_ = false;
+  last_observed_id_ = -1;
+  update_count_ = 0;
+  no_update_frames_ = 0;
+}
+
 auto RobotModel::finish_initialize(
     const CameraFeature & camera, const Eigen::Vector3d & center, double yaw, bool large) -> bool
 {
@@ -531,6 +575,7 @@ auto RobotModel::finish_initialize(
 
   set_noise();
   reset_covariance();
+  observable_dirty_ = false;
 
   init_timestamp_ = std::chrono::steady_clock::now();
   jumped_ = false;
@@ -555,16 +600,9 @@ auto RobotModel::finish_initialize(
   return true;
 }
 
-auto RobotModel::predict(double dt) -> void
+auto RobotModel::extrapolate_state(const StateVector & state, double dt) const -> StateVector
 {
-  // Out-of-order or non-finite timestamps must not poison the filter.
-  if (!std::isfinite(dt) || dt <= 0.0) {
-    last_dt_ = 0.0;
-    return;
-  }
-
-  last_dt_ = dt;
-  auto next = state_;
+  auto next = state;
   next[kStateX] += next[kStateVx] * dt;
   next[kStateY] += next[kStateVy] * dt;
   next[kStateZ] += next[kStateVz] * dt;
@@ -573,32 +611,118 @@ auto RobotModel::predict(double dt) -> void
     next[kStateW] = std::clamp(
       next[kStateW], -config_.rotation_speed_limit, config_.rotation_speed_limit);
   }
+  return next;
+}
 
+auto RobotModel::propagate_covariance(double dt) -> void
+{
   Covariance jacobian = Covariance::Identity();
   jacobian(kStateX, kStateVx) = dt;
   jacobian(kStateY, kStateVy) = dt;
   jacobian(kStateZ, kStateVz) = dt;
   jacobian(kStateA, kStateW) = dt;
 
-  state_ = next;
+  ProcessNoise q = ProcessNoise::Zero();
+  switch (config_.process_model) {
+    case ProcessModel::CWNA: {
+      // Continuous white-noise acceleration, exactly discretized:
+      //   Q_pp = q*dt^3/3, Q_pv = q*dt^2/2, Q_vv = q*dt
+      const auto a = dt * dt * dt / 3.0;
+      const auto b = dt * dt / 2.0;
+      const auto c = dt;
+      const auto add_axis = [&](int p, int v, double q_axis) {
+        q(p, p) = q_axis * a;
+        q(p, v) = q_axis * b;
+        q(v, p) = q_axis * b;
+        q(v, v) = q_axis * c;
+      };
+      add_axis(kStateX, kStateVx, config_.q_accel_xy);
+      add_axis(kStateY, kStateVy, config_.q_accel_xy);
+      add_axis(kStateZ, kStateVz, config_.q_accel_z);
+      add_axis(kStateA, kStateW, config_.q_alpha);
+      break;
+    }
+    case ProcessModel::DWNA: {
+      // sp25's original piecewise white-noise acceleration:
+      //   Q_pp = q*dt^4/4, Q_pv = q*dt^3/2, Q_vv = q*dt^2
+      const auto a = dt * dt * dt * dt / 4.0;
+      const auto b = dt * dt * dt / 2.0;
+      const auto c = dt * dt;
+      const auto add_axis = [&](int p, int v, double q_axis) {
+        q(p, p) = q_axis * a;
+        q(p, v) = q_axis * b;
+        q(v, p) = q_axis * b;
+        q(v, v) = q_axis * c;
+      };
+      add_axis(kStateX, kStateVx, config_.q_accel_xy);
+      add_axis(kStateY, kStateVy, config_.q_accel_xy);
+      add_axis(kStateZ, kStateVz, config_.q_accel_z);
+      add_axis(kStateA, kStateW, config_.q_alpha);
+      break;
+    }
+    case ProcessModel::DIAG_RATE: {
+      q = process_noise_;
+      q *= dt;
+      break;
+    }
+  }
 
-  // rmcs adds the same Q every predict (per-frame noise). DGE runs at a
-  // different frame rate, so q_rate_aware interprets the configured diagonal
-  // as a per-second density and scales it by dt. Set q_rate_aware=false to
-  // reproduce the original per-frame behavior for A/B tests.
-  auto q = process_noise_;
-  if (config_.q_rate_aware) q *= dt;
+  // Radius/height have no velocity state: diagonal random walk in all models.
+  q(kStateRF, kStateRF) = process_noise_(kStateRF, kStateRF) * dt;
+  q(kStateRL, kStateRL) = process_noise_(kStateRL, kStateRL) * dt;
+  q(kStateHL, kStateHL) = process_noise_(kStateHL, kStateHL) * dt;
+
   covariance_ = jacobian * covariance_ * jacobian.transpose() + q;
-
-  observable_.update(state_);
 }
+
+auto RobotModel::refresh_observable() const -> void
+{
+  if (!observable_dirty_) return;
+  observable_.update(state_);
+  observable_dirty_ = false;
+}
+
+auto RobotModel::predict(double dt) -> void
+{
+  // Filter time update only. State-only lookahead must use extrapolate().
+  if (!std::isfinite(dt) || dt <= 0.0) {
+    last_dt_ = 0.0;
+    return;
+  }
+
+  last_dt_ = dt;
+  state_ = extrapolate_state(state_, dt);
+  propagate_covariance(dt);
+
+  // Do not project here. correct()/diagnostics() refresh on demand; full()
+  // only needs RobotSolution::solve_armors() and stays projection-free.
+  observable_dirty_ = true;
+}
+
+auto RobotModel::extrapolate(double dt) const -> State
+{
+  if (!std::isfinite(dt)) return state();
+  return state_from_vector(extrapolate_state(state_, dt));
+}
+
+auto RobotModel::extrapolated(double dt) const -> RobotModel
+{
+  RobotModel copy = *this;
+  if (std::isfinite(dt)) {
+    copy.state_ = copy.extrapolate_state(copy.state_, dt);
+  }
+  copy.observable_dirty_ = true;
+  return copy;
+}
+
 
 auto RobotModel::correct(const std::vector<Armor2d> & armors,
   const std::vector<Lightbar2d> & lightbars, const CameraFeature & camera) -> void
 {
   observable_.camera = camera;
   observable_.large = large_;
-  observable_.update(state_);
+  observable_dirty_ = true;
+  refresh_observable();
 
   frame_nis_sum_ = 0.0;
   frame_nis_max_ = 0.0;
@@ -945,6 +1069,7 @@ auto RobotModel::update_one(const Eigen::Vector2d & upper, const Eigen::Vector2d
   covariance_ = posterior_covariance;
 
   observable_.update(state_);
+  observable_dirty_ = false;
 
   last_update_accepted_ = true;
   ++frame_update_count_;
@@ -956,6 +1081,8 @@ auto RobotModel::update_one(const Eigen::Vector2d & upper, const Eigen::Vector2d
 
 auto RobotModel::diagnostics() const -> Diagnostics
 {
+  refresh_observable();
+
   Diagnostics result;
   result.state = state();
   result.variance = covariance_.diagonal();
@@ -1090,22 +1217,24 @@ auto RobotModel::make_observation_jacobian(int lightbar_id) const
   return jacobian;
 }
 
-auto RobotModel::state() const -> State
+auto RobotModel::state_from_vector(const StateVector & state) const -> State
 {
   State result;
-  result.x = state_[kStateX];
-  result.y = state_[kStateY];
-  result.z = state_[kStateZ];
-  result.vx = state_[kStateVx];
-  result.vy = state_[kStateVy];
-  result.vz = state_[kStateVz];
-  result.rotation_angle = state_[kStateA];
-  result.rotation_speed = state_[kStateW];
-  result.radius_forward = state_[kStateRF];
-  result.radius_lateral = state_[kStateRL];
-  result.height_lateral = state_[kStateHL];
+  result.x = state[kStateX];
+  result.y = state[kStateY];
+  result.z = state[kStateZ];
+  result.vx = state[kStateVx];
+  result.vy = state[kStateVy];
+  result.vz = state[kStateVz];
+  result.rotation_angle = state[kStateA];
+  result.rotation_speed = state[kStateW];
+  result.radius_forward = state[kStateRF];
+  result.radius_lateral = state[kStateRL];
+  result.height_lateral = state[kStateHL];
   return result;
 }
+
+auto RobotModel::state() const -> State { return state_from_vector(state_); }
 
 auto RobotModel::full() const -> std::array<Armor3d, 4>
 {

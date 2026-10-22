@@ -34,29 +34,24 @@ io::Command Aimer::aim(
   bool to_now)
 {
   if (targets.empty()) return {false, false, 0, 0};
-  auto target = targets.front();
+  const auto base = targets.front();
 
-  auto state = target.state();
+  const auto state = base.state();
   double delay_time =
     state.rotation_speed > decision_speed_ ? high_speed_delay_time_ : low_speed_delay_time_;
 
   if (bullet_speed < 14) bullet_speed = 23;
 
-  // 考虑detecor和tracker所消耗的时间，此外假设aimer的用时可忽略不计
-  auto future = timestamp;
+  // 考虑detector和tracker所消耗的时间，此外假设aimer的用时可忽略不计
+  double dt0;
   if (to_now) {
-    double dt;
-    dt = tools::delta_time(std::chrono::steady_clock::now(), timestamp) + delay_time;
-    future += std::chrono::microseconds(int(dt * 1e6));
-    target.predict(future);
+    dt0 = tools::delta_time(std::chrono::steady_clock::now(), timestamp) + delay_time;
+  } else {
+    dt0 = 0.005 + delay_time;  //detector-aimer耗时0.005+发弹延时0.1
   }
 
-  else {
-    auto dt = 0.005 + delay_time;  //detector-aimer耗时0.005+发弹延时0.1
-    // tools::logger()->info("dt is {:.4f} second", dt);
-    future += std::chrono::microseconds(int(dt * 1e6));
-    target.predict(future);
-  }
+  // 只做状态外推，不改协方差；后续迭代都从 base 重新外推，避免累积误差。
+  const auto target = base.at(dt0);
 
   auto aim_point0 = choose_aim_point(target);
   debug_aim_point = aim_point0;
@@ -79,15 +74,13 @@ io::Command Aimer::aim(
   bool converged = false;
   double prev_fly_time = trajectory0.fly_time;
   tools::Trajectory current_traj = trajectory0;
-  std::vector<Target> iteration_target(10, target);  // 创建10个目标副本用于迭代预测
 
   for (int iter = 0; iter < 10; ++iter) {
-    // 预测目标在 future + prev_fly_time 时刻的位置
-    auto predict_time = future + std::chrono::microseconds(static_cast<int>(prev_fly_time * 1e6));
-    iteration_target[iter].predict(predict_time);
+    // 从原始 posterior 状态外推到命中时刻，不累积上一轮的外推。
+    const auto iter_target = base.at(dt0 + prev_fly_time);
 
     // 计算瞄准点
-    auto aim_point = choose_aim_point(iteration_target[iter]);
+    auto aim_point = choose_aim_point(iter_target);
     debug_aim_point = aim_point;
     if (!aim_point.valid) {
       return {false, false, 0, 0};

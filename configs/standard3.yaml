@@ -38,8 +38,15 @@ max_temp_lost_count: 15 #最大暂存丢失帧数
 #####-----4板 rmcs 像素 EKF-----#####
 ekf:
   noise_observation: 40.0
-  # v0.3：Q 按 dt 归一；P0 收紧；坏关联/失锁自动重初始化
-  q_rate_aware: true
+  # 过程噪声模型：cwna | dwna | diag_rate
+  # cwna: Q_pp=q*dt^3/3, Q_pv=q*dt^2/2, Q_vv=q*dt
+  # dwna: sp25 原版，Q_pp=q*dt^4/4, Q_pv=q*dt^3/2, Q_vv=q*dt^2
+  # diag_rate: 旧的 diag(noise_*)*dt
+  process_model: cwna
+  # q_accel_xy / q_accel_z: (m/s²)²·s；q_alpha: (rad/s²)²·s
+  q_accel_xy: 1.0
+  q_accel_z: 1e-4
+  q_alpha: 10.0
   initial_cov_position: 0.04
   initial_cov_z: 0.01
   initial_cov_velocity: 4.0

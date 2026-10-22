@@ -79,21 +79,49 @@ Target::Target(
   isinit = true;
 }
 
+auto Target::synthetic(double x, double vyaw, double radius, double h) -> Target
+{
+  Target target;
+  target.name = ArmorName::not_armor;
+  target.armor_type = ArmorType::small;
+  target.priority = ArmorPriority::fifth;
+
+  rmcs_ekf::State state;
+  state.x = x;
+  state.y = 0.0;
+  state.z = 0.0;
+  state.vx = 0.0;
+  state.vy = 0.0;
+  state.vz = 0.0;
+  state.rotation_angle = 0.0;
+  state.rotation_speed = vyaw;
+  state.radius_forward = radius;
+  state.radius_lateral = radius;
+  state.height_lateral = h;
+
+  target.rmcs_model_.initialize_synthetic(state);
+  target.isinit = true;
+  return target;
+}
+
 void Target::predict(std::chrono::steady_clock::time_point t)
 {
   const auto dt = tools::delta_time(t, t_);
-  if (!std::isfinite(dt) || dt < 0.0) {
-    tools::logger()->debug("[Target] ignoring out-of-order predict timestamp: dt={:.4f}s", dt);
+  if (!std::isfinite(dt) || dt <= 0.0) {
+    tools::logger()->debug("[Target] ignoring non-positive predict dt: dt={:.4f}s", dt);
     return;
   }
-  predict(dt);
+  rmcs_model_.predict(dt);
   t_ = t;
 }
 
-void Target::predict(double dt)
+auto Target::at(double dt) const -> Target
 {
-  if (!std::isfinite(dt) || dt <= 0.0) return;
-  rmcs_model_.predict(dt);
+  Target copy = *this;
+  copy.rmcs_model_ = rmcs_model_.extrapolated(dt);
+  copy.t_ += std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+    std::chrono::duration<double>(dt));
+  return copy;
 }
 
 void Target::update(const std::list<Armor> & armors, const rmcs_ekf::CameraFeature & camera)

@@ -53,12 +53,12 @@ int main(int argc, char * argv[])
   io::Gimbal gimbal(config_path);
   auto_aim::Planner planner(config_path);
   // 虚拟目标：距离 d、角速度 w、半径 0.2 m、装甲板高度 0.1 m
-  auto_aim::Target target(d, w, 0.2, 0.1);
+  auto_aim::Target target = auto_aim::Target::synthetic(d, w, 0.2, 0.1);
 
   auto t0 = std::chrono::steady_clock::now();
 
   while (!exiter.exit()) {
-    target.predict(0.01);  // 按 10 ms 步长推进目标状态
+    target = target.at(0.01);  // 按 10 ms 步长推进目标状态
 
     auto gs = gimbal.state();
     // 用当前弹速计算弹道补偿，得到云台规划指令

@@ -42,14 +42,15 @@ Plan Planner::plan(Target target, double bullet_speed)
     }
   }
   auto bullet_traj = tools::Trajectory(bullet_speed, min_dist, xyz.z());
-  target.predict(bullet_traj.fly_time);
+  const auto fly_time = bullet_traj.fly_time;
+  const auto predicted = target.at(fly_time);
 
   // 2. Get trajectory
   double yaw0;
   Trajectory traj;
   try {
-    yaw0 = aim(target, bullet_speed)(0);
-    traj = get_trajectory(target, yaw0, bullet_speed);
+    yaw0 = aim(predicted, bullet_speed)(0);
+    traj = get_trajectory(target, fly_time, yaw0, bullet_speed);
   } catch (const std::exception & e) {
     tools::logger()->warn("Unsolvable target {:.2f}", bullet_speed);
     return {false};
@@ -102,9 +103,8 @@ Plan Planner::plan(std::optional<Target> target, double bullet_speed)
 
   auto future = std::chrono::steady_clock::now() + std::chrono::microseconds(int(delay_time * 1e6));
 
-  target->predict(future);
-
-  return plan(*target, bullet_speed);
+  const auto dt = tools::delta_time(future, target->time());
+  return plan(target->at(dt), bullet_speed);
 }
 
 void Planner::setup_yaw_solver(const std::string & config_path)
@@ -176,19 +176,18 @@ Eigen::Matrix<double, 2, 1> Planner::aim(const Target & target, double bullet_sp
   return {tools::limit_rad(azim + yaw_offset_), -bullet_traj.pitch - pitch_offset_};
 }
 
-Trajectory Planner::get_trajectory(Target & target, double yaw0, double bullet_speed)
+Trajectory Planner::get_trajectory(
+  const Target & target, double base_dt, double yaw0, double bullet_speed)
 {
   Trajectory traj;
 
-  target.predict(-DT * (HALF_HORIZON + 1));
-  auto yaw_pitch_last = aim(target, bullet_speed);
-
-  target.predict(DT);  // [0] = -HALF_HORIZON * DT -> [HHALF_HORIZON] = 0
-  auto yaw_pitch = aim(target, bullet_speed);
+  auto yaw_pitch_last =
+    aim(target.at(base_dt - DT * (HALF_HORIZON + 1)), bullet_speed);
+  auto yaw_pitch = aim(target.at(base_dt - DT * HALF_HORIZON), bullet_speed);
 
   for (int i = 0; i < HORIZON; i++) {
-    target.predict(DT);
-    auto yaw_pitch_next = aim(target, bullet_speed);
+    auto yaw_pitch_next =
+      aim(target.at(base_dt + (i + 1 - HALF_HORIZON) * DT), bullet_speed);
 
     auto yaw_vel = tools::limit_rad(yaw_pitch_next(0) - yaw_pitch_last(0)) / (2 * DT);
     auto pitch_vel = (yaw_pitch_next(1) - yaw_pitch_last(1)) / (2 * DT);

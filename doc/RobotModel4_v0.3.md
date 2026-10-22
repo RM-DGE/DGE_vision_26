@@ -1,5 +1,8 @@
 # RobotModel4 v0.3 改动说明（4 板像素 EKF）
 
+> **历史文档**：本文的 `q_rate_aware` 已被 `process_model: cwna | dwna | diag_rate`
+> 取代，当前配置见 `configs/*.yaml` 的 `q_accel_*` / `q_alpha`。
+>
 > 范围：只改 `tasks/auto_aim/rmcs_ekf/`（11 维、4 板、像素观测），
 > legacy 2/3 板 EKF 和 Target/Tracker 的接口不变。
 >

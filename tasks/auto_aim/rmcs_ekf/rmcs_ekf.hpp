@@ -253,8 +253,23 @@ struct RobustPnp
 // EKF configuration
 // ---------------------------------------------------------------------------
 
+// Process-noise model selection.
+enum class ProcessModel
+{
+  // Continuous white-noise acceleration, exactly discretized:
+  //   Q_pp = q*dt^3/3, Q_pv = q*dt^2/2, Q_vv = q*dt
+  CWNA,
+  // sp25's original piecewise white-noise acceleration:
+  //   Q_pp = q*dt^4/4, Q_pv = q*dt^3/2, Q_vv = q*dt^2
+  DWNA,
+  // Legacy rmcs diagonal: Q = diag(noise_*) * dt
+  DIAG_RATE,
+};
+
 struct Config
 {
+  // Legacy diagonal process noise (DIAG_RATE only). Radii/height also use
+  // their noise_* values as a q*dt random walk in CWNA/DWNA.
   // Process noise (diagonal Q)
   double noise_x = 1e-4;
   double noise_y = 1e-4;
@@ -274,10 +289,16 @@ struct Config
   // Observation noise (pixel^2)
   double noise_observation = 40.0;
 
-  // Rate-aware process noise. When true, the noise_* diagonal above is
-  // interpreted as a per-second density and scaled by dt inside predict().
-  // false reproduces rmcs' per-frame behavior (kept for A/B tests).
-  bool q_rate_aware = true;
+  // Process-noise model. CWNA is the default; DWNA keeps sp25's original
+  // dt powers for A/B; DIAG_RATE reproduces the old diagonal noise_* * dt.
+  ProcessModel process_model = ProcessModel::CWNA;
+
+  // CWNA/DWNA acceleration noise. For CWNA these are continuous acceleration
+  // PSD: q_accel_xy / q_accel_z in (m/s^2)^2*s, q_alpha in (rad/s^2)^2*s.
+  // For DWNA they are interpreted as sp25's discrete acceleration variance.
+  double q_accel_xy = 1.0;
+  double q_accel_z = 1e-4;
+  double q_alpha = 10.0;
 
   // State clamps
   double radius_forward_min = 0.1;
@@ -430,12 +451,22 @@ public:
 
   auto initialize(const CameraFeature & camera, const std::vector<Armor2d> & armors) -> bool;
 
+  // Test/utility: initialize directly from a synthetic state without a camera.
+  auto initialize_synthetic(const State & state) -> void;
+
   // Fallback: initialize from an already-solved armor pose (sp_vision Solver).
   // Useful when the detector's PnP is too noisy for the robust-PnP branch.
   auto initialize_from_pose(const CameraFeature & camera, const Eigen::Vector3d & translation,
     const Eigen::Quaterniond & orientation, bool large) -> bool;
 
   auto predict(double dt) -> void;
+
+  /// 只做状态外推，不修改协方差/时间/observable；dt 可以为负。
+  auto extrapolate(double dt) const -> State;
+
+  /// 返回一个“状态已外推”的轻量副本；协方差和观测缓存保持不变。
+  /// 供 aimer / planner / Foxglove 做未来时刻查询。
+  auto extrapolated(double dt) const -> RobotModel;
 
   auto correct(const std::vector<Armor2d> & armors, const std::vector<Lightbar2d> & lightbars,
     const CameraFeature & camera) -> void;
@@ -482,6 +513,10 @@ private:
 
   auto reset_covariance() -> void;
   auto set_noise() -> void;
+  auto extrapolate_state(const StateVector & state, double dt) const -> StateVector;
+  auto propagate_covariance(double dt) -> void;
+  auto refresh_observable() const -> void;
+  auto state_from_vector(const StateVector & state) const -> State;
   auto finish_initialize(
     const CameraFeature & camera, const Eigen::Vector3d & center, double yaw, bool large) -> bool;
   auto maybe_reinitialize(const CameraFeature & camera, const std::vector<Armor2d> & armors)
@@ -497,7 +532,8 @@ private:
   ProcessNoise process_noise_{ ProcessNoise::Zero() };
   ObservationNoise observation_noise_{ ObservationNoise::Zero() };
 
-  Observable observable_;
+  mutable Observable observable_;
+  mutable bool observable_dirty_ = true;
 
   bool large_ = false;
   bool jumped_ = false;

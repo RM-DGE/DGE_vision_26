@@ -951,9 +951,7 @@ void FoxgloveServer::publish_prediction(
   const int steps = std::max(1, static_cast<int>(horizon_s / step_s));
 
   for (const auto & target : targets) {
-    // 复制一份目标，向前预测，不影响主流程的估计器状态
-    auto predictor = target;
-
+    // 只做状态外推，不推进协方差/时间，不影响主流程估计器。
     // 最近装甲板轨迹（瞄准器实际跟随的轨迹，小陀螺时会跳变）
     LinePrimitive armor_path;
     armor_path.type = LinePrimitive::LineType::LINE_STRIP;
@@ -965,27 +963,25 @@ void FoxgloveServer::publish_prediction(
     center_path.thickness = 0.006;
     center_path.color = make_color(1.0, 0.85, 0.1, 0.4);
 
-    const auto add_sample = [&](double frac) {
-      const Eigen::Vector3d armor_xyz = nearest_armor_xyz(predictor);
-      const Eigen::Vector3d center = target_center(predictor.state());
+    const auto add_sample = [&](const auto_aim::Target & sample) {
+      const Eigen::Vector3d armor_xyz = nearest_armor_xyz(sample);
+      const Eigen::Vector3d center = target_center(sample.state());
       armor_path.points.push_back(Point3{armor_xyz.x(), armor_xyz.y(), armor_xyz.z()});
       center_path.points.push_back(Point3{center.x(), center.y(), center.z()});
     };
 
-    add_sample(0.0);
+    add_sample(target);
     for (int i = 1; i <= steps; ++i) {
-      predictor.predict(step_s);
-      add_sample(static_cast<double>(i) / steps);
+      add_sample(target.at(step_s * i));
     }
 
     entity.lines.push_back(std::move(armor_path));
     entity.lines.push_back(std::move(center_path));
 
     // 未来若干时刻的幽灵装甲板（预测位置）
-    auto ghost = target;
     const int ghost_stride = std::max(1, steps / 3);
     for (int i = 1; i <= steps; i += ghost_stride) {
-      ghost.predict(step_s * ghost_stride);
+      const auto ghost = target.at(step_s * i);
       const double frac = static_cast<double>(i) / steps;
       for (const auto & xyza : ghost.xyza_list()) {
         CubePrimitive cube;

@@ -7,6 +7,7 @@
 | [融合说明.md](./融合说明.md) | 同济 sp_vision × 南京理工 rmcs 的融合内容、改动文件、使用方式 |
 | [RobotModel4_v0.3.md](./RobotModel4_v0.3.md) | 4 板像素 EKF v0.3：P0/Q×dt/门控/重初始化/NIS 口径 |
 | [RobotModel4_v0.32.md](./RobotModel4_v0.32.md) | v0.32 修改记录：RobustPnp 未定义行为修复、Solver 位姿初始化、仿真 + Foxglove 测试清单 |
+| [RobotModel4_v0.33.md](./RobotModel4_v0.33.md) | v0.33 修改记录：时间更新/状态外推拆分、observable 懒刷新、Aimer/Planner/Foxglove 迁移、CWNA/DWNA/DIAG_RATE 过程噪声 |
 
 ## 快速入口
 
@@ -29,5 +30,6 @@
 - `/dge/debug.sigma_x/y/z/vx/vy/vz/a/w/rf/rl/hl`
 - `/dge/debug.state[0..10]`
 - `/dge/debug.ekf_init_source`：1 = Solver 位姿初始化，2 = RobustPnp（v0.32）
+- `ekf.process_model`：`cwna`（默认）/ `dwna`（sp25 对照）/ `diag_rate`（旧 rmcs）；v0.33
 - `/dge/scene`：`tracked_target` 的 1σ/2σ XY 协方差椭圆
 - `/sim/ground_truth`：仿真真值（仅 Daedalus）

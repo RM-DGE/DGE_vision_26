@@ -41,6 +41,7 @@ max_temp_lost_count: 75 #最大暂存丢失帧数（仿真检测偶发丢帧，�
 # 27 赛季全兵种 4 块小装甲板；仅 4 板目标走该 EKF。
 # 状态顺序：[x, y, z, vx, vy, vz, a, w, rf, rl, hl]
 ekf:
+  # 旧的 diagonal/半径随机游走参数；CWNA/DWNA 下只用于 rf/rl/hl。
   # 过程噪声（对角线）
   noise_x: 1e-4
   noise_y: 1e-4
@@ -58,9 +59,17 @@ ekf:
   # 仿真调参：DGE YOLO 的角点噪声比 rmcs 实机检测更大，故比 rmcs 默认 40 放宽
   noise_observation: 100.0
 
-  # v0.3：Q 按 dt 归一（噪声值按“每秒方差”解释），换帧率不用重调
-  # 设为 false 可回到 rmcs 原来的“每帧常量 Q”做 A/B
-  q_rate_aware: true
+  # 过程噪声模型：cwna | dwna | diag_rate
+  # cwna: 连续白噪声加速度，Q_pp=q*dt^3/3, Q_pv=q*dt^2/2, Q_vv=q*dt
+  # dwna: sp25 原版，Q_pp=q*dt^4/4, Q_pv=q*dt^3/2, Q_vv=q*dt^2
+  # diag_rate: 旧的 diag(noise_*)*dt
+  process_model: cwna
+  # CWNA 参数：q 是加速度谱密度
+  # q_accel_xy / q_accel_z: (m/s²)²·s；q_alpha: (rad/s²)²·s
+  q_accel_xy: 1.0
+  q_accel_z: 1e-4
+  q_alpha: 10.0
+  # dwna 对照时，100 Hz 起点建议 q_accel_xy≈100, q_alpha≈900
 
   # 状态夹紧
   radius_forward_min: 0.1

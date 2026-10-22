@@ -32,8 +32,16 @@ public:
     const Armor & armor, std::chrono::steady_clock::time_point t,
     const rmcs_ekf::Config & ekf_config, const rmcs_ekf::CameraFeature & camera);
 
+  /// 测试/离线规划用的虚拟 4 板目标；不依赖相机和检测。
+  static auto synthetic(double x, double vyaw, double radius, double h) -> Target;
+
   void predict(std::chrono::steady_clock::time_point t);
-  void predict(double dt);
+
+  /// 轻量外推副本：只推状态，不推进协方差/时间，不修改原 Target。
+  /// 供 Aimer / Planner / Foxglove 查询未来时刻使用。
+  auto at(double dt) const -> Target;
+
+  auto time() const -> std::chrono::steady_clock::time_point { return t_; }
 
   // Bulk update: the rmcs model needs all observations in a frame to do
   // anchor matching and sequential lightbar updates.
