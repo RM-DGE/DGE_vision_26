@@ -9,6 +9,24 @@
 
 namespace auto_aim
 {
+
+namespace
+{
+
+/// DGE now only tracks 4-armor robots with the rmcs pixel EKF.
+/// 2/3-armor targets (balance / outpost / base) are no longer supported.
+auto is_supported_target(const Armor & armor) -> bool
+{
+  if (armor.name == ArmorName::outpost || armor.name == ArmorName::base) return false;
+
+  const auto is_balance = armor.type == ArmorType::big &&
+                          (armor.name == ArmorName::three || armor.name == ArmorName::four ||
+                           armor.name == ArmorName::five);
+  return !is_balance;
+}
+
+}  // namespace
+
 Tracker::Tracker(const std::string & config_path, Solver & solver)
 : solver_{solver},
   detect_count_(0),
@@ -22,8 +40,6 @@ Tracker::Tracker(const std::string & config_path, Solver & solver)
   enemy_color_ = (yaml["enemy_color"].as<std::string>() == "red") ? Color::red : Color::blue;
   min_detect_count_ = yaml["min_detect_count"].as<int>();
   max_temp_lost_count_ = yaml["max_temp_lost_count"].as<int>();
-  outpost_max_temp_lost_count_ = yaml["outpost_max_temp_lost_count"].as<int>();
-  normal_temp_lost_count_ = max_temp_lost_count_;
   ekf_config_ = rmcs_ekf::load_config(yaml["ekf"]);
 }
 
@@ -40,15 +56,9 @@ std::list<Target> Tracker::track(
     tools::logger()->warn("[Tracker] Large dt: {:.3f}s", dt);
     state_ = "lost";
   }
-  // 过滤掉非我方装甲板
-  armors.remove_if([&](const auto_aim::Armor & a) { return a.color != enemy_color_; });
-
-  // 过滤前哨站顶部装甲板
-  // armors.remove_if([this](const auto_aim::Armor & a) {
-  //   return a.name == ArmorName::outpost &&
-  //          solver_.oupost_reprojection_error(a, 27.5 * CV_PI / 180.0) <
-  //            solver_.oupost_reprojection_error(a, -15 * CV_PI / 180.0);
-  // });
+  // 只保留己方颜色且受支持的 4 板目标
+  armors.remove_if(
+    [&](const auto_aim::Armor & a) { return a.color != enemy_color_ || !is_supported_target(a); });
 
   // 优先选择靠近图像中心的装甲板
   armors.sort([](const Armor & a, const Armor & b) {
@@ -76,8 +86,8 @@ std::list<Target> Tracker::track(
   // 发散检测
   if (state_ != "lost" && target_.diverged()) {
     tools::logger()->debug(
-      "[Tracker] Target diverged! name={} rmcs={}",
-      ARMOR_NAMES.at(static_cast<size_t>(target_.name)), target_.uses_rmcs() ? 1 : 0);
+      "[Tracker] Target diverged! name={}",
+      ARMOR_NAMES.at(static_cast<size_t>(target_.name)));
     state_ = "lost";
     return {};
   }
@@ -106,6 +116,11 @@ std::tuple<omniperception::DetectionResult, std::list<Target>> Tracker::track(
     tools::logger()->warn("[Tracker] Large dt: {:.3f}s", dt);
     state_ = "lost";
   }
+
+  // 全向感知结果同样只保留 4 板目标，避免切到不支持的前哨站/平衡/基地
+  armors.remove_if([](const auto_aim::Armor & a) { return !is_supported_target(a); });
+  temp_target.armors.remove_if(
+    [](const auto_aim::Armor & a) { return !is_supported_target(a); });
 
   // 优先选择靠近图像中心的装甲板
   armors.sort([](const Armor & a, const Armor & b) {
@@ -160,8 +175,8 @@ std::tuple<omniperception::DetectionResult, std::list<Target>> Tracker::track(
   // 发散检测
   if (state_ != "lost" && target_.diverged()) {
     tools::logger()->debug(
-      "[Tracker] Target diverged! name={} rmcs={}",
-      ARMOR_NAMES.at(static_cast<size_t>(target_.name)), target_.uses_rmcs() ? 1 : 0);
+      "[Tracker] Target diverged! name={}",
+      ARMOR_NAMES.at(static_cast<size_t>(target_.name)));
     state_ = "lost";
     return {switch_target, {}};  // 返回switch_target和空的targets
   }
@@ -212,12 +227,6 @@ void Tracker::state_machine(bool found)
       state_ = "tracking";
     } else {
       temp_lost_count_++;
-      if (target_.name == ArmorName::outpost)
-        //前哨站的temp_lost_count需要设置的大一些
-        max_temp_lost_count_ = outpost_max_temp_lost_count_;
-      else
-        max_temp_lost_count_ = normal_temp_lost_count_;
-
       if (temp_lost_count_ > max_temp_lost_count_) state_ = "lost";
     }
   }
@@ -228,31 +237,15 @@ bool Tracker::set_target(std::list<Armor> & armors, std::chrono::steady_clock::t
   if (armors.empty()) return false;
 
   auto & armor = armors.front();
+  if (!is_supported_target(armor)) return false;
+
   solver_.solve(armor);
 
-  // 根据兵种优化初始化参数
-  auto is_balance = (armor.type == ArmorType::big) &&
-                    (armor.name == ArmorName::three || armor.name == ArmorName::four ||
-                     armor.name == ArmorName::five);
-
-  if (is_balance) {
-    Eigen::VectorXd P0_dig{{1, 64, 1, 64, 1, 64, 0.4, 100, 1, 1, 1}};
-    target_ = Target(armor, t, 0.2, 2, P0_dig, ekf_config_, solver_.camera_feature());
-  }
-
-  else if (armor.name == ArmorName::outpost) {
-    Eigen::VectorXd P0_dig{{1, 64, 1, 64, 1, 81, 0.4, 100, 1e-4, 0, 0}};
-    target_ = Target(armor, t, 0.2765, 3, P0_dig, ekf_config_, solver_.camera_feature());
-  }
-
-  else if (armor.name == ArmorName::base) {
-    Eigen::VectorXd P0_dig{{1, 64, 1, 64, 1, 64, 0.4, 100, 1e-4, 0, 0}};
-    target_ = Target(armor, t, 0.3205, 3, P0_dig, ekf_config_, solver_.camera_feature());
-  }
-
-  else {
-    Eigen::VectorXd P0_dig{{1, 64, 1, 64, 1, 64, 0.4, 100, 1, 1, 1}};
-    target_ = Target(armor, t, 0.2, 4, P0_dig, ekf_config_, solver_.camera_feature());
+  target_ = Target(armor, t, ekf_config_, solver_.camera_feature());
+  if (!target_.checkinit()) {
+    tools::logger()->warn(
+      "[Tracker] failed to initialize 4-armor EKF for {}", ARMOR_NAMES[armor.name]);
+    return false;
   }
 
   return true;
@@ -263,11 +256,9 @@ bool Tracker::update_target(std::list<Armor> & armors, std::chrono::steady_clock
   target_.predict(t);
 
   int found_count = 0;
-  double min_x = 1e10;  // 画面最左侧
   for (const auto & armor : armors) {
     if (armor.name != target_.name || armor.type != target_.armor_type) continue;
     found_count++;
-    min_x = armor.center.x < min_x ? armor.center.x : min_x;
   }
 
   if (found_count == 0) return false;
@@ -276,7 +267,10 @@ bool Tracker::update_target(std::list<Armor> & armors, std::chrono::steady_clock
   for (auto & armor : armors) {
     if (armor.name != target_.name || armor.type != target_.armor_type) continue;
 
-    solver_.solve(armor);
+    // v0.32: 4 板像素 EKF 只用角点，不用 PnP 结果。skip_tracking_pnp=true 时跳过
+    // 逐板解算（省掉每块板 140 次 yaw 重投影搜索），但 Foxglove 的 detections
+    // 方块会丢失世界系位姿，默认关闭。
+    if (!ekf_config_.skip_tracking_pnp) solver_.solve(armor);
     matched_armors.push_back(armor);
   }
 

@@ -93,35 +93,45 @@ void USBCamera::read(cv::Mat & img, std::chrono::steady_clock::time_point & time
 void USBCamera::open()
 {
   std::lock_guard<std::mutex> lock(cap_mutex_);
-  std::string true_device_name = "/dev/" + open_name_;
-  cap_.open(true_device_name, cv::CAP_V4L);
+
+  // 允许传入 "video2"、"v4l/by-path/..." 或完整的 "/dev/..." 路径。
+  // 推荐使用 /dev/v4l/by-path 下的稳定路径，避免插拔后 videoN 变化。
+  std::string true_device_name = open_name_;
+  if (true_device_name.rfind("/dev/", 0) != 0) {
+    true_device_name = "/dev/" + true_device_name;
+  }
+
+  cap_.open(true_device_name, cv::CAP_V4L2);
   if (!cap_.isOpened()) {
-    tools::logger()->warn("Failed to open USB camera");
+    tools::logger()->warn("Failed to open USB camera {}", true_device_name);
     return;
   }
   sharpness_ = cap_.get(cv::CAP_PROP_SHARPNESS);
   cap_.set(cv::CAP_PROP_FOURCC, cv::VideoWriter::fourcc('M', 'J', 'P', 'G'));
+  // 先定分辨率，再定帧率；否则部分 UVC 相机会把 FPS 重置回默认值。
+  cap_.set(cv::CAP_PROP_FRAME_WIDTH, image_width_);
+  cap_.set(cv::CAP_PROP_FRAME_HEIGHT, image_height_);
   cap_.set(cv::CAP_PROP_FPS, usb_frame_rate_);
   cap_.set(cv::CAP_PROP_AUTO_EXPOSURE, 1);
   cap_.set(cv::CAP_PROP_GAMMA, usb_gamma_);
   cap_.set(cv::CAP_PROP_GAIN, usb_gain_);
+  cap_.set(cv::CAP_PROP_EXPOSURE, usb_exposure_);
 
+  // 部分相机可用 sharpness 区分左右（2=左，3=右）。
+  // 当前 RYS USB Camera 上报的是 80，因此名称由调用方显式指定；
+  // 分辨率/曝光不再依赖 sharpness 判断，统一按 YAML 应用。
   if (sharpness_ == 2) {
     device_name = "left";
-    cap_.set(cv::CAP_PROP_FRAME_WIDTH, image_width_);
-    cap_.set(cv::CAP_PROP_FRAME_HEIGHT, image_height_);
-    cap_.set(cv::CAP_PROP_EXPOSURE, usb_exposure_);
   } else if (sharpness_ == 3) {
     device_name = "right";
-    cap_.set(cv::CAP_PROP_FRAME_WIDTH, image_width_);
-    cap_.set(cv::CAP_PROP_FRAME_HEIGHT, image_height_);
-    cap_.set(cv::CAP_PROP_EXPOSURE, usb_exposure_);
   }
 
-  tools::logger()->info("{} USBCamera opened", device_name);
-  // tools::logger()->info("USBCamera exposure time:{}", cap_.get(cv::CAP_PROP_EXPOSURE));
-  tools::logger()->info("USBCamera fps:{}", cap_.get(cv::CAP_PROP_FPS));
-  // tools::logger()->info("USBCamera gamma:{}", cap_.get(cv::CAP_PROP_GAMMA));
+  const auto & display_name = device_name.empty() ? open_name_ : device_name;
+  tools::logger()->info(
+    "{} USBCamera opened: {} {}x{}@{:.0f}fps ex={}", display_name, true_device_name,
+    static_cast<int>(cap_.get(cv::CAP_PROP_FRAME_WIDTH)),
+    static_cast<int>(cap_.get(cv::CAP_PROP_FRAME_HEIGHT)), cap_.get(cv::CAP_PROP_FPS),
+    cap_.get(cv::CAP_PROP_EXPOSURE));
 
   // 取图线程
   capture_thread_ = std::thread{[this] {

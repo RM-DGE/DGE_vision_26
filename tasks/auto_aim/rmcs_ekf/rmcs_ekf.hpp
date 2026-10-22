@@ -355,6 +355,14 @@ struct Config
   // Added to the position/velocity/angle diagonal after too many consecutive
   // rejections, so the filter can re-open its gate instead of staying stuck.
   double nis_reject_cov_inflation = 0.01;
+
+  // ---- v0.32 观测侧开关（全部可在 YAML 关闭做 A/B）----
+  // 初始化优先使用 sp_vision Solver 已解算的世界系板位姿（与 DGE 外参一致）；
+  // false = 优先 RobustPnp（v0.3 行为）。
+  bool init_prefer_solver_pose = true;
+  // 跟踪阶段 4 板目标跳过逐板 Solver::solve（像素 EKF 不需要）。会让 Foxglove
+  // detections 方块失去世界系位姿，默认 false。
+  bool skip_tracking_pnp = false;
 };
 
 auto load_config(const YAML::Node & node) -> Config;

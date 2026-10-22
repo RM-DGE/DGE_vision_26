@@ -160,7 +160,7 @@ AimPoint Aimer::choose_aim_point(const Target & target)
   }
 
   // 不考虑小陀螺
-  if (std::abs(state.radius_forward) <= 2 && target.name != ArmorName::outpost) {
+  if (std::abs(state.radius_forward) <= 2) {
     // 选择在可射击范围内的装甲板
     std::vector<int> id_list;
     for (int i = 0; i < armor_num; i++) {
@@ -189,14 +189,8 @@ AimPoint Aimer::choose_aim_point(const Target & target)
     return {true, armor_xyza_list[id_list[0]]};
   }
 
-  double coming_angle, leaving_angle;
-  // if (target.name == ArmorName::outpost) {
-  //   coming_angle = 70 / 57.3;
-  //   leaving_angle = 30 / 57.3;
-  // } else {
-    coming_angle = comming_angle_;
-    leaving_angle = leaving_angle_;
-  // }
+  double coming_angle = comming_angle_;
+  double leaving_angle = leaving_angle_;
 
   // 在小陀螺时，一侧的装甲板不断出现，另一侧的装甲板不断消失，显然前者被打中的概率更高
   for (int i = 0; i < armor_num; i++) {

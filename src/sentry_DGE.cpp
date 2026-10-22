@@ -11,9 +11,9 @@
  *   - USB 全向感知阶段只发送 control，不发送 shoot。
  *
  * 相机角色：
- *   io::Camera      工业相机（主相机，随云台转动）
- *   io::USBCamera   左 USB（device_name = "left"）
- *   io::USBCamera   右 USB（device_name = "right"）
+ *   io::Camera      前向工业相机（主相机，随云台转动，0°）
+ *   io::USBCamera   左 USB（device_name = "left"，YAML 配置，默认 +120°）
+ *   io::USBCamera   右 USB（device_name = "right"，YAML 配置，默认 -120°）
  *
  * 使用方法：
  *   ./build/sentry_DGE configs/sentry.yaml
@@ -87,8 +87,8 @@ void draw_omni_radar(
   cv::line(radar, {300, 40}, {300, 560}, {60, 60, 60}, 1);
 
   tools::draw_text(radar, "0", {292, 30}, {200, 200, 200});
-  tools::draw_text(radar, "90", {530, 290}, {200, 200, 200});
-  tools::draw_text(radar, "-90", {40, 290}, {200, 200, 200});
+  tools::draw_text(radar, "-90", {530, 290}, {200, 200, 200});
+  tools::draw_text(radar, "90", {40, 290}, {200, 200, 200});
   tools::draw_text(radar, "180", {280, 575}, {200, 200, 200});
 
   // 云台当前朝向（0° 为车体/云台零位，图上的上方向）
@@ -209,9 +209,15 @@ int main(int argc, char * argv[])
 
   // 图像-IMU 时间补偿：真机需要按实际链路延迟调整，仿真默认 1 ms
   double imu_delay_ms = 1.0;
+  std::string usb_left_device = "video2";
+  std::string usb_right_device = "video4";
   {
     auto yaml = YAML::LoadFile(config_path);
     if (yaml["imu_delay_ms"]) imu_delay_ms = yaml["imu_delay_ms"].as<double>();
+    if (yaml["usb_left_device"])
+      usb_left_device = yaml["usb_left_device"].as<std::string>();
+    if (yaml["usb_right_device"])
+      usb_right_device = yaml["usb_right_device"].as<std::string>();
   }
 
   // 真机使用 CBoard（串口），仿真使用 DaedalusCBoard（共享内存）
@@ -231,9 +237,10 @@ int main(int argc, char * argv[])
 
   // 两路 USB：并行全向感知
   // video0/video1 是电脑内置摄像头，这里不使用；
-  // 两路外接 RYS USB 相机当前对应 video2 和 video4。
-  io::USBCamera usbcam1("video2", config_path);
-  io::USBCamera usbcam2("video4", config_path);
+  // 前向工业相机为 0°；两路外接 USB 相机分别放在左/右约 ±120°。
+  // 用 /dev/v4l/by-path 的稳定路径，避免插拔/重启后 videoN 变化。
+  io::USBCamera usbcam1(usb_left_device, config_path);
+  io::USBCamera usbcam2(usb_right_device, config_path);
 
   // USBCamera 默认根据 sharpness 判断左右，这里显式指定，避免硬件差异
   usbcam1.device_name = "left";

@@ -6,7 +6,7 @@
 >
 > - 同济 `sp_vision_25`：3D EKF、重投影验证、NIS/残差曲线、离线视频回放；
 > - 南京理工 `rmcs_auto_aim_v2`：2D 像素观测 EKF、合成真值测试、Foxglove 3D 真值对比、协方差收敛/发散判据；
-> - DGE：4 板走 rmcs 像素 EKF，2/3 板保留 legacy 3D EKF；Foxglove 同时显示状态、协方差、NIS 和真值误差。
+> - DGE：只保留 4 板 rmcs 像素 EKF；2/3 板 legacy 3D EKF 已移除。Foxglove 同时显示状态、协方差、NIS 和真值误差。
 
 ---
 
@@ -64,7 +64,7 @@ sigma_rf, sigma_rl, sigma_hl
 nis              当前帧 4 维像素新息的 NIS
 nis_threshold    chi-square(4) 阈值，默认 9.488（95%）
 nis_fail_rate    最近 nis_window 次更新的失败比例
-residual_norm    当前帧新息向量平均范数（4 板 EKF 为像素；legacy 为 yaw/pitch/distance/angle 混合量纲，仅看趋势）
+residual_norm    当前帧 4 维像素新息的平均范数（像素）
 ekf_updates      累计 correct 帧数
 ekf_frame_updates 当前帧被接受的灯条数
 ekf_frame_rejected 当前帧因 NIS/投影无效被拒绝的灯条数
@@ -75,7 +75,7 @@ ekf_dt           最近一次 predict 的 dt
 converged        协方差/时间收敛标志
 diverged         发散标志
 last_id          最近观测到的灯条/装甲板 id
-uses_rmcs_ekf    1 = 4 板 rmcs 像素 EKF，0 = legacy 3D EKF
+uses_rmcs_ekf    固定为 1（DGE 现在只有 4 板 rmcs 像素 EKF）
 ```
 
 判读建议：
@@ -84,7 +84,7 @@ uses_rmcs_ekf    1 = 4 板 rmcs 像素 EKF，0 = legacy 3D EKF
 |---|---|---|
 | `nis` | 稳态大多 < 9.488，切板/机动允许尖峰 | 长期 >> 阈值：Q/R 不匹配、外参/内参有问题、关联错 |
 | `nis_fail_rate` | 稳态 < 5%～10% | 持续 > 20%：不要先调 EKF，先查标定/关联 |
-| `residual_norm` | 小且平稳（4 板看像素，legacy 看趋势） | 持续大：相机外参、PnP、检测角点有问题 |
+| `residual_norm` | 小且平稳（像素） | 持续大：相机外参、PnP、检测角点有问题 |
 | `sigma_x/y` | 收敛后逐渐变小 | 不降反升：过程噪声过大或观测被拒绝 |
 | `sigma_w` | 静止时小，旋转时适度增大 | 静止时很大：角速度不可观/初始化差 |
 | `ekf_frame_updates` | 1～8，随可见灯条变化 | 长期 0：关联失败/可见性模型错 |
@@ -153,18 +153,20 @@ Foxglove 布局 `foxglove_layouts/dge_debug_layout.json`：
 
 ---
 
-## 5. 两套 EKF 的区别
+## 5. EKF 实现
 
-| 项目 | 4 板 rmcs 像素 EKF | legacy 3D EKF |
-|---|---|---|
-| 代码 | `tasks/auto_aim/rmcs_ekf/` | `target.cpp` + `tools/extended_kalman_filter` |
-| 观测 | 8 灯条上下端点像素（4D/灯条） | PnP 后 yaw/pitch/distance/angle |
-| 状态 | 11 维，rmcs 顺序 | 11 维，sp_vision 顺序 |
-| 半径/高度 | 在线估计 | 固定/半固定 |
-| 适用 | 4 板普通机器人/英雄/步兵/哨兵 | 2/3 板平衡、前哨站、基地 |
-| 诊断 | `RobotModel::diagnostics()` | `Target::diagnostics()` 映射 |
+DGE 现在只保留 **4 板 rmcs 像素 EKF**：
 
-`Target::diagnostics()` 把两套 EKF 统一成同一个 `rmcs_ekf::Diagnostics`，所以 Foxglove 不需要关心目标类型。
+| 项目 | 内容 |
+|---|---|
+| 代码 | `tasks/auto_aim/rmcs_ekf/` |
+| 观测 | 8 灯条上下端点像素（4D/灯条） |
+| 状态 | 11 维，rmcs 顺序 `[x,y,z,vx,vy,vz,a,w,rf,rl,hl]` |
+| 半径/高度 | 在线估计 |
+| 适用 | 4 板普通机器人/英雄/步兵/哨兵 |
+| 诊断 | `RobotModel::diagnostics()` |
+
+2/3 板目标（平衡、前哨站、基地）的 legacy 3D EKF 已删除；`Tracker` 会直接丢弃这些检测，不再创建对应 `Target`。
 
 ---
 
@@ -209,7 +211,7 @@ diverge_vz: 1.0
 
 建议后续增加 `tests/ekf_sim_test.cpp`：
 
-- MockMotion：静止、匀速、小陀螺、切板、遮挡、离群点、前哨站；
+- MockMotion：静止、匀速、小陀螺、切板、遮挡、离群点；
 - 生成带噪声的像素观测；
 - 跑 `RobotModel::init/predict/correct`；
 - 输出：位置 RMSE、yaw/vyaw RMSE、NIS 覆盖率、收敛时间、丢目标率；
@@ -234,7 +236,7 @@ diverge_vz: 1.0
    外参误差随距离/角度变化，Q/R 补不了；只会让 NIS 看起来正常但估计仍然偏。
 
 5. **忽略 `uses_rmcs_ekf`**  
-   4 板和 2/3 板的 EKF 不同；看曲线前先确认目标类型。
+   该字段在 DGE 中固定为 1；2/3 板 legacy EKF 已移除，不要再按 `0` 去查旧路径。
 
 6. **只看单帧 NIS**  
    单帧尖峰正常；看 `nis_fail_rate` 和滑动窗口。

@@ -329,7 +329,6 @@ sp_vision_25
 └── tools          // 工具层，见3.4软件架构
     ├── crc.hpp                    // CRC校验
     ├── exiter.hpp                 // 退出检测
-    ├── extended_kalman_filter.hpp // 扩展卡尔曼滤波器
     ├── img_tools.hpp              // 图像处理工具
     ├── logger.hpp                 // 日志记录器
     ├── math_tools.hpp             // 数学工具

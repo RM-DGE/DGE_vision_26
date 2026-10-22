@@ -9,7 +9,8 @@
  *   3. 生成 io::Command，交给 CBoard / Gimbal 执行。
  *
  * 角度约定：
- *   - 相机安装偏角写死在 decider.cpp：左 +62°、右 -62°、后 +170°；
+ *   - 前向工业相机为 0°；左/右 USB 相机安装角由 YAML 配置，
+ *     默认左 +120°、右 -120°（三相机间隔 120°）；
  *   - delta_angle 为“目标相对该相机光轴”的角度（度）；
  *   - 最终云台 yaw = 当前云台 yaw + delta_angle[0]，pitch = delta_angle[1]；
  *   - 类内部计算使用弧度，日志中乘 57.3 显示为度。
@@ -44,19 +45,20 @@ public:
   explicit Decider(const std::string & config_path);
 
   /**
-   * @brief 三相机轮询决策（左 USB / 右 USB / 后置主相机）
+   * @brief 旧三相机轮询决策（左 USB / 右 USB / 主相机）
+   *        当前前向工业相机 + 左右 USB 布局请使用 decide(detection_queue)。
    * @param yolo          用于检测当前帧的 YOLO 实例
    * @param gimbal_pos    当前云台 yaw/pitch/roll（弧度）
    * @param usbcam1       左相机
    * @param usbcam2       右相机
-   * @param back_cammera  后置相机
+   * @param back_cammera  主相机（旧接口参数名保留）
    * @return control=false 表示本帧无目标或未命中；否则 yaw/pitch 为绝对角度
    */
   io::Command decide(
     auto_aim::YOLO & yolo, const Eigen::Vector3d & gimbal_pos, io::USBCamera & usbcam1,
     io::USBCamera & usbcam2, io::Camera & back_cammera);
 
-  /// 只用后置相机的简化版本
+  /// 只用主相机的简化版本（旧接口）
   io::Command decide(
     auto_aim::YOLO & yolo, const Eigen::Vector3d & gimbal_pos, io::Camera & back_cammera);
 
@@ -66,7 +68,7 @@ public:
   /**
    * @brief 由检测框中心归一化坐标计算相对相机光轴的角度偏差
    * @param armors  当前帧装甲板，使用 armors.front()
-   * @param camera  相机名："left" / "right" / 其他（按后置相机处理）
+   * @param camera  相机名："left" / "right" / 其他（旧接口按后置相机处理）
    * @return {yaw 偏差, pitch 偏差}，单位：度
    */
   Eigen::Vector2d delta_angle(
@@ -97,8 +99,10 @@ private:
   int img_height_;   // 图像高（像素）
   double fov_h_, new_fov_h_;  // 原始/裁剪或缩放后的水平视场角（度）
   double fov_v_, new_fov_v_;  // 原始/裁剪或缩放后的垂直视场角（度）
+  double left_camera_yaw_deg_;   // 左 USB 相机安装角（度，向前为 0，向左为正）
+  double right_camera_yaw_deg_;  // 右 USB 相机安装角（度，向前为 0，向右为负）
   int mode_;   // 优先级模式：1/2 对应 mode1/mode2
-  int count_;  // 轮询计数：0=左，1=右，2=后
+  int count_;  // 轮询计数：0=左 USB，1=右 USB，2=主相机（旧三相机接口）
 
   auto_aim::Color enemy_color_;       // 需要打击的敌方颜色
   auto_aim::YOLO detector_;           // 预留的单路检测器

@@ -9,7 +9,8 @@
  *   再加上相机安装偏角和当前云台 yaw，得到云台需要转到的绝对角度。
  *
  * 注意：
- *   - 相机安装角 62° / -62° / 170° 和部分 FOV 是写死的，换机器人必须修改；
+ *   - 前向工业相机为 0°，左/右 USB 相机默认 +120° / -120°，
+ *     可通过 YAML 的 left_camera_yaw_deg / right_camera_yaw_deg 调整；
  *   - 本模块只输出瞄准指令（shoot=false），不负责开火和 EKF 跟踪。
  */
 
@@ -33,19 +34,30 @@ Decider::Decider(const std::string & config_path) : detector_(config_path), coun
   img_height_ = yaml["image_height"].as<double>();
   fov_h_ = yaml["fov_h"].as<double>();              // 相机原始水平视场角
   fov_v_ = yaml["fov_v"].as<double>();              // 相机原始垂直视场角
-  new_fov_h_ = yaml["new_fov_h"].as<double>();      // 裁剪/缩放后实际使用的视场角
-  new_fov_v_ = yaml["new_fov_v"].as<double>();
+  new_fov_h_ = yaml["new_fov_h"] ? yaml["new_fov_h"].as<double>()
+                                 : fov_h_;           // 裁剪/缩放后实际使用的视场角
+  new_fov_v_ = yaml["new_fov_v"] ? yaml["new_fov_v"].as<double>()
+                                 : fov_v_;
+  tools::logger()->info(
+    "[Decider] FOV native h/v={:.1f}/{:.1f}, effective h/v={:.1f}/{:.1f}", fov_h_, fov_v_,
+    new_fov_h_, new_fov_v_);
+  left_camera_yaw_deg_ =
+    yaml["left_camera_yaw_deg"] ? yaml["left_camera_yaw_deg"].as<double>() : 120.0;
+  right_camera_yaw_deg_ =
+    yaml["right_camera_yaw_deg"] ? yaml["right_camera_yaw_deg"].as<double>() : -120.0;
   enemy_color_ =                                    // 只打配置指定的敌方颜色
     (yaml["enemy_color"].as<std::string>() == "red") ? auto_aim::Color::red : auto_aim::Color::blue;
   mode_ = yaml["mode"].as<double>();                // 1/2 选择不同优先级表
 }
 
+// 旧三相机接口：只用于“左 USB / 右 USB / 主相机”轮询；
+// 当前 sentry_DGE 使用 Perceptron 队列 + decide(queue)，不走这条路径。
 io::Command Decider::decide(
   auto_aim::YOLO & yolo, const Eigen::Vector3d & gimbal_pos, io::USBCamera & usbcam1,
   io::USBCamera & usbcam2, io::Camera & back_camera)
 {
   Eigen::Vector2d delta_angle;
-  // count_ 轮询三路：0 -> 左 USB，1 -> 右 USB，2 -> 后置主相机
+  // count_ 轮询三路：0 -> 左 USB，1 -> 右 USB，2 -> 主相机（旧接口）
   io::USBCamera * cams[] = {&usbcam1, &usbcam2};
 
   cv::Mat usb_img;
@@ -134,28 +146,31 @@ io::Command Decider::decide(const std::vector<DetectionResult> & detection_queue
 };
 
 // 把检测框中心的归一化坐标（0~1）映射成相对相机光轴的角度。
-// 安装偏角写死为：左 +62°、右 -62°、后 +170°，换机器人必须重新标定。
+// 前向工业相机为 0°；左/右 USB 默认 +120°/-120°，由 YAML 配置。
 Eigen::Vector2d Decider::delta_angle(
   const std::list<auto_aim::Armor> & armors, const std::string & camera)
 {
   Eigen::Vector2d delta_angle;
   if (camera == "left") {
-    // 左相机：+62° 安装角；x 越大目标越靠右，因此 yaw 偏角减小
-    delta_angle[0] = 62 + (new_fov_h_ / 2) - armors.front().center_norm.x * new_fov_h_;
+    // 左相机：+120° 安装角；x 越大目标越靠右，因此 yaw 偏角减小
+    delta_angle[0] = left_camera_yaw_deg_ + (new_fov_h_ / 2) -
+                     armors.front().center_norm.x * new_fov_h_;
     // center_norm.y 向下为正，pitch 偏角相应向下
     delta_angle[1] = armors.front().center_norm.y * new_fov_v_ - new_fov_v_ / 2;
     return delta_angle;
   }
 
   else if (camera == "right") {
-    // 右相机：-62° 安装角，映射方式与左相机对称
-    delta_angle[0] = -62 + (new_fov_h_ / 2) - armors.front().center_norm.x * new_fov_h_;
+    // 右相机：-120° 安装角，映射方式与左相机对称
+    delta_angle[0] = right_camera_yaw_deg_ + (new_fov_h_ / 2) -
+                     armors.front().center_norm.x * new_fov_h_;
     delta_angle[1] = armors.front().center_norm.y * new_fov_v_ - new_fov_v_ / 2;
     return delta_angle;
   }
 
   else {
-    // 后置相机：安装角 170°，这里直接写死水平/垂直视场角 54.2°/44.5°
+    // 旧三相机接口的“后置”分支；当前前向工业相机 + 左右 USB 布局不使用。
+    // 保留仅为兼容旧调用，安装角 170° 不再代表现车布局。
     delta_angle[0] = 170 + (54.2 / 2) - armors.front().center_norm.x * 54.2;
     delta_angle[1] = armors.front().center_norm.y * 44.5 - 44.5 / 2;
     return delta_angle;

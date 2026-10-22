@@ -1402,7 +1402,8 @@ void FoxgloveServer::publish_debug(
     dbg["anchor_err_px"] = diag.anchor_error;
     dbg["ekf_no_update_frames"] = diag.no_update_frames;
     dbg["ekf_reinits"] = diag.reinit_count;
-    dbg["uses_rmcs_ekf"] = target.uses_rmcs() ? 1.0 : 0.0;
+    dbg["uses_rmcs_ekf"] = 1.0;  // DGE 现在只有 4 板 rmcs 像素 EKF
+    dbg["ekf_init_source"] = target.init_source();  // v0.32: 1=Solver 位姿, 2=RobustPnp
 
     // rmcs-style validation: compare against simulator ground truth.
     // Position has a fixed odom offset; align it on first lock, then report

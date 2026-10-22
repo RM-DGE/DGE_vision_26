@@ -36,7 +36,6 @@ max_rectangular_error: 25 # degree
 #####-----tracker参数-----#####
 min_detect_count: 5 # 最小确认帧数
 max_temp_lost_count: 75 #最大暂存丢失帧数（仿真检测偶发丢帧，放宽）
-outpost_max_temp_lost_count: 75
 
 #####-----rmcs 4板 EKF 参数（像素域观测）-----#####
 # 27 赛季全兵种 4 块小装甲板；仅 4 板目标走该 EKF。
@@ -123,6 +122,10 @@ ekf:
   nis_gate_warmup_updates: 10
   nis_max_consecutive_rejects: 5
   nis_reject_cov_inflation: 0.01
+
+  # v0.32 观测侧（可 A/B 回退）
+  init_prefer_solver_pose: true   # 初始化优先用 Solver 世界系板位姿；false = 优先 RobustPnp
+  skip_tracking_pnp: false        # true: 跟踪阶段 4 板目标跳过逐板 PnP（省 CPU，Foxglove detections 方块失去位姿）
 
 #####-----aimer参数-----#####
 # 仿真下真机标定偏置清零，方向不对时优先调 daedalus.yaw_sign/pitch_sign

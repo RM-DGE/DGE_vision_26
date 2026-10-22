@@ -245,15 +245,17 @@ auto RobustPnp::solve(Armor3d & output) const -> bool
     const auto q_camera_armor = Eigen::Quaterniond{ q_camera_odom * q_odom_armor }.normalized();
     const auto t_camera_armor = Eigen::Vector3d{ q_camera_odom * (t_odom_armor - t_odom_camera) };
 
-    const auto rotation_opencv = ros2opencv_rotation(q_camera_armor.toRotationMatrix());
+    const Eigen::Matrix3d rotation_opencv = ros2opencv_rotation(q_camera_armor.toRotationMatrix());
     const auto translation_opencv = ros2opencv_position(t_camera_armor);
 
     error = 0.0;
     for (int point_index = 0; point_index < 4; ++point_index) {
       const auto object = shape[point_index];
-      const auto point = rotation_opencv
-          * Eigen::Vector3d{ object.x, object.y, object.z }
-        + translation_opencv;
+      // v0.32: 必须求值成具体向量。`const auto` 会得到 Eigen 表达式模板，
+      // 引用已析构的临时 Vector3d（未定义行为）。实测 -O2 下每个候选 yaw 的误差都
+      // 相同，搜索总停在窗口左边界：初始化 yaw 恒偏 -30°、中心偏 10.35 cm。
+      const Eigen::Vector3d object_point{ object.x, object.y, object.z };
+      const Eigen::Vector3d point = rotation_opencv * object_point + translation_opencv;
 
       const auto projected = project_camera_point(point, intrinsic, distortion);
       if (!projected) return false;
@@ -393,6 +395,10 @@ auto load_config(const YAML::Node & node) -> Config
     read_or(node, "nis_max_consecutive_rejects", config.nis_max_consecutive_rejects);
   config.nis_reject_cov_inflation =
     read_or(node, "nis_reject_cov_inflation", config.nis_reject_cov_inflation);
+
+  config.init_prefer_solver_pose =
+    read_or(node, "init_prefer_solver_pose", config.init_prefer_solver_pose);
+  config.skip_tracking_pnp = read_or(node, "skip_tracking_pnp", config.skip_tracking_pnp);
 
   return config;
 }
@@ -844,9 +850,10 @@ auto RobotModel::update_one(const Eigen::Vector2d & upper, const Eigen::Vector2d
     return;
   }
 
-  const auto innovation_covariance =
+  // v0.32: 显式类型，避免 Eigen 惰性表达式在每次使用时重复求值（含求逆）。
+  const Eigen::Matrix4d innovation_covariance =
     jacobian * covariance_ * jacobian.transpose() + observation_noise_;
-  const auto innovation_covariance_inv = innovation_covariance.inverse();
+  const Eigen::Matrix4d innovation_covariance_inv = innovation_covariance.inverse();
   if (innovation_covariance_inv.hasNaN() || !innovation_covariance_inv.allFinite()) {
     last_update_accepted_ = false;
     ++frame_rejected_count_;
@@ -855,7 +862,7 @@ auto RobotModel::update_one(const Eigen::Vector2d & upper, const Eigen::Vector2d
 
   // NIS: r^T S^-1 r，自由度 = 观测维数 4。
   // 注意：这里用的是更新前的 covariance_ 和 innovation，符合标准 NIS 定义。
-  const auto nis = innovation.transpose() * innovation_covariance_inv * innovation;
+  const double nis = (innovation.transpose() * innovation_covariance_inv * innovation)(0, 0);
   last_nis_ = nis;
   last_residual_norm_ = innovation.norm();
 
@@ -897,7 +904,7 @@ auto RobotModel::update_one(const Eigen::Vector2d & upper, const Eigen::Vector2d
 
   consecutive_nis_rejects_ = 0;
 
-  const auto kalman_gain =
+  const KalmanGain kalman_gain =
     covariance_ * jacobian.transpose() * innovation_covariance_inv;
 
   auto posterior_state = StateVector{ state_ + kalman_gain * innovation };

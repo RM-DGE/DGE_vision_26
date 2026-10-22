@@ -320,7 +320,7 @@
       "followingViewWidth": 10
     },
     "Plot!dge_health": {
-      "title": "关联/恢复（anchor 误差 / 连续无更新 / 重初始化）",
+      "title": "关联/恢复（anchor 误差 / 连续无更新 / 重初始化 / 初始化来源）",
       "paths": [
         {
           "value": "/dge/debug.anchor_err_px",
@@ -339,6 +339,12 @@
           "enabled": true,
           "color": "#a3e635",
           "timestampMethod": "receiveTime"
+        },
+        {
+          "value": "/dge/debug.ekf_init_source",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "label": "init_source (1=Solver,2=PnP)"
         }
       ],
       "showXAxisLabels": true,

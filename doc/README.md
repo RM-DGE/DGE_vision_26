@@ -5,6 +5,8 @@
 | [标定程序.md](./标定程序.md) | 教程：机械零点/杆臂/rpy、QD 风格 URDF 外参与自动 pitch、刚性检查和世界系验收 |
 | [EKF调试.md](./EKF调试.md) | 状态/不确定性/一致性三层、Foxglove 字段、NIS/σ 判读、调参流程 |
 | [融合说明.md](./融合说明.md) | 同济 sp_vision × 南京理工 rmcs 的融合内容、改动文件、使用方式 |
+| [RobotModel4_v0.3.md](./RobotModel4_v0.3.md) | 4 板像素 EKF v0.3：P0/Q×dt/门控/重初始化/NIS 口径 |
+| [RobotModel4_v0.32.md](./RobotModel4_v0.32.md) | v0.32 修改记录：RobustPnp 未定义行为修复、Solver 位姿初始化、仿真 + Foxglove 测试清单 |
 
 ## 快速入口
 
@@ -26,5 +28,6 @@
 - `/dge/debug.nis`、`nis_threshold`、`nis_fail_rate`、`residual_norm`
 - `/dge/debug.sigma_x/y/z/vx/vy/vz/a/w/rf/rl/hl`
 - `/dge/debug.state[0..10]`
+- `/dge/debug.ekf_init_source`：1 = Solver 位姿初始化，2 = RobustPnp（v0.32）
 - `/dge/scene`：`tracked_target` 的 1σ/2σ XY 协方差椭圆
 - `/sim/ground_truth`：仿真真值（仅 Daedalus）

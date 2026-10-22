@@ -34,7 +34,6 @@ max_rectangular_error: 25 # degree
 #####-----tracker参数-----#####
 min_detect_count: 5 # 最小确认帧数
 max_temp_lost_count: 15 #最大暂存丢失帧数
-outpost_max_temp_lost_count: 75
 
 #####-----aimer数-----#####
 yaw_offset: 2.5 # degree -2.5
