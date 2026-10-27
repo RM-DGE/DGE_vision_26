@@ -119,3 +119,29 @@ target_link_libraries(io PUBLIC foxglove_cpp)
 #     include_directories(${std_msgs_INCLUDE_DIRS})
 #     ament_target_dependencies(io rclcpp std_msgs sp_msgs)
 #  endif()
+
+# ---------- ROS2 可选桥接层（io_ros2）----------
+# 只有 source 了 sp_msgs 所在工作空间、cmake 能找到 rclcpp/sp_msgs 时才编译。
+# 这样没有 ROS 环境的机器仍然可以只编译自瞄主程序。
+find_package(ament_cmake QUIET)
+find_package(rclcpp QUIET)
+find_package(std_msgs QUIET)
+find_package(sensor_msgs QUIET)
+find_package(geometry_msgs QUIET)
+find_package(sp_msgs QUIET)
+find_package(rosidl_typesupport_cpp QUIET)
+
+if(ament_cmake_FOUND AND rclcpp_FOUND AND std_msgs_FOUND AND sensor_msgs_FOUND
+   AND geometry_msgs_FOUND AND sp_msgs_FOUND AND rosidl_typesupport_cpp_FOUND)
+  message(STATUS "ROS2 found: building io_ros2 bridge")
+  add_library(io_ros2 STATIC
+    ros2/mcu_ros_bridge.cpp
+  )
+  target_include_directories(io_ros2 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+  target_link_libraries(io_ros2 io)
+  ament_target_dependencies(io_ros2 rclcpp std_msgs sensor_msgs geometry_msgs sp_msgs)
+  set(DGE_ROS2_FOUND TRUE PARENT_SCOPE)
+else()
+  message(STATUS "ROS2/sp_msgs not found: skipping io_ros2 (build ros2_ws/build.sh first)")
+  set(DGE_ROS2_FOUND FALSE PARENT_SCOPE)
+endif()

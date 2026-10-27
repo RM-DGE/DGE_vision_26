@@ -1,3 +1,6 @@
+// 旧版目标发布器：当前使用 io/ros2/mcu_ros_bridge.*。
+// 本文件保留给旧分支参考，不参与当前 CMake 编译。
+
 #ifndef IO__PBLISH2NAV_HPP
 #define IO__PBLISH2NAV_HPP
 

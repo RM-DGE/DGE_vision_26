@@ -40,6 +40,13 @@ add_executable(sentry_DGE src/sentry_DGE.cpp)
 
 target_link_libraries(standard ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
 target_link_libraries(sentry_DGE ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim omniperception tools io)
+
+# ROS2 桥接层暂时不接入 sentry_DGE：当前调试阶段先保证纯自瞄链路。
+# 桥接代码保留在 io/ros2/mcu_ros_bridge.*，需要时再重新链接 io_ros2。
+if(DGE_ROS2_FOUND)
+  add_executable(mcu_ros_delay_test tests/mcu_ros_delay_test.cpp)
+  target_link_libraries(mcu_ros_delay_test ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io io_ros2)
+endif()
 # target_link_libraries(mt_standard ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim auto_buff tools io)
 # target_link_libraries(standard_mpc ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
 # target_link_libraries(standard_mpc ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim auto_buff tools io)

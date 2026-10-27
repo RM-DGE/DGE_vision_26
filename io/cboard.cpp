@@ -15,6 +15,8 @@
 /* C板通信模块 */
 #include "cboard.hpp"
 
+#include <utility>
+
 #include "tools/math_tools.hpp"
 #include "tools/yaml.hpp"
 
@@ -161,6 +163,16 @@ void CBoard::callback(const std::vector<uint8_t> & frame)
         // queue_.push_back({{x, y, z, w}, timestamp});
         queue_.push_back({{w, x, y, z}, timestamp});
     }
+
+    // ROS 桥接层观察者：只做 mailbox 更新，不在这里 publish。
+    ImuObserver imu_observer;
+    {
+        std::lock_guard<std::mutex> lock(observer_mutex_);
+        imu_observer = imu_observer_;
+    }
+    if (imu_observer) {
+        imu_observer(ImuSample{Eigen::Quaterniond{w, x, y, z}, timestamp});
+    }
   } 
   else if (header == 0xBB) {
     if (frame.size() != sizeof(StatusDataFrame)) {
@@ -173,11 +185,20 @@ void CBoard::callback(const std::vector<uint8_t> & frame)
     bullet_speed = data->bullet_speed / 100.0;
     int m = data->mode;
     if (m >= 0 && m < static_cast<int>(MODES.size())) mode = Mode(m);
-    
-    // int sm = data->shoot_mode;
-    // if (sm >= 0 && sm < static_cast<int>(SHOOT_MODES.size())) shoot_mode = ShootMode(sm);
+    shoot_mode = data->ShootMode;
 
     ft_angle = data->ft_angle / 10000.0;
+
+    // ROS 桥接层观察者：状态低频，直接拷贝即可。
+    StatusObserver status_observer;
+    {
+        std::lock_guard<std::mutex> lock(observer_mutex_);
+        status_observer = status_observer_;
+    }
+    if (status_observer) {
+        status_observer(StatusSample{
+          bullet_speed, static_cast<int>(mode), shoot_mode, ft_angle, timestamp});
+    }
 
     static auto last_log_time = std::chrono::steady_clock::time_point::min();
     if (tools::delta_time(timestamp, last_log_time) >= 1.0) {
@@ -189,6 +210,18 @@ void CBoard::callback(const std::vector<uint8_t> & frame)
   } else {
     tools::logger()->debug("Unknown frame header: 0x{:02X}", header);
   }
+}
+
+void CBoard::set_imu_observer(ImuObserver observer)
+{
+  std::lock_guard<std::mutex> lock(observer_mutex_);
+  imu_observer_ = std::move(observer);
+}
+
+void CBoard::set_status_observer(StatusObserver observer)
+{
+  std::lock_guard<std::mutex> lock(observer_mutex_);
+  status_observer_ = std::move(observer);
 }
 
 std::string CBoard::read_yaml(const std::string & config_path)

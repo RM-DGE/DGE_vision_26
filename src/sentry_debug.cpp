@@ -7,8 +7,6 @@
 
 #include "io/camera.hpp"
 #include "io/cboard.hpp"
-#include "io/ros2/publish2nav.hpp"
-#include "io/ros2/ros2.hpp"
 #include "io/usbcamera/usbcamera.hpp"
 #include "tasks/auto_aim/aimer.hpp"
 #include "tasks/auto_aim/shooter.hpp"
@@ -42,7 +40,7 @@ int main(int argc, char * argv[])
   }
   auto config_path = cli.get<std::string>(0);
 
-  io::ROS2 ros2;
+  // ROS 通信暂时关闭：当前调试阶段不初始化 DDS。
   io::CBoard cboard(config_path);
   io::Camera camera(config_path);
   io::Camera back_camera("configs/camera.yaml");
@@ -74,11 +72,11 @@ int main(int argc, char * argv[])
 
     auto armors = yolo.detect(img);
 
-    decider.get_invincible_armor(ros2.subscribe_enemy_status());
+    // decider.get_invincible_armor(ros2.subscribe_enemy_status());
 
     decider.armor_filter(armors);
 
-    decider.get_auto_aim_target(armors, ros2.subscribe_autoaim_target());
+    // decider.get_auto_aim_target(armors, ros2.subscribe_autoaim_target());
 
     decider.set_priority(armors);
 
@@ -97,10 +95,7 @@ int main(int argc, char * argv[])
 
     cboard.send(command);
 
-    /// ROS2通信
-    Eigen::Vector4d target_info = decider.get_target_info(armors, targets);
-
-    ros2.publish(target_info);
+    // ROS 通信暂时关闭：target_info 不再发布。
 
     /// debug
     tools::draw_text(img, fmt::format("[{}]", tracker.state()), {10, 30}, {255, 255, 255});

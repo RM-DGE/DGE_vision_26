@@ -150,3 +150,29 @@ t_camera2gimbal: [0.13089617453251859, 0.0038468007459533785, 0.0941399452220102
 #####-----cboard串口参数-----#####
 serial_device: "/dev/ttyACM0"
 serial_baudrate: 115200
+
+#####-----ROS2 导航通信-----#####
+# 串口仍由 CBoard 独占；本节点只把解析后的 IMU/状态发布到 ROS，
+# 并订阅导航发来的无敌目标/优先目标。默认不把云台指令绕到 ROS，
+# 避免给云台控制增加一次 DDS 往返。
+ros2:
+  enabled: true
+  node_name: "dge_mcu_bridge"
+  imu_topic: "/mcu/imu"
+  status_topic: "/mcu/status"
+  # 可选：自瞄 -> /gimbal/cmd -> 桥接层 -> 串口。
+  # 生产默认 false，保持 sentry_DGE 直接 cboard.send() 的低延时路径。
+  enable_remote_gimbal_cmd: false
+  gimbal_cmd_topic: "/gimbal/cmd"
+  nav_enemy_status_topic: "/enemy_status"
+  nav_autoaim_target_topic: "/autoaim_target"
+  target_pos_topic: "/auto_aim_target_pos"
+  target_info_topic: "/auto_aim_target_info"
+  imu_frame_id: "imu_link"
+  # IMU 原始帧 1 kHz；导航不需要全量，默认降采样到 200 Hz。
+  # 测试时可在临时配置里改成 1000，测原始链路。
+  imu_publish_rate: 200.0
+  status_publish_rate: 20.0
+  max_cmd_age_ms: 20.0
+  nav_timeout_ms: 1500.0
+  status_online_timeout_ms: 200.0

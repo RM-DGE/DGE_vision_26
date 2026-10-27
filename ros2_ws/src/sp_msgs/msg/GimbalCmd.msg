@@ -1,0 +1,9 @@
+std_msgs/Header header
+uint32 seq
+bool control
+bool shoot
+float32 yaw
+float32 pitch
+float32 yaw_velocity
+float32 pitch_velocity
+float32 horizon_distance

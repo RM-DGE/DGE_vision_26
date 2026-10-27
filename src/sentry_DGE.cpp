@@ -23,6 +23,8 @@
  *   - 配置中需要提供 camera_matrix、R_camera2gimbal、t_camera2gimbal、
  *     fov_h/fov_v、new_fov_h/new_fov_v、mode，以及工业相机/USB 相机参数；
  *   - 真机使用 io::CBoard（串口），仿真时在 yaml 中写 cboard_name: daedalus；
+ *   - ROS2 通信暂时关闭：当前调试阶段先保证纯自瞄链路可运行。
+ *     恢复时参考 io/ros2/mcu_ros_bridge.* 和 doc/RobotModel4_v0.40.md；
  *   - USB 设备名当前写死为 video2/video4（两路外接相机），不使用内置摄像头；
  *     按实际设备修改。
  */
@@ -44,9 +46,11 @@
 #include "tasks/auto_aim/shooter.hpp"
 #include "tasks/auto_aim/solver.hpp"
 #include "tasks/auto_aim/tracker.hpp"
+#include "tasks/auto_aim/visualizer.hpp"
 #include "tasks/auto_aim/yolo.hpp"
 #include "tasks/omniperception/decider.hpp"
 #include "tasks/omniperception/perceptron.hpp"
+#include "tasks/omniperception/visualizer.hpp"
 #include "tools/Foxglove/foxglove.hpp"
 #include "tools/exiter.hpp"
 #include "tools/img_tools.hpp"
@@ -60,135 +64,6 @@ const std::string keys =
   "{@config-path   | configs/sentry.yaml | 位置参数，yaml配置文件路径 }"
   "{d display      |                     | 显示主相机和全向感知画面       }";
 
-namespace
-{
-cv::Point polar_to_screen(const cv::Point & center, double yaw_deg, double radius)
-{
-  const auto a = yaw_deg * CV_PI / 180.0;
-  // 屏幕上方为 0°，yaw 正方向向左
-  return {
-    static_cast<int>(center.x - radius * std::sin(a)),
-    static_cast<int>(center.y - radius * std::cos(a))};
-}
-
-// 极坐标全向感知图：中心为云台，0° 朝前，正 yaw 向左
-void draw_omni_radar(
-  cv::Mat & radar, const std::vector<omniperception::DetectionResult> & detection_queue,
-  double gimbal_yaw, const io::Command & command, const std::string & state)
-{
-  radar = cv::Mat(600, 600, CV_8UC3, cv::Scalar(30, 30, 30));
-  const cv::Point center(300, 300);
-
-  // 距离环和坐标轴
-  for (double r : {80.0, 160.0, 240.0}) {
-    cv::circle(radar, center, static_cast<int>(r), {80, 80, 80}, 1);
-  }
-  cv::line(radar, {40, 300}, {560, 300}, {60, 60, 60}, 1);
-  cv::line(radar, {300, 40}, {300, 560}, {60, 60, 60}, 1);
-
-  tools::draw_text(radar, "0", {292, 30}, {200, 200, 200});
-  tools::draw_text(radar, "-90", {530, 290}, {200, 200, 200});
-  tools::draw_text(radar, "90", {40, 290}, {200, 200, 200});
-  tools::draw_text(radar, "180", {280, 575}, {200, 200, 200});
-
-  // 云台当前朝向（0° 为车体/云台零位，图上的上方向）
-  cv::arrowedLine(radar, center, {300, 60}, {0, 255, 0}, 2);
-
-  // 当前云台指令方向（相对当前 yaw）
-  if (command.control) {
-    const auto cmd_yaw = (command.yaw - gimbal_yaw) * 57.3;
-    cv::arrowedLine(radar, center, polar_to_screen(center, cmd_yaw, 240), {0, 0, 255}, 2);
-  }
-
-  // 两路 USB 的检测结果
-  int index = 0;
-  for (const auto & dr : detection_queue) {
-    if (dr.armors.empty()) continue;
-
-    const auto yaw_deg = dr.delta_yaw * 57.3;
-    const auto point = polar_to_screen(center, yaw_deg, 180);
-
-    const cv::Scalar color = (index++ % 2 == 0) ? cv::Scalar(255, 180, 0)
-                                                : cv::Scalar(0, 180, 255);
-    cv::circle(radar, point, 7, color, -1);
-    tools::draw_text(
-      radar, fmt::format("{:.0f}", yaw_deg), point + cv::Point(8, -8), color, 0.5, 1);
-    tools::draw_text(
-      radar, auto_aim::ARMOR_NAMES[dr.armors.front().name], point + cv::Point(8, 18), color, 0.5,
-      1);
-  }
-
-  tools::draw_text(radar, fmt::format("state: {}", state), {10, 25}, {255, 255, 255}, 0.7, 1);
-  tools::draw_text(
-    radar, fmt::format("usb: {}", detection_queue.size()), {10, 50}, {255, 255, 255}, 0.7, 1);
-
-  if (detection_queue.empty()) {
-    tools::draw_text(radar, "no USB target", {220, 300}, {180, 180, 180}, 0.7, 1);
-  }
-}
-
-// USB 相机画面：原始图像 + 本帧检测框 + 相对偏角
-void draw_usb_view(
-  cv::Mat & view, const omniperception::DebugFrame & frame, const std::string & title)
-{
-  if (frame.img.empty()) return;
-
-  view = frame.img.clone();
-  for (const auto & armor : frame.armors) {
-    tools::draw_points(view, armor.points, {0, 255, 0});
-    tools::draw_text(
-      view, auto_aim::ARMOR_NAMES[armor.name],
-      cv::Point(static_cast<int>(armor.center.x), static_cast<int>(armor.center.y)), {0, 255, 0},
-      0.6, 1);
-  }
-
-  tools::draw_text(
-    view, fmt::format("{}  yaw {:.1f}", title, frame.delta_yaw * 57.3), {10, 30},
-    {0, 255, 255});
-  cv::resize(view, view, {}, 0.5, 0.5);
-}
-
-// 主相机画面：装甲板、跟踪状态、瞄准点、云台指令
-void draw_main_view(
-  cv::Mat & canvas, const std::list<auto_aim::Armor> & armors,
-  const std::list<auto_aim::Target> & targets, auto_aim::Solver & solver,
-  const auto_aim::AimPoint & aim_point, const std::string & state, const io::Command & command,
-  std::size_t usb_count)
-{
-  for (const auto & armor : armors) {
-    tools::draw_points(canvas, armor.points, {0, 255, 0});
-    tools::draw_text(
-      canvas, auto_aim::ARMOR_NAMES[armor.name],
-      cv::Point(static_cast<int>(armor.center.x), static_cast<int>(armor.center.y)), {0, 255, 0},
-      0.6, 1);
-  }
-
-  if (!targets.empty()) {
-    auto target = targets.front();
-    for (const auto & xyza : target.xyza_list()) {
-      auto image_points =
-        solver.reproject_armor(xyza.head(3), xyza[3], target.armor_type, target.name);
-      tools::draw_points(canvas, image_points, {255, 255, 0});
-    }
-
-    if (aim_point.valid) {
-      auto aim_xyza = aim_point.xyza;
-      auto image_points =
-        solver.reproject_armor(aim_xyza.head(3), aim_xyza[3], target.armor_type, target.name);
-      tools::draw_points(canvas, image_points, {0, 0, 255});
-    }
-  }
-
-  tools::draw_text(canvas, fmt::format("[{}]", state), {10, 30}, {255, 255, 255});
-  tools::draw_text(
-    canvas,
-    fmt::format(
-      "cmd yaw {:.1f} pitch {:.1f} shoot {}", command.yaw * 57.3, command.pitch * 57.3,
-      command.shoot),
-    {10, 65}, {0, 255, 255});
-  tools::draw_text(canvas, fmt::format("usb {}", usb_count), {10, 100}, {0, 255, 255});
-}
-}  // namespace
 
 int main(int argc, char * argv[])
 {
@@ -290,6 +165,7 @@ int main(int argc, char * argv[])
     /// 自瞄核心逻辑
     auto armors = yolo.detect(img);
 
+    // ROS 通信暂时关闭：导航无敌目标/优先目标不再注入。
     // 过滤非敌方、5 号、前哨站和无敌目标，并写入优先级
     decider.armor_filter(armors);
     decider.set_priority(armors);
@@ -328,6 +204,7 @@ int main(int argc, char * argv[])
     command.shoot = shooter.shoot(command, aimer, targets, gimbal_pos);
 
     /// 下发云台/发射指令
+    /// ROS 通信暂时关闭，云台指令直接写串口。
     cboard.send(command);
 
     /// Foxglove：图像、识别框、TF、3D 场景和调试曲线
@@ -350,12 +227,12 @@ int main(int argc, char * argv[])
     /// 可视化
     if (display) {
       cv::Mat main_view = img.clone();
-      draw_main_view(
+      auto_aim::draw_main_view(
         main_view, armors, targets, solver, aimer.debug_aim_point, tracker.state(), command,
         detection_queue.size());
 
       cv::Mat radar;
-      draw_omni_radar(radar, detection_queue, gimbal_pos[0], command, tracker.state());
+      omniperception::draw_omni_radar(radar, detection_queue, gimbal_pos[0], command, tracker.state());
 
       cv::resize(main_view, main_view, {}, 0.5, 0.5);
       cv::imshow("sentry_DGE", main_view);
@@ -367,7 +244,7 @@ int main(int argc, char * argv[])
         if (usb_frames[i].img.empty()) continue;
         cv::Mat usb_view;
         const auto title = (i == 0) ? "usb_left" : "usb_right";
-        draw_usb_view(usb_view, usb_frames[i], title);
+        omniperception::draw_usb_view(usb_view, usb_frames[i], title);
         cv::imshow(title, usb_view);
       }
 

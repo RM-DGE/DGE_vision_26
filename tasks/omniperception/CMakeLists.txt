@@ -12,5 +12,6 @@ find_package(OpenVINO REQUIRED COMPONENTS Runtime)
 add_library(omniperception OBJECT 
     decider.cpp
     perceptron.cpp
+    visualizer.cpp
 )
 target_link_libraries(omniperception openvino::runtime)

@@ -1,3 +1,6 @@
+// 旧版 ROS2 包装：当前 DGE 主程序使用 io/ros2/mcu_ros_bridge.*。
+// 本文件保留给旧分支参考，不参与当前 CMake 编译。
+
 #ifndef IO__ROS2_HPP
 #define IO__ROS2_HPP
 

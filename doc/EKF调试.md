@@ -1,255 +1,395 @@
-# DGE EKF 调试与可视化
+# 用 Foxglove 调 DGE EKF：从跑起来到定位问题
 
-> 目标：把“EKF 估计得准不准、协方差是否可信、滤波器是否一致”变成可观察、可回归的指标。
->
-> 融合思路：
->
-> - 同济 `sp_vision_25`：3D EKF、重投影验证、NIS/残差曲线、离线视频回放；
-> - 南京理工 `rmcs_auto_aim_v2`：2D 像素观测 EKF、合成真值测试、Foxglove 3D 真值对比、协方差收敛/发散判据；
-> - DGE：只保留 4 板 rmcs 像素 EKF；2/3 板 legacy 3D EKF 已移除。Foxglove 同时显示状态、协方差、NIS 和真值误差。
+这篇不是 EKF 公式说明，而是一套实际调试流程。目标是你打开 Foxglove 后，知道先看什么、正常是什么样、出现异常时从哪里往下查。
 
----
+DGE 现在只有 4 板 rmcs 像素 EKF：状态是 `[x,y,z,vx,vy,vz,a,w,rf,rl,hl]`，观测是 8 条灯条的上下端点像素。2/3 板 legacy EKF 已移除。
 
-## 1. 滤波性能分三层
+当前 EKF 基线是 v0.33（预测/协方差拆分、observable 懒刷新、CWNA）。版本细节见 `doc/RobotModel4_v0.33.md`；ROS2 桥接、IMU/相机时间戳和延时测试见 `doc/RobotModel4_v0.40.md`。
 
-| 层次 | 看什么 | DGE 中的位置 |
-|---|---|---|
-| 状态层 | 估计轨迹 vs 真值、重投影是否重合 | `/dge/scene`、`/dge/debug.state`、`/sim/ground_truth` |
-| 不确定性层 | 协方差 `P`、1σ/2σ、置信椭圆 | `/dge/debug.sigma_*`、`/dge/debug.cov`、3D XY 椭圆 |
-| 一致性层 | 新息、NIS、NIS 失败率 | `/dge/debug.nis`、`nis_threshold`、`nis_fail_rate`、`residual_norm` |
+当前调试分支已暂时关闭 `sentry_DGE` 的 ROS 接入，不初始化 DDS；这不影响 Foxglove、EKF 曲线和 `standard` 的调试流程。通信链路单独用 `mcu_ros_delay_test` 验证。
 
-只看状态曲线不够：**估计看起来平滑，不代表协方差可信；NIS 看起来小，也不代表没有系统偏差。**
+调 EKF 时建议先用 `standard`，不要一上来就用 `sentry_DGE` 的全向切换。全向切换会引入目标切换、USB 延迟和队列排序，先把单目标 EKF 调稳，再看全向。
 
 ---
 
-## 2. DGE 当前提供的字段
+## 1. 先把仿真器和 DGE 跑起来
 
-`tools/Foxglove/foxglove.cpp` 的 `publish_debug()` 会发布到 `/dge/debug`：
+终端 1，启动仿真器：
 
-### 2.1 状态
-
-```text
-state[0..10] = [x, y, z, vx, vy, vz, a, w, rf, rl, hl]
+```bash
+cd ~/桌面/simulation/bevy_robomaster_simulator-master
+cargo run --release
 ```
 
-- `x/y/z`：目标旋转中心（odom 系，m）
-- `vx/vy/vz`：平移速度（m/s）
-- `a`：朝向角（rad）
-- `w`：角速度（rad/s）
-- `rf/rl/hl`：前向半径、侧向半径、侧板高度差（m）
+终端 2，启动 DGE：
 
-### 2.2 不确定性
-
-```text
-cov[0..10] = variance 对角线，与 state 同序
-sigma_x, sigma_y, sigma_z
-sigma_vx, sigma_vy, sigma_vz
-sigma_a, sigma_w
-sigma_rf, sigma_rl, sigma_hl
+```bash
+cd ~/桌面/DGE_vision_26
+./build/standard configs/daedalus.yaml
 ```
 
-- `sigma_* = sqrt(max(0, variance))`
-- 3D 场景中 `tracked_target` 会画 XY 平面的 1σ/2σ 椭圆：
+仿真器窗口里按 `F5` 打开自瞄订阅，否则 DGE 的云台指令不会生效。用 `I/J/K/L` 把蓝色假人开进视野，`Tab` 切换假人，`Q/U` 开关小陀螺，`[`/`]` 和 `;`/`'` 让底盘滚转/俯仰。
+
+然后打开 Foxglove Studio，连接：
 
 ```text
-1σ：洋红色细线
-2σ：洋红色半透明线
+ws://localhost:8765
 ```
 
-如果椭圆很大但状态很平滑，说明滤波器“过度自信/过度不信”需要检查 Q/R。
+如果 Foxglove 不在同一台机器上，把 `localhost` 换成 DGE 机器的 IP。
 
-### 2.3 一致性
+导入布局：
 
 ```text
-nis              当前帧 4 维像素新息的 NIS
-nis_threshold    chi-square(4) 阈值，默认 9.488（95%）
-nis_fail_rate    最近 nis_window 次更新的失败比例
-residual_norm    当前帧 4 维像素新息的平均范数（像素）
-ekf_updates      累计 correct 帧数
-ekf_frame_updates 当前帧被接受的灯条数
-ekf_frame_rejected 当前帧因 NIS/投影无效被拒绝的灯条数
-nis_rejected     累计 NIS 拒绝次数
+foxglove_layouts/dge_debug_layout.json
+```
+
+3D 面板的 `fixedFrame` 保持 `odom`，`followTf` 默认是 `camera_optical_frame`。如果 3D 是空的，先在左侧话题列表确认 `/tf`、`/dge/scene`、`/dge/prediction` 有数据，再检查 fixed frame 是不是 `odom`。
+
+DGE 只有在 Foxglove 有客户端时才真正发送调试数据，所以先连上 Foxglove，再开始看曲线是正常的。连接断了再连上，曲线会从当前时刻重新开始。
+
+---
+
+## 2. 先认清楚 Foxglove 里的几块东西
+
+布局里主要有这些面板：
+
+- **识别结果图像**：`/detector/result_img/compressed`，看原始检测框和角点，不经过 EKF。
+- **3D 场景**：`/dge/scene`、`/dge/prediction`、`/detector/marker`、`/tracker/marker`、`/aiming_point`。
+- **跟踪抖动**：`/tracker/info.position_diff`、`yaw_diff`。
+- **目标状态**：`/tracker/target.v_yaw`、`radius_1`、`radius_2`、`dz` 和 `/sim/ground_truth`。
+- **EKF 验证**：`center_err`、`yaw_err`、`vyaw_err`、`nis`、`nis_fail_rate`、`residual_norm`、`converged`、`diverged`。
+- **关联/恢复**：`anchor_err_px`、`ekf_no_update_frames`、`ekf_reinits`、`ekf_init_source`。
+- **RawMessages**：`/dge/debug`、`/tracker/target`、`/sim/ground_truth`。
+
+3D 场景里的含义：
+
+- `detections`：检测器输出的装甲板，带 Solver 解算出的世界系位姿；
+- `tracked_target`：EKF 估计的 4 块板、旋转中心、旋转圆、速度/角速度箭头，以及 XY 平面的 1σ/2σ 协方差椭圆；
+- `target_prediction`：未来一段时间的预测轨迹和幽灵装甲板；
+- `aiming_point`：Aimer 当前瞄准点；
+- `self`：云台/相机光轴。
+
+调试时不要只盯 3D。3D 看起来“差不多”但 NIS 很大，通常说明状态还能用，但协方差或关联有问题；3D 很平滑但 `vyaw_err` 一直偏，通常说明模型或外参有系统误差。
+
+---
+
+## 3. 第一次锁定：先确认 EKF 活着
+
+先把假人放在 2～3 米处，静止，不开小陀螺。
+
+按 `F5`，让 `targets` 从 0 变成 1。然后在 `/dge/debug` 里看这几个字段：
+
+```text
+ekf_init_source
+converged
+ekf_updates
+ekf_frame_updates
+center_err
+yaw_err
+nis
+```
+
+正常应该是：
+
+- `ekf_init_source` 是 1 或 2。1 表示用 Solver 的世界系板位姿初始化，2 表示 Solver 路径失败后用 RobustPnp 兜底。如果经常出现 2，先看初始化阶段的 PnP 和角点质量。
+- `converged` 在锁定后很快变 1，通常 0.1～0.3 秒内。
+- `ekf_updates` 持续增加，不再归零。
+- `ekf_frame_updates` 每帧 1～8 条，具体取决于能看到几条灯条。
+- `center_err` 在 dm 级，静止目标通常小于 0.05～0.1 m。
+- `yaw_err` 不持续增大，也不在两个固定值之间来回跳。
+- `nis` 大多数时间小于 9.488，偶尔切板/遮挡出现尖峰是正常的。
+
+如果 `targets=1` 但 `converged` 长时间是 0，先看 `ekf_frame_updates`。它长期是 0 说明检测没有真正进 EKF，不是“滤波器收敛慢”。这时去查 `anchor_err_px`、`ekf_frame_rejected` 和 `last_id`。
+
+---
+
+## 4. 先查外参，不要急着调 Q/R
+
+这是最容易走错的一步。EKF 的预测像素依赖：
+
+```text
+R_camera2gimbal
+t_camera2gimbal
+R_gimbal2imubody
+camera_matrix / distort_coeffs
+```
+
+外参错了，NIS 会长期偏大，`center_err` 会随距离/角度变化。调 Q/R 只能把曲线“抹平”，不能修正系统性偏差。
+
+一个很直接的检查方法：
+
+1. 锁定静止假人；
+2. 缓慢左右转云台；
+3. 看 3D 里的 `detections` 和 `tracked_target`。
+
+正确时，目标本来没动，`detections` 在世界系里应该基本原地不动，`tracked_target` 也应该稳定在同一个位置。
+
+如果 `detections` 随云台画弧，说明相机外参或手眼标定有问题。如果 `detections` 原地不动，但 `tracked_target` 跟着云台飘，说明 EKF 的观测/关联或状态模型有问题。
+
+如果两者都在动，先回到标定流程，不要继续调 EKF。
+
+标定验收顺序：
+
+```bash
+./build/calibrate_validate assets/img_with_q -c=configs/calibration.yaml
+```
+
+世界系板位置 std 小于 10 mm、姿态 std 小于 0.5° 再继续。标定误差是系统误差，Q/R 是随机误差模型，两者不能互相替代。
+
+---
+
+## 5. 看 NIS、残差和协方差
+
+`/dge/debug` 里和一致性有关的字段：
+
+```text
+nis                 当前帧单条灯条的最大 NIS
+nis_mean            当前帧平均 NIS
+nis_threshold       9.488，chi-square(4) 95%
+nis_gate_threshold  13.277，NIS 门控阈值
+nis_fail_rate       最近 nis_window 次的失败比例
+residual_norm       当前帧平均像素残差
+ekf_frame_updates   当前帧被接受的灯条数
+ekf_frame_rejected  当前帧被拒绝的灯条数
+nis_rejected        累计 NIS 拒绝次数
 nis_consecutive_rejects 连续 NIS 拒绝次数
-ekf_last_update_accepted 最近一次灯条更新是否被接受
-ekf_dt           最近一次 predict 的 dt
-converged        协方差/时间收敛标志
-diverged         发散标志
-last_id          最近观测到的灯条/装甲板 id
-uses_rmcs_ekf    固定为 1（DGE 现在只有 4 板 rmcs 像素 EKF）
 ```
 
-判读建议：
+`nis` 是 4 维像素新息的马氏距离，正常稳态大多数应小于 9.488。切板、遮挡、突然加速时允许短时尖峰，`nis_fail_rate` 看的是最近 100 次的比例，不要用单帧尖峰下结论。
 
-| 字段 | 正常 | 异常/排查 |
-|---|---|---|
-| `nis` | 稳态大多 < 9.488，切板/机动允许尖峰 | 长期 >> 阈值：Q/R 不匹配、外参/内参有问题、关联错 |
-| `nis_fail_rate` | 稳态 < 5%～10% | 持续 > 20%：不要先调 EKF，先查标定/关联 |
-| `residual_norm` | 小且平稳（像素） | 持续大：相机外参、PnP、检测角点有问题 |
-| `sigma_x/y` | 收敛后逐渐变小 | 不降反升：过程噪声过大或观测被拒绝 |
-| `sigma_w` | 静止时小，旋转时适度增大 | 静止时很大：角速度不可观/初始化差 |
-| `ekf_frame_updates` | 1～8，随可见灯条变化 | 长期 0：关联失败/可见性模型错 |
-| `ekf_frame_rejected` | 偶发 1～2，切板/遮挡时允许 | 长期接近可见灯条数：关联错、外参错或 NIS 门控过紧 |
-| `nis_consecutive_rejects` | 稳态接近 0 | 持续 ≥ 3：先查检测角点/关联，再考虑放宽 `nis_gate_threshold` |
-| `converged` | 初始化后变为 1 | 长期 0：协方差没降下来或时间不够 |
-| `diverged` | 0 | 1：位置/速度/协方差越界，检查 `[rmcs_ekf] div` 日志 |
+我通常按这个顺序判断：
 
----
+先看 `ekf_frame_updates`。如果是 0，先解决“为什么没有观测进来”，不要看 NIS。
 
-## 3. 真值对比（仿真）
+如果 `ekf_frame_updates` 正常，但 `nis_fail_rate` 长期大于 20%，先查外参、角点检测和关联。NIS 大不等于 Q/R 一定错。外参、内参、装甲板尺寸、角点顺序都会让新息持续偏大。
 
-Daedalus 仿真通过 `/sim/ground_truth` 发布敌方真值：
+如果 `residual_norm` 一直很大，但 `center_err` 还行，通常是角点或外参有系统误差。像素残差是绝对值，比 NIS 更直观。
+
+再看协方差。`cov[0..10]` 与 `state` 同序：
 
 ```text
-targets[i].x/y/z, yaw, vyaw, is_outpost
+[ x, y, z, vx, vy, vz, a, w, rf, rl, hl ]
 ```
 
-`publish_debug()` 会在有真值时计算：
+`sigma_*` 是对角线开根号。3D 里的洋红色椭圆是 XY 的 1σ/2σ。
+
+正常收敛时，`sigma_x/sigma_y` 应该逐渐下降；静止目标尤其明显。旋转时 `sigma_w` 可以适度变大。如果 `sigma_x` 不降反升，先看 `ekf_frame_updates` 是不是长期为 0，或者 Q 是否过大。
+
+---
+
+## 6. 看真值误差：center_err、yaw_err、vyaw_err
+
+仿真里 `/sim/ground_truth` 会给出目标真值。`publish_debug()` 会计算：
 
 ```text
-center_err   估计中心与真值的水平误差（对齐固定 odom 偏移后）
-yaw_err      估计 yaw - 真值 yaw
-vyaw_err     估计角速度 - 真值角速度
-gt_yaw       真值 yaw
-gt_vyaw      真值角速度
+center_err  估计中心与真值的水平误差
+yaw_err     估计 yaw 与真值 yaw 的差
+vyaw_err    估计角速度与真值角速度的差
+gt_yaw      真值 yaw
+gt_vyaw     真值角速度
 ```
 
-推荐看：
+三个指标里，`vyaw_err` 最干净，因为它没有 odom 平移偏移的问题。小陀螺场景优先看它。
 
-- `center_err` 稳态应接近 0，换板/机动允许短时尖峰；
-- `yaw_err` 稳态小，持续振荡说明观测噪声/换板关联有问题；
-- `vyaw_err` 是最干净的指标（无坐标平移歧义）；
-- 如果 `center_err` 有一个固定偏移，先查 odom 原点/外参，不要先调 EKF。
+`center_err` 有一个容易误解的地方：DGE 在第一次拿到真值时，会记录一个固定的 odom 偏移，之后用这个偏移对齐真值。所以 `center_err` 是“相对第一帧对齐后的误差”，不是绝对坐标误差。换目标或仿真重置后，这个偏移可能不再对应，看到固定偏大时先确认是不是这个原因。
 
-> 实车没有真值，不能计算 NEES。实车只看 NIS、残差、重投影和世界系静止性；真值误差只在仿真/录制的已知场景里看。
+`yaw_err` 和 `vyaw_err` 更适合判断滤波器的动态性能：
 
----
+- 静止时 `vyaw_err` 应在 0 附近小幅波动；
+- 起转/停转时允许尖峰，但应很快回落；
+- 如果 `vyaw_err` 长期滞后一个固定方向，先查 `q_alpha`、观测噪声和角速度观测；
+- 如果 `yaw_err` 在两个值之间周期性跳，先查切板关联和 `last_id`。
 
-## 4. 3D 场景怎么看
-
-Foxglove 布局 `foxglove_layouts/dge_debug_layout.json`：
-
-| 面板 | 内容 |
-|---|---|
-| 3D | `/dge/scene` + `/dge/prediction` + `/tf` |
-| Image | `/detector/result_img/compressed` |
-| Plot | `/dge/debug.nis`、`nis_fail_rate`、`sigma_*`、`center_err`、`yaw_err`、`vyaw_err` |
-| RawMessages | `/dge/debug`、`/tracker/target`、`/sim/ground_truth` |
-
-3D 场景里：
-
-- `detections`：识别器原始装甲板（按颜色）；
-- `tracked_target`：EKF 估计的四块板、旋转中心、旋转圆、速度/角速度箭头、**XY 协方差椭圆**；
-- `target_prediction`：未来预测轨迹 + 幽灵装甲板；
-- `aiming_point`：瞄准点；
-- `self`：云台光轴/相机光轴。
-
-验证外参的最快方法：
-
-1. 锁定一个静止目标；
-2. 缓慢转云台；
-3. 看 `detections` 和 `tracked_target` 是否在 odom 系原地不动；
-4. 如果随云台画弧 → `R_camera2gimbal` / `t_camera2gimbal` / `R_gimbal2imubody` 有问题；
-5. 如果原地不动但 NIS 大 → 检查观测噪声、关联、检测角点。
+实车没有真值，不要算 NEES，也不要拿 `center_err` 调参。实车看 NIS、残差、重投影和世界系静止性。
 
 ---
 
-## 5. EKF 实现
+## 7. 小陀螺、切板和遮挡
 
-DGE 现在只保留 **4 板 rmcs 像素 EKF**：
+这部分是 EKF 最容易暴露问题的地方。
 
-| 项目 | 内容 |
-|---|---|
-| 代码 | `tasks/auto_aim/rmcs_ekf/` |
-| 观测 | 8 灯条上下端点像素（4D/灯条） |
-| 状态 | 11 维，rmcs 顺序 `[x,y,z,vx,vy,vz,a,w,rf,rl,hl]` |
-| 半径/高度 | 在线估计 |
-| 适用 | 4 板普通机器人/英雄/步兵/哨兵 |
-| 诊断 | `RobotModel::diagnostics()` |
+把假人放静止，按 `U` 开小陀螺，让 `v_yaw` 从 0 慢慢升到 3、6、8 rad/s，每个速度看十几秒。重点看：
 
-2/3 板目标（平衡、前哨站、基地）的 legacy 3D EKF 已删除；`Tracker` 会直接丢弃这些检测，不再创建对应 `Target`。
+```text
+vyaw_err 的峰值和回落时间
+nis / nis_fail_rate
+ekf_frame_updates / ekf_frame_rejected
+anchor_err_px
+ekf_reinits
+sigma_w
+```
+
+正常情况：
+
+- `vyaw_err` 起转时有峰，但 0.5 秒内回落；
+- `nis` 在切板瞬间有尖峰，但 `nis_fail_rate` 不持续升高；
+- `ekf_frame_updates` 仍然大于 0，不是整帧都被拒绝；
+- `anchor_err_px` 偶发升高，但不长期超过 40 px 或预测板宽的 50%；
+- `ekf_reinits` 不持续增长。
+
+如果 `ekf_frame_updates` 突然变 0，先看 `anchor_err_px` 和 `last_id`。anchor 对不上时整个关联会失败，表现不是 NIS 大，而是根本没有更新。
+
+如果 `ekf_frame_rejected` 接近可见灯条数，说明每条灯条都被 NIS 或投影有效性拒绝。先查外参和角点，再考虑放宽 `nis_gate_threshold`。把门控放宽只是让坏观测进来，不是修复。
+
+如果 `ekf_no_update_frames` 超过 10，会触发自动重初始化；超过 30 会判发散，Tracker 丢目标。看到 `ekf_reinits` 反复增长，先看是关联失败、遮挡太久，还是 Q 太小导致预测跟不上。
 
 ---
 
-## 6. 推荐调参流程
+## 8. 调 Q/R 的顺序
 
-### 6.1 先标定，再调 EKF
+先标定，再调 Q/R。顺序不要反。
 
-顺序：
-
-1. `calibrate_validate` 通过（世界系板位置 std < 10 mm，姿态 std < 0.5°）；
-2. 转云台时 `detections` 世界系不画弧；
-3. 再调 `ekf.noise_*` 和 `noise_observation`。
-
-标定误差是系统误差，Q/R 是随机误差模型。**不要用 Q/R 去补外参。**
-
-### 6.2 调 Q/R
-
-- 静止目标抖动大：增大 `noise_observation` 或减小过程噪声；
-- 机动跟不上：增大 `q_accel_xy / q_accel_z / q_alpha`；
-- 换板时估计跳变：检查关联/可见性模型，不要只调大 R；
-- NIS 长期偏大：Q 太小或 R 太小；NIS 长期偏小：Q 太大或 R 太大。
-
-> `process_model: cwna` 时 Q 为连续白噪声加速度的精确离散化：
-> `Q_pp = q·dt³/3`、`Q_pv = q·dt²/2`、`Q_vv = q·dt`。
-> `q_accel_xy / q_accel_z` 单位是 `(m/s²)²·s`，`q_alpha` 是 `(rad/s²)²·s`。
-> `dwna` 保留 sp25 原版 `dt⁴/4, dt³/2, dt²` 做 A/B；`diag_rate` 是旧的
-> `diag(noise_*)·dt`。
-
-### 6.3 调收敛/发散
+v0.33 的 Q 配置：
 
 ```yaml
-converge_min_update: 10
-converge_max_cov_xy: 1.0
-converge_delay_s: 0.1
-diverge_cov: 150.0
-diverge_xy: 15.0
-diverge_z: 2.0
-diverge_w: 31.4159
-diverge_v: 5.0
-diverge_vz: 1.0
+process_model: cwna
+q_accel_xy: 1.0     # (m/s²)²·s
+q_accel_z: 1e-4
+q_alpha: 10.0       # (rad/s²)²·s
 ```
 
-- 收敛太慢：检查初始协方差和观测质量；
-- 误判发散：先看 `sigma_*` 和原始观测；仿真里可适当放宽 `diverge_v`；
-- 真发散：检查外参、关联、检测角点，不要只放宽阈值。
+`cwna` 是默认模型，Q 为：
 
-### 6.4 合成真值回归测试
+```text
+Q_pp = q · dt³ / 3
+Q_pv = q · dt² / 2
+Q_vv = q · dt
+```
 
-建议后续增加 `tests/ekf_sim_test.cpp`：
+`q_accel_xy` 管平移，`q_accel_z` 管高度，`q_alpha` 管小陀螺。`q_accel_z` 通常保持很小，避免高度方向被噪声带飞。
 
-- MockMotion：静止、匀速、小陀螺、切板、遮挡、离群点；
-- 生成带噪声的像素观测；
-- 跑 `RobotModel::init/predict/correct`；
-- 输出：位置 RMSE、yaw/vyaw RMSE、NIS 覆盖率、收敛时间、丢目标率；
-- 阈值写进 CI/脚本，防止调参回归。
+要做 sp25 原版对照，用：
 
-这部分是 rmcs `tool/cxx/test_robot_ekf.cpp` 最有价值的思路，DGE 可以按同样方式补。
+```yaml
+process_model: dwna
+```
+
+`dwna` 的 Q 是 `dt⁴/4, dt³/2, dt²`。100 Hz 起点可以试 `q_accel_xy≈100`、`q_alpha≈900`，但这两个数和 CWNA 不是一个量级，不能直接混填。
+
+调参时一次只改一个参数，至少跑三种场景：
+
+1. 静止；
+2. 匀速平移；
+3. 反复起转/停转的小陀螺。
+
+每个场景记录：
+
+```text
+ekf_reinits
+vyaw_err 峰值和回落时间
+center_err RMS
+nis_fail_rate
+ekf_frame_rejected
+```
+
+我的经验是先调 `q_alpha`，因为小陀螺最容易暴露预测跟不上。起转/停转时 `vyaw_err` 峰值大、回落慢，先增大 `q_alpha`；静止时抖动明显、`sigma_w` 偏大，再减小 `q_alpha`。
+
+平移起停跟不上再调 `q_accel_xy`。`noise_observation` 是像素观测噪声，降低它会更相信角点，但也更容易被角点抖动带偏；升高它会平滑，但机动会滞后。
+
+NIS 长期偏大时，不要第一反应调大 `nis_gate_threshold`。先确认外参、角点和关联；门控阈值只决定“坏观测要不要拒绝”，不决定“观测本身准不准”。
 
 ---
 
-## 7. 常见误区
+## 9. 帧率和性能
 
-1. **只看状态曲线，不看协方差**
-   状态平滑不代表滤波器可信；椭圆和 NIS 才能说明不确定性。
+`/dge/debug.fps` 是 DGE 循环帧率，`ekf_dt` 是最近一次 `predict` 的 dt。
 
-2. **把 NIS 大当成 EKF 算法问题**
-   先查标定、关联、检测角点。NIS 是“新息是否像噪声”，不是“算法是否高级”。
+如果 `ekf_dt` 经常大于 0.1 秒，Tracker 会直接判丢目标，这不是 EKF 发散。先看 CPU、YOLO 推理、USB 相机和 Foxglove 推流。
 
-3. **实车算 NEES**
-   没有真值就没有 NEES；实车只看 NIS/残差/重投影。
+v0.33 之后，`Target::at()` 只做状态外推，`full()` 不再刷新 8 灯条投影；Aimer 和 Foxglove 的预测轨迹不会再因为投影变慢。`diagnostics()` 仍然会刷新一次投影，因为它要给调试输出完整的 EKF 状态；所以 Foxglove 调试本身有少量开销，但不会影响 Aimer 的迭代。
 
-4. **用 Q/R 补外参**
-   外参误差随距离/角度变化，Q/R 补不了；只会让 NIS 看起来正常但估计仍然偏。
-
-5. **忽略 `uses_rmcs_ekf`**
-   该字段在 DGE 中固定为 1；2/3 板 legacy EKF 已移除，不要再按 `0` 去查旧路径。
-
-6. **只看单帧 NIS**
-   单帧尖峰正常；看 `nis_fail_rate` 和滑动窗口。
+如果换帧率做 A/B，CWNA 的 Q 按 dt 自动缩放，原则上不需要重调。`diag_rate` 是旧行为，换帧率需要重新看 NIS 和 `vyaw_err`。
 
 ---
 
-## 8. 一句话总结
+## 10. 常见现象怎么查
 
-> 状态层看“跟得对不对”，不确定性层看“协方差可不可信”，一致性层看“新息像不像噪声”。
-> 先标定，再调 Q/R；先看 NIS/残差，再看 3D 椭圆；实车不看 NEES，仿真才看真值误差。
+**3D 里 detections 随云台画弧**
+
+先查外参和手眼标定，不要调 EKF。
+
+**目标锁上了，但 `center_err` 一直有固定偏移**
+
+先确认 `center_err` 的 odom 对齐偏移是否还对应当前目标；换目标或重置仿真后旧偏移可能失效。然后查 odom 原点、外参和真值坐标系。
+
+**`targets=1`，但 `ekf_frame_updates` 长期是 0**
+
+查 `anchor_err_px`、`last_id`、`ekf_frame_rejected`。通常是 anchor 关联失败、预测像素在相机后面、可见性模型不对，或者目标已经被判发散。
+
+**NIS 长期很大，但 3D 看起来还行**
+
+先查角点、内外参和装甲板尺寸。NIS 是统计量，曲线平滑不代表新息像噪声。
+
+**NIS 很小，但 `center_err` 很大**
+
+可能是协方差过度自信，或者存在固定外参偏差。看 `sigma_x/sigma_y` 和椭圆大小；如果椭圆很小但误差很大，不要继续调小 R。
+
+**小陀螺时 `vyaw_err` 峰值很大**
+
+先看 `q_alpha` 是否偏小，再看 `nis_fail_rate` 和 `ekf_frame_rejected`。如果大量观测被拒绝，先解决拒绝原因，再谈 Q。
+
+**`ekf_reinits` 反复增长**
+
+看 `ekf_no_update_frames`、`anchor_err_px` 和 `nis_consecutive_rejects`。重初始化是恢复手段，不是正常状态；频繁重初始化说明关联或模型有问题。
+
+**`diverged=1`**
+
+看状态/协方差是否越界，或者连续无更新超过 30 帧。日志里搜 `[rmcs_ekf]`，结合 `ekf_no_update_frames` 和 `ekf_frame_rejected` 判断是模型发散还是观测断了。
+
+**Foxglove 没有曲线**
+
+先确认有客户端连接；DGE 在没有 Foxglove 客户端时不会发调试数据。再检查话题名和布局是否对应 `/dge/debug`。如果 3D 空但曲线有，检查 fixed frame 和 `/tf`。
+
+---
+
+## 11. 实车要注意什么
+
+实车没有 `/sim/ground_truth`，所以没有 `center_err/yaw_err/vyaw_err`，也不能算 NEES。
+
+实车调试主要看：
+
+- 静止目标时 `nis`、`residual_norm` 是否稳定；
+- 转云台时 `detections` 和 `tracked_target` 是否在世界系原地不动；
+- 小陀螺时 `nis_fail_rate`、`ekf_frame_rejected`、`ekf_reinits`；
+- `sigma_*` 是否收敛，`diverged` 是否误触发；
+- 装甲板角点是否稳定，外参是否随距离/角度变化。
+
+实车没有真值，不要用“看起来挺顺”代替一致性检查；NIS、残差和重投影才是可回归的指标。
+
+---
+
+## 12. 一页速查
+
+正常锁定：
+
+```text
+targets = 1
+converged = 1
+ekf_frame_updates = 1..8
+nis 多数 < 9.488
+nis_fail_rate < 10%
+ekf_reinits 不增长
+diverged = 0
+```
+
+优先排查顺序：
+
+```text
+外参/内参
+  → 角点质量
+  → anchor 关联
+  → NIS/残差
+  → Q/R
+  → 收敛/发散阈值
+```
+
+不要做的事：
+
+- 不要用 Q/R 补外参；
+- 不要用单帧 NIS 判断滤波器好坏；
+- 不要在 `ekf_frame_updates=0` 时先调 NIS 门控；
+- 不要把 `center_err` 的固定 odom 偏移当成 EKF 误差；
+- 不要只看 3D 平滑，忽略协方差和 NIS。
+
+最后一句话：先把“看得见的 3D”与“看不见的统计量”对齐，再动参数。3D 用来定位现象，NIS/残差/协方差用来判断原因。

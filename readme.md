@@ -18,6 +18,17 @@
 
 *为实现哨兵“追击”功能，本项目预留了与导航通信的ROS接口。
 
+> **ROS2 串口/导航桥接（本仓库新增）**
+>
+> `io/ros2/mcu_ros_bridge.*` 在 CBoard 读线程上挂观察者，把 IMU/状态发布为
+> `/mcu/imu`、`/mcu/status`，并订阅导航的 `/enemy_status`、`/autoaim_target`。
+> 串口仍由 CBoard 独占；云台指令默认仍直接 `cboard.send()`，不绕 ROS。
+> 当前调试分支已暂时从 `sentry_DGE.cpp` 移除 ROS 接入，桥接层代码保留。
+> 编译、话题、延时测试和限制见 [`ros2_ws/README.md`](ros2_ws/README.md)；
+> 版本改动与时间戳口径见 [`doc/RobotModel4_v0.40.md`](doc/RobotModel4_v0.40.md)。
+>
+> 延时测试：`./build/mcu_ros_delay_test -c=configs/sentry.yaml -d=10 -r=100`。
+
 
 ## 1 功能介绍
 自瞄的定义和意义。我们对自瞄的定义为“针对移动装甲板目标的自动瞄准和自动火控软件”。当操作手切换成自瞄模式后，自瞄会接管云台的控制权，通过对敌方运动轨迹的预测和弹道解算，控制云台进行追踪；同时，自瞄还会接管发射机构的控制权，判断开火时机。自瞄的意义在于提高我方作战能力，实现短击杀时间、高命中率的作战效果。 

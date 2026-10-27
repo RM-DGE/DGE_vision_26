@@ -67,6 +67,27 @@ struct ControlDataFrame {
 };
 #pragma pack(pop)
 
+// 串口/共享内存收到的一帧 IMU。timestamp 是接收时刻的 steady_clock，
+// ROS 桥接层用它反推数据年龄，不能直接当成 ROS 时间使用。
+struct ImuSample
+{
+  Eigen::Quaterniond q = Eigen::Quaterniond::Identity();
+  std::chrono::steady_clock::time_point timestamp{};
+};
+
+// 下位机状态帧（弹速、模式、FT 角度等）。
+struct StatusSample
+{
+  double bullet_speed = 0;
+  int mode = 0;
+  int shoot_mode = 0;
+  double ft_angle = 0;
+  std::chrono::steady_clock::time_point timestamp{};
+};
+
+using ImuObserver = std::function<void(const ImuSample &)>;
+using StatusObserver = std::function<void(const StatusSample &)>;
+
 // 云台通信的抽象基类：真机用 CBoard（串口），仿真用 DaedalusCBoard（共享内存）。
 class CBoardBase
 {
@@ -76,10 +97,16 @@ public:
 
   double bullet_speed = 0;
   Mode mode = Mode::idle;
+  int shoot_mode = 0;
   double ft_angle = 0;
 
   virtual Eigen::Quaterniond imu_at(std::chrono::steady_clock::time_point timestamp) = 0;
   virtual void send(Command command) const = 0;
+
+  // ROS 桥接层用：在串口读线程里收到完整帧后回调。
+  // 回调必须只做“拷贝到 mailbox”这类短操作，禁止在回调里直接 publish。
+  virtual void set_imu_observer(ImuObserver observer) { (void)observer; }
+  virtual void set_status_observer(StatusObserver observer) { (void)observer; }
 };
 
 class CBoard : public CBoardBase
@@ -91,6 +118,9 @@ public:
 
   void send(Command command) const override;
 
+  void set_imu_observer(ImuObserver observer) override;
+  void set_status_observer(StatusObserver observer) override;
+
 private:
   struct IMUData
   {
@@ -98,10 +128,13 @@ private:
     std::chrono::steady_clock::time_point timestamp;
   };
 
-  
   std::deque<IMUData> queue_;
   mutable std::mutex queue_mutex_;
   const size_t queue_capacity_ = 5000;
+
+  mutable std::mutex observer_mutex_;
+  ImuObserver imu_observer_;
+  StatusObserver status_observer_;
 
   mutable SerialPortMultithread serial_;
   IMUData data_ahead_;
