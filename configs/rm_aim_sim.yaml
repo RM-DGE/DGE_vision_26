@@ -1,0 +1,105 @@
+enemy_color: "blue"
+# enemy_color: "blue"
+
+#####-----神经网络参数-----#####
+yolo_name: yolov5
+classify_model: assets/tiny_resnet.onnx
+yolo11_model_path: assets/yolo11.xml
+yolov8_model_path: assets/yolov8.xml
+yolov5_model_path: assets/yolov5.xml
+device: CPU
+min_confidence: 0.8
+use_traditional: false
+
+#####-----ROI-----#####
+roi: 
+  x: 420
+  y: 50
+  width: 600
+  height: 600
+
+use_roi: false
+
+#####-----传统方法参数-----#####
+threshold: 150
+max_angle_error: 45 # degree
+min_lightbar_ratio: 1.5
+max_lightbar_ratio: 20
+min_lightbar_length: 8
+min_armor_ratio: 1
+max_armor_ratio: 5
+max_side_ratio: 1.5
+max_rectangular_error: 25 # degree
+
+#####-----tracker参数-----#####
+min_detect_count: 5 # 最小确认帧数
+max_temp_lost_count: 15 #最大暂存丢失帧数
+
+#####-----4板 rmcs 像素 EKF-----#####
+ekf:
+  noise_observation: 40.0
+  # 过程噪声模型：cwna | dwna | diag_rate
+  # cwna: Q_pp=q*dt^3/3, Q_pv=q*dt^2/2, Q_vv=q*dt
+  # dwna: sp25 原版，Q_pp=q*dt^4/4, Q_pv=q*dt^3/2, Q_vv=q*dt^2
+  # diag_rate: 旧的 diag(noise_*)*dt
+  process_model: cwna
+  # q_accel_xy / q_accel_z: (m/s²)²·s；q_alpha: (rad/s²)²·s
+  q_accel_xy: 1.0
+  q_accel_z: 1e-4
+  q_alpha: 10.0
+  initial_cov_position: 0.04
+  initial_cov_z: 0.01
+  initial_cov_velocity: 4.0
+  initial_cov_vz: 0.01
+  initial_cov_angle: 0.1
+  initial_cov_rotation_speed: 4.0
+  initial_cov_radius: 0.001
+  initial_cov_height: 0.001
+  anchor_max_corner_error: 40.0
+  anchor_max_relative_error: 0.5
+  auto_reinit_after_no_update: 10
+  max_no_update_frames: 30
+  converge_max_cov_xy: 0.04
+  converge_max_cov_v: 1.0
+  converge_max_cov_w: 1.0
+  converge_max_no_update_frames: 5
+  rotation_speed_limit: 25.132741228718345
+  nis_threshold: 9.488
+  nis_window: 100
+  nis_gate_enabled: true
+  nis_gate_threshold: 13.277
+  nis_gate_warmup_updates: 10
+  nis_max_consecutive_rejects: 5
+  nis_reject_cov_inflation: 0.01
+
+  # v0.32 观测侧（可 A/B 回退）
+  init_prefer_solver_pose: true   # 初始化优先用 Solver 世界系板位姿；false = 优先 RobustPnp
+  skip_tracking_pnp: false        # true: 跟踪阶段 4 板目标跳过逐板 PnP（省 CPU，Foxglove detections 方块失去位姿）
+
+#####-----aimer数-----#####
+yaw_offset: 0
+pitch_offset: 0
+comming_angle: 60 # degree 切入角
+leaving_angle: 20 # degree 切出角
+decision_speed: 7 # rad/s 决策速度
+high_speed_delay_time: 0.015 # s
+low_speed_delay_time: 0.015 # s planner use this value
+
+#####-----shooter参数-----#####
+first_tolerance: 3 # 近距离射击容差，degree
+second_tolerance: 2 # 远距离射击容差，degree
+judge_distance: 2 #距离判断阈值
+auto_fire: true # 是否由自瞄控制射击
+
+
+camera_matrix: [1303.6753236814714, 0, 720, 0, 1303.6753236814714, 540, 0, 0, 1]
+distort_coeffs: [0, 0, 0, 0, 0]
+R_gimbal2imubody: [1, 0, 0, 0, 1, 0, 0, 0, 1]
+R_camera2gimbal: [0, 0, 1, -1, 0, 0, 0, -1, 0]
+t_camera2gimbal: [0.08, 0, 0.04]
+rm_aim_sim:
+  channel: default
+  ipc_root: /dev/shm
+  state_timeout_ms: 200
+  frame_timeout_ms: 5000
+  publish_truth: true

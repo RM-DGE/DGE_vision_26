@@ -17,15 +17,15 @@ DGE 现在只有 4 板 rmcs 像素 EKF：状态是 `[x,y,z,vx,vy,vz,a,w,rf,rl,hl
 终端 1，启动仿真器：
 
 ```bash
-cd ~/桌面/simulation/bevy_robomaster_simulator-master
-cargo run --release
+cd ~/桌面/simulation/rm_aim_sim
+./run.sh -- --config=res://configs/vision.cfg --remote
 ```
 
 终端 2，启动 DGE：
 
 ```bash
 cd ~/桌面/DGE_vision_26
-./build/standard configs/daedalus.yaml
+./build/auto_aim_sim configs/rm_aim_sim.yaml
 ```
 
 仿真器窗口里按 `F5` 打开自瞄订阅，否则 DGE 的云台指令不会生效。用 `I/J/K/L` 把蓝色假人开进视野，`Tab` 切换假人，`Q/U` 开关小陀螺，`[`/`]` 和 `;`/`'` 让底盘滚转/俯仰。

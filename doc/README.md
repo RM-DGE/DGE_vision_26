@@ -30,7 +30,7 @@
 ./build/calibrate_validate assets/img_with_q -c=configs/calibration.yaml
 
 # 运行 + Foxglove
-./build/standard configs/daedalus.yaml
+./build/auto_aim_sim configs/rm_aim_sim.yaml
 # Foxglove: ws://<机器人IP>:8765
 # 布局: foxglove_layouts/dge_debug_layout.json
 ```
@@ -43,4 +43,4 @@
 - `/dge/debug.ekf_init_source`：1 = Solver 位姿初始化，2 = RobustPnp（v0.32）
 - `ekf.process_model`：`cwna`（默认）/ `dwna`（sp25 对照）/ `diag_rate`（旧 rmcs）；v0.33
 - `/dge/scene`：`tracked_target` 的 1σ/2σ XY 协方差椭圆
-- `/sim/ground_truth`：仿真真值（仅 Daedalus）
+- `/sim/ground_truth`：仿真真值（仅 rm_aim_sim）

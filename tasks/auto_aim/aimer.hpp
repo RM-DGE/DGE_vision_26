@@ -21,11 +21,11 @@ struct AimPoint
 class Aimer
 {
 public:
-  AimPoint debug_aim_point;
+  AimPoint debug_aim_point{false, Eigen::Vector4d::Zero()};
   explicit Aimer(const std::string & config_path);
   io::Command aim(
     std::list<Target> targets, std::chrono::steady_clock::time_point timestamp, double bullet_speed,
-    bool to_now = true);
+    bool to_now = true, double observation_age_s = 0.005);
 
   // io::Command aim(
   //   std::list<Target> targets, std::chrono::steady_clock::time_point timestamp, double bullet_speed,

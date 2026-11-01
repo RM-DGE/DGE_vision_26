@@ -161,11 +161,11 @@ IMU型号：使用C板内置BMI088作为IMU\
    当前 CMake 默认生成 `standard` 。 `auto_aim_debug_mpc`、`auto_aim_test` 已在
    `CMakeLists.txt` 中注释，不属于当前默认构建目标。
 
-   **Daedalus 仿真 + Foxglove 3D 可视化**（查看检测 / 跟踪 / 预测 / 瞄准）：
+   **rm_aim_sim 仿真 + Foxglove 3D 可视化**（查看检测 / 跟踪 / 预测 / 瞄准）：
 
    ```bash
    export LD_LIBRARY_PATH=/opt/intel/openvino_2024.6.0/runtime/lib/intel64:$LD_LIBRARY_PATH
-   ./build/standard configs/daedalus.yaml     # 需先启动 Daedalus 仿真器
+   ./build/auto_aim_sim configs/rm_aim_sim.yaml     # 需先启动 rm_aim_sim 仿真器
    ```
 
    程序内置 Foxglove WebSocket 服务器（`ws://<本机IP>:8765`）。Foxglove Studio →

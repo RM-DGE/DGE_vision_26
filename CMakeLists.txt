@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.16.3)
 
 project(sp_vision)
+enable_testing()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_BUILD_TYPE Release)
@@ -29,6 +30,11 @@ add_subdirectory(tasks/omniperception)
 
 ####################src###################
 add_executable(standard src/standard.cpp)
+add_executable(auto_aim_sim src/auto_aim_sim.cpp)
+target_link_libraries(auto_aim_sim ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
+add_executable(rm_aim_sim_test tests/rm_aim_sim_test.cpp)
+target_link_libraries(rm_aim_sim_test ${OpenCV_LIBS} io)
+add_test(NAME rm_aim_sim_test COMMAND rm_aim_sim_test)
 add_executable(sentry_DGE src/sentry_DGE.cpp)
 # add_executable(mt_standard src/mt_standard.cpp)
 # add_executable(standard_mpc src/standard_mpc.cpp)

@@ -2,7 +2,6 @@
 
 #include <stdexcept>
 
-#include "Daedalus/daedalus_camera.hpp"
 #include "hikrobot/hikrobot.hpp"
 // #include "mindvision/mindvision.hpp"
 #include "tools/yaml.hpp"
@@ -27,9 +26,6 @@ Camera::Camera(const std::string & config_path)
     camera_ = std::make_unique<HikRobot>(exposure_ms, gain, vid_pid);
   }
 
-  else if (camera_name == "daedalus") {
-    camera_ = std::make_unique<DaedalusCamera>(config_path);
-  }
 
   else {
     throw std::runtime_error("Unknow camera_name: " + camera_name + "!");
@@ -41,6 +37,5 @@ void Camera::read(cv::Mat & img, std::chrono::steady_clock::time_point & timesta
   camera_->read(img, timestamp);
 }
 
-std::vector<SimTargetTruth> Camera::ground_truth() { return camera_->ground_truth(); }
 
 }  // namespace io

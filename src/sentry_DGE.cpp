@@ -22,7 +22,7 @@
  * 注意：
  *   - 配置中需要提供 camera_matrix、R_camera2gimbal、t_camera2gimbal、
  *     fov_h/fov_v、new_fov_h/new_fov_v、mode，以及工业相机/USB 相机参数；
- *   - 真机使用 io::CBoard（串口），仿真时在 yaml 中写 cboard_name: daedalus；
+ *   - 使用 io::CBoard 串口通信；
  *   - ROS2 通信暂时关闭：当前调试阶段先保证纯自瞄链路可运行。
  *     恢复时参考 io/ros2/mcu_ros_bridge.* 和 doc/RobotModel4_v0.40.md；
  *   - USB 设备名当前写死为 video2/video4（两路外接相机），不使用内置摄像头；
@@ -40,7 +40,6 @@
 
 #include "io/camera.hpp"
 #include "io/cboard.hpp"
-#include "io/Daedalus/daedalus_cboard.hpp"
 #include "io/usbcamera/usbcamera.hpp"
 #include "tasks/auto_aim/aimer.hpp"
 #include "tasks/auto_aim/shooter.hpp"
@@ -95,17 +94,7 @@ int main(int argc, char * argv[])
       usb_right_device = yaml["usb_right_device"].as<std::string>();
   }
 
-  // 真机使用 CBoard（串口），仿真使用 DaedalusCBoard（共享内存）
-  std::unique_ptr<io::CBoardBase> cboard_ptr;
-  {
-    auto yaml = YAML::LoadFile(config_path);
-    auto cboard_name = yaml["cboard_name"] ? yaml["cboard_name"].as<std::string>() : "cboard";
-    if (cboard_name == "daedalus")
-      cboard_ptr = std::make_unique<io::DaedalusCBoard>(config_path);
-    else
-      cboard_ptr = std::make_unique<io::CBoard>(config_path);
-  }
-  auto & cboard = *cboard_ptr;
+  io::CBoard cboard(config_path);
 
   // 工业相机：主自瞄，同时随云台转向全向相机发现的目标
   io::Camera camera(config_path);
@@ -221,7 +210,6 @@ int main(int argc, char * argv[])
     foxglove.publish_tf(q);
     foxglove.publish_scene(armors, targets, aim_valid, aim_xyza, q);
     foxglove.publish_prediction(targets);
-    foxglove.publish_ground_truth(camera.ground_truth());
     foxglove.publish_debug(fps, command, targets, armors, aim_valid, aim_xyza, gimbal_pos);
 
     /// 可视化

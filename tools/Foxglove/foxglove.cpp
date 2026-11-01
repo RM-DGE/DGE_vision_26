@@ -997,7 +997,7 @@ void FoxgloveServer::publish_prediction(
   impl_->prediction_ch->log(update, ns);
 }
 
-void FoxgloveServer::publish_ground_truth(const std::vector<io::SimTargetTruth> & truths)
+void FoxgloveServer::publish_ground_truth(const std::vector<io::rm_aim_sim::SimTruthTarget> & truths)
 {
   if (!impl_->gt_ch || !has_clients() || truths.empty()) return;
 
@@ -1009,7 +1009,7 @@ void FoxgloveServer::publish_ground_truth(const std::vector<io::SimTargetTruth> 
       {"y", t.position[1]},
       {"z", t.position[2]},
       {"yaw", t.yaw},
-      {"vyaw", t.vyaw},
+      {"vyaw", t.vyaw ? nlohmann::json(*t.vyaw) : nlohmann::json(nullptr)},
       {"is_outpost", t.is_outpost},
     });
   }
@@ -1332,7 +1332,7 @@ void FoxgloveServer::publish_tracker_markers(const std::list<auto_aim::Target> &
 void FoxgloveServer::publish_debug(
   double fps, const io::Command & command, const std::list<auto_aim::Target> & targets,
   const std::list<auto_aim::Armor> & armors, bool aim_valid, const Eigen::Vector4d & aim_xyza,
-  const Eigen::Vector3d & gimbal_ypr, const std::vector<io::SimTargetTruth> & truths)
+  const Eigen::Vector3d & gimbal_ypr, const std::vector<io::rm_aim_sim::SimTruthTarget> & truths)
 {
   if (!impl_->debug_ch || !has_clients()) return;
 
@@ -1407,7 +1407,7 @@ void FoxgloveServer::publish_debug(
     if (!truths.empty()) {
       const Eigen::Vector2d estimate(state.x, state.y);
 
-      const io::SimTargetTruth * reference = nullptr;
+      const io::rm_aim_sim::SimTruthTarget * reference = nullptr;
       for (const auto & truth : truths) {
         if (!truth.is_outpost) {
           reference = &truth;
@@ -1422,7 +1422,7 @@ void FoxgloveServer::publish_debug(
         impl_->has_gt_offset = true;
       }
 
-      const io::SimTargetTruth * best = nullptr;
+      const io::rm_aim_sim::SimTruthTarget * best = nullptr;
       auto best_distance = std::numeric_limits<double>::max();
 
       for (const auto & truth : truths) {
@@ -1438,9 +1438,9 @@ void FoxgloveServer::publish_debug(
       if (best) {
         dbg["center_err"] = std::sqrt(best_distance);
         dbg["yaw_err"] = tools::limit_rad(state.rotation_angle - best->yaw);
-        dbg["vyaw_err"] = state.rotation_speed - best->vyaw;
+        if (best->vyaw) dbg["vyaw_err"] = state.rotation_speed - *best->vyaw;
         dbg["gt_yaw"] = best->yaw;
-        dbg["gt_vyaw"] = best->vyaw;
+        if (best->vyaw) dbg["gt_vyaw"] = *best->vyaw;
       }
     }
   } else {

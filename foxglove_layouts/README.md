@@ -29,7 +29,7 @@ Foxglove 连接方式：Studio → Open connection → **Foxglove WebSocket** �
 | `/tracker/target` | json (`auto_aim_interfaces/msg/Target`) | 跟踪状态：`position` `velocity` `yaw` `v_yaw` `radius_1` `radius_2` `dz` |
 | `/tracker/info` | json (`auto_aim_interfaces/msg/TrackerInfo`) | 抖动指标：`position_diff`(m) `yaw_diff`(rad)，每帧差分 |
 | `/dge/debug` | json | `fps` `yaw` `pitch` `gimbal_yaw` `gimbal_pitch` `shoot` `armors` `targets` `state[11]` `aim_*`；EKF 一致性：`cov[11]` `sigma_*` `nis` `nis_threshold` `nis_fail_rate` `residual_norm` `ekf_updates` `ekf_frame_updates` `ekf_dt` `converged` `diverged` `uses_rmcs_ekf`；真值误差：`center_err` `yaw_err` `vyaw_err` |
-| `/sim/ground_truth` | json | 仿真器敌方真值（仅 daedalus 相机）：每目标 `x/y/z/yaw/vyaw/is_outpost`，坐标为仿真器世界系 |
+| `/sim/ground_truth` | json | 仿真器敌方真值（仅 rm_aim_sim 客户端）：每目标 `x/y/z/yaw/vyaw/is_outpost`，坐标为仿真器世界系 |
 
 坐标系：固定系 `odom`，3D 面板跟随 `gimbal_link`。
 

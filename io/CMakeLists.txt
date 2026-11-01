@@ -34,13 +34,14 @@ add_library(io STATIC
     usbcamera/usbcamera.cpp
     camera.cpp
     cboard.cpp
-    Daedalus/daedalus_camera.cpp
+    rm_aim_sim/protocol.cpp
+    rm_aim_sim/local_client.cpp
+    rm_aim_sim/clock_mapper.cpp
     # dm_imu/dm_imu.cpp
     # gimbal/gimbal.cpp
 )
 
-# Daedalus 仿真器 IPC 适配层（协议头在 io/Daedalus/，header-only，无额外链接）
-target_include_directories(io PUBLIC Daedalus)
+target_link_libraries(io PUBLIC nlohmann_json::nlohmann_json)
 
 # hikrobot
 target_include_directories(io PUBLIC hikrobot/include)

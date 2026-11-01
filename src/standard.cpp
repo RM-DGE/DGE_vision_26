@@ -7,7 +7,6 @@
 
 #include "io/camera.hpp"
 #include "io/cboard.hpp"
-#include "io/Daedalus/daedalus_cboard.hpp"
 #include "tasks/auto_aim/aimer.hpp"
 #include "tasks/auto_aim/shooter.hpp"
 #include "tasks/auto_aim/solver.hpp"
@@ -41,18 +40,7 @@ int main(int argc, char * argv[])
   tools::FoxgloveServer foxglove(8765);
   foxglove.configure_camera(config_path);
 
-  // 仿真时在 yaml 里写 cboard_name: daedalus，真机不写或写 cboard
-  std::unique_ptr<io::CBoardBase> cboard_ptr;
-  {
-    auto yaml = YAML::LoadFile(config_path);
-    auto cboard_name =
-      yaml["cboard_name"] ? yaml["cboard_name"].as<std::string>() : "cboard";
-    if (cboard_name == "daedalus")
-      cboard_ptr = std::make_unique<io::DaedalusCBoard>(config_path);
-    else
-      cboard_ptr = std::make_unique<io::CBoard>(config_path);
-  }
-  auto & cboard = *cboard_ptr;
+  io::CBoard cboard(config_path);
   io::Camera camera(config_path);
 
   auto_aim::YOLO detector(config_path, false);
@@ -116,8 +104,6 @@ int main(int argc, char * argv[])
     foxglove.publish_scene(
       armors, targets, aimer.debug_aim_point.valid, aimer.debug_aim_point.xyza, q);
     foxglove.publish_prediction(targets);
-    const auto ground_truth = camera.ground_truth();
-    foxglove.publish_ground_truth(ground_truth);
 
     // //红框
     // if (!targets.empty() && aimer.debug_aim_point.valid) {
@@ -162,7 +148,7 @@ int main(int argc, char * argv[])
     // Foxglove 调试曲线（Plot 面板可直接选字段）
     foxglove.publish_debug(
       fps, command, targets, armors, aimer.debug_aim_point.valid, aimer.debug_aim_point.xyza,
-      current_ypr, ground_truth);
+      current_ypr);
 
     cv::imshow("Standard Test", img);
     if (cv::waitKey(1) == 'q') break;

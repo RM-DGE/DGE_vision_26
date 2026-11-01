@@ -31,9 +31,9 @@ Aimer::Aimer(const std::string & config_path)
 
 io::Command Aimer::aim(
   std::list<Target> targets, std::chrono::steady_clock::time_point timestamp, double bullet_speed,
-  bool to_now)
+  bool to_now, double observation_age_s)
 {
-  if (targets.empty()) return {false, false, 0, 0};
+  if (targets.empty()) { debug_aim_point.valid = false; return {false, false, 0, 0}; }
   const auto base = targets.front();
 
   const auto state = base.state();
@@ -47,7 +47,7 @@ io::Command Aimer::aim(
   if (to_now) {
     dt0 = tools::delta_time(std::chrono::steady_clock::now(), timestamp) + delay_time;
   } else {
-    dt0 = 0.005 + delay_time;  //detector-aimer耗时0.005+发弹延时0.1
+    dt0 = std::max(0.0, observation_age_s) + delay_time;
   }
 
   // 只做状态外推，不改协方差；后续迭代都从 base 重新外推，避免累积误差。

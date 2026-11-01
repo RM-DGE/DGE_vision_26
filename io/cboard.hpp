@@ -88,7 +88,7 @@ struct StatusSample
 using ImuObserver = std::function<void(const ImuSample &)>;
 using StatusObserver = std::function<void(const StatusSample &)>;
 
-// 云台通信的抽象基类：真机用 CBoard（串口），仿真用 DaedalusCBoard（共享内存）。
+// 下位机接口，供串口实现、ROS2 桥接及测试注入使用。
 class CBoardBase
 {
 public:
