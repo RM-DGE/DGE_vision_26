@@ -228,6 +228,22 @@ rm_aim_sim:
 
 自行编写 WebSocket 客户端时，要与仓库使用的官方 SDK 协商匹配的子协议。验证脚本会提供 `foxglove.sdk.v1` 等候选项；仅提供旧的 `foxglove.websocket.v1` 可能收到 HTTP 400。直接使用支持该 SDK 的 Foxglove 客户端连接即可，无需在界面手工填写子协议。
 
+启动两端后，在 DGE 根目录可用标准库脚本验证消息传输：
+
+```bash
+python3 tests/foxglove_ws_smoke.py --duration=6
+```
+
+本次 6 s 实测收到 `/camera/image` 71 条，以及跟踪、调试、仿真状态各约 142 条；TF、3D 场景和预测消息也均收到，`fresh=true`、`observation_valid=true`，观测年龄约 20.8 ms。该检查证明协议握手与话题传输成功；布局 JSON 通过解析与字段核对，但没有把这些检查等同于 Foxglove 桌面界面的人工逐面板验收。
+
+保持 DGE 运行、退出调试器后，还可以验证失联状态：
+
+```bash
+python3 tests/foxglove_ws_smoke.py --status-only --expect-inactive --duration=3
+```
+
+本次负向检查收到 254 条状态消息，并断言 `fresh=false`、`observation_valid=false`；帧时间和观测年龄为 null。恢复测试时重新启动调试器，必要时重启 DGE，以重新打开通道并获取新会话。
+
 ### 8.2 推荐观察顺序
 
 | 层次 | 面板/话题 | 先判断什么 |

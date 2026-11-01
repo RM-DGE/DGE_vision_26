@@ -58,10 +58,12 @@ int main(int argc,char **argv)
       aimer=std::make_unique<auto_aim::Aimer>(path);
       shooter=std::make_unique<auto_aim::Shooter>(path);
       clock.reset();
+      foxglove.reset_sim_diagnostics();
     };
     reset();
     const auto begin=sim::Clock::now();
     auto report=begin;
+    auto last_frame_received=begin;
     size_t frames=0;
     std::cerr<<"rm_aim_sim pixel closed loop; channel="<<config.channel<<std::endl;
     while(!exiter.exit() && (duration<=0 || std::chrono::duration<double>(sim::Clock::now()-begin).count()<duration)) {
@@ -72,11 +74,16 @@ int main(int argc,char **argv)
           client.send_stop(); reset(); validate_camera(client.state()->camera,yaml);
         }
         if(!client.fresh() || client.state()->paused || !client.state()->ipc_enabled) {
+          foxglove.publish_sim_status(client.state() ? &*client.state() : nullptr,client.fresh(),false);
           client.send_stop(); client.cancel_frame(); reset(); std::this_thread::sleep_for(10ms); continue;
         }
         client.request_frame();
         auto frame=client.try_read_frame();
-        if(!frame) {std::this_thread::sleep_for(2ms);continue;}
+        if(!frame) {
+          if(sim::Clock::now()-last_frame_received>200ms)
+            foxglove.publish_sim_status(&*client.state(),client.fresh(),false);
+          std::this_thread::sleep_for(2ms);continue;
+        }
         auto mapped=clock.map(frame->metadata.context,frame->metadata.sim_time,frame->received_at);
         if(mapped.epoch_changed) {
           tracker=std::make_unique<auto_aim::Tracker>(path,solver);
@@ -96,7 +103,19 @@ int main(int argc,char **argv)
         auto ypr=tools::eulers(solver.R_gimbal2world(),2,1,0);
         command.shoot=shooter->shoot(command,*aimer,targets,ypr);
         client.send(command);
+        const double frame_dt=std::chrono::duration<double>(frame->received_at-last_frame_received).count();
+        const double fps=frame_dt>0?1.0/frame_dt:0;
+        last_frame_received=frame->received_at;
+        const auto aim_xyza=aimer->debug_aim_point.valid?aimer->debug_aim_point.xyza:Eigen::Vector4d::Zero().eval();
         foxglove.publish_image(frame->bgr); foxglove.publish_annotations(armors);
+        foxglove.publish_number_image(armors);
+        foxglove.publish_rmvision(armors,targets,aim_xyza);
+        foxglove.publish_detector_markers(armors);
+        foxglove.publish_tracker_markers(targets);
+        // State truth is newer than the image, and its yaw is not an observed armor yaw.
+        // Do not feed it to legacy auto-aligned error curves.
+        foxglove.publish_debug(fps,command,targets,armors,aimer->debug_aim_point.valid,aim_xyza,ypr);
+        foxglove.publish_sim_status(&*client.state(),true,true,frame->metadata.sim_time,age);
         foxglove.publish_tf(frame->metadata.gimbal_to_world);
         foxglove.publish_scene(armors,targets,aimer->debug_aim_point.valid,aimer->debug_aim_point.xyza,frame->metadata.gimbal_to_world);
         foxglove.publish_prediction(targets);
@@ -108,6 +127,7 @@ int main(int argc,char **argv)
         }
       } catch(const CalibrationError &) {throw;
       } catch(const std::exception &e) {
+        foxglove.publish_sim_status(client.state() ? &*client.state() : nullptr,client.fresh(),false);
         try{client.send_stop();}catch(...){}
         client.cancel_frame();reset();std::cerr<<e.what()<<std::endl;
         std::this_thread::sleep_for(50ms);

@@ -437,6 +437,7 @@ struct FoxgloveServer::Impl
   std::optional<foxglove::RawChannel> tracker_marker_ch;   // /tracker/marker (cdr MarkerArray)
   std::optional<foxglove::RawChannel> aiming_point_ch;     // /aiming_point (cdr PointStamped)
   std::optional<foxglove::RawChannel> gt_ch;               // /sim/ground_truth (json)
+  std::optional<foxglove::RawChannel> sim_status_ch;
   std::vector<foxglove::Parameter> parameters;             // Parameters 面板
 
   uint64_t last_image_ns = 0;
@@ -598,6 +599,9 @@ FoxgloveServer::FoxgloveServer(int port, std::string name) : impl_(std::make_uni
   if (auto ch = foxglove::RawChannel::create(
         "/sim/ground_truth", "json", json_schema("dge.sim.GroundTruth"), impl_->context); ch)
     impl_->gt_ch = std::move(*ch);
+  if (auto ch = foxglove::RawChannel::create(
+        "/sim/status", "json", json_schema("dge.sim.Status"), impl_->context); ch)
+    impl_->sim_status_ch = std::move(*ch);
 
   logger()->info("foxglove: WebSocket server on ws://0.0.0.0:{}", port);
 }
@@ -999,7 +1003,7 @@ void FoxgloveServer::publish_prediction(
 
 void FoxgloveServer::publish_ground_truth(const std::vector<io::rm_aim_sim::SimTruthTarget> & truths)
 {
-  if (!impl_->gt_ch || !has_clients() || truths.empty()) return;
+  if (!impl_->gt_ch || !has_clients()) return;
 
   const uint64_t ns = now_ns();
   nlohmann::json msg = {{"targets", nlohmann::json::array()}};
@@ -1015,6 +1019,44 @@ void FoxgloveServer::publish_ground_truth(const std::vector<io::rm_aim_sim::SimT
   }
   const auto data = msg.dump();
   impl_->gt_ch->log(reinterpret_cast<const std::byte *>(data.data()), data.size(), ns);
+}
+
+void FoxgloveServer::publish_sim_status(
+  const io::rm_aim_sim::SimState * state, bool fresh, bool observation_valid,
+  double frame_sim_time, double observation_age_s)
+{
+  if (!impl_->sim_status_ch || !has_clients()) return;
+  nlohmann::json message = {{"fresh", fresh}, {"observation_valid", observation_valid},
+    {"frame_sim_time", observation_valid ? nlohmann::json(frame_sim_time) : nlohmann::json(nullptr)},
+    {"observation_age_s", observation_valid ? nlohmann::json(observation_age_s) : nlohmann::json(nullptr)}};
+  if (state) {
+    message["publisher_id"] = state->context.publisher_id;
+    message["session_id"] = state->context.session_id;
+    message["state_sim_time"] = state->sim_time;
+    message["paused"] = state->paused;
+    message["ipc_enabled"] = state->ipc_enabled;
+    message["last_seq"] = state->last_seq;
+    message["publication"] = state->publication;
+    message["stats"] = state->stats;
+  }
+  const auto data = message.dump();
+  impl_->sim_status_ch->log(reinterpret_cast<const std::byte *>(data.data()), data.size(), now_ns());
+}
+
+void FoxgloveServer::reset_sim_diagnostics()
+{
+  impl_->has_last_target = false;
+  impl_->has_gt_offset = false;
+  publish_ground_truth({});
+  const std::list<auto_aim::Armor> armors;
+  const std::list<auto_aim::Target> targets;
+  const auto aim = Eigen::Vector4d::Zero().eval();
+  publish_rmvision(armors, targets, aim);
+  publish_debug(0, {false, false, 0, 0}, targets, armors, false, aim);
+  publish_scene(armors, targets, false, aim);
+  publish_prediction(targets);
+  publish_detector_markers(armors);
+  publish_tracker_markers(targets);
 }
 
 void FoxgloveServer::publish_image(const cv::Mat & bgr, int quality)
@@ -1123,7 +1165,7 @@ void FoxgloveServer::publish_rmvision(
   if (!has_clients()) return;
   const uint64_t ns = now_ns();
   nlohmann::json header = {{"stamp", {{"sec", ns / 1000000000ULL}, {"nanosec", ns % 1000000000ULL}}},
-                           {"frame_id", "camera_optical_frame"}};
+                           {"frame_id", "gimbal_link"}};
   if (impl_->rm_armors_ch) {
     nlohmann::json msg = {{"header", header}, {"armors", nlohmann::json::array()}};
     for (const auto & a : armors) {
@@ -1132,8 +1174,12 @@ void FoxgloveServer::publish_rmvision(
       item["type"] = auto_aim::ARMOR_TYPES.at(static_cast<size_t>(a.type));
       item["distance_to_image_center"] = static_cast<float>(
         std::hypot(a.center.x - 720.0, a.center.y - 540.0));
+      const Eigen::Quaterniond armor_q(
+        Eigen::AngleAxisd(a.ypr_in_gimbal[0], Eigen::Vector3d::UnitZ()) *
+        Eigen::AngleAxisd(a.ypr_in_gimbal[1], Eigen::Vector3d::UnitY()) *
+        Eigen::AngleAxisd(a.ypr_in_gimbal[2], Eigen::Vector3d::UnitX()));
       item["pose"] = {{"position", {{"x", a.xyz_in_gimbal.x()}, {"y", a.xyz_in_gimbal.y()}, {"z", a.xyz_in_gimbal.z()}}},
-                      {"orientation", {{"x", 0.0}, {"y", 0.0}, {"z", 0.0}, {"w", 1.0}}}};
+                      {"orientation", {{"x", armor_q.x()}, {"y", armor_q.y()}, {"z", armor_q.z()}, {"w", armor_q.w()}}}};
       msg["armors"].push_back(std::move(item));
     }
     const auto data = msg.dump();
@@ -1141,7 +1187,9 @@ void FoxgloveServer::publish_rmvision(
   }
   nlohmann::json info_header = {{"stamp", {{"sec", ns / 1000000000ULL}, {"nanosec", ns % 1000000000ULL}}}};
   if (impl_->rm_target_ch) {
-    nlohmann::json msg = {{"header", header}, {"tracking", false}, {"id", ""}, {"armors_num", 0},
+    auto target_header = header;
+    target_header["frame_id"] = "odom";
+    nlohmann::json msg = {{"header", target_header}, {"tracking", false}, {"id", ""}, {"armors_num", 0},
       {"position", {{"x", 0.0}, {"y", 0.0}, {"z", 0.0}}},
       {"velocity", {{"x", 0.0}, {"y", 0.0}, {"z", 0.0}}}, {"yaw", 0.0}, {"v_yaw", 0.0},
       {"radius_1", 0.0}, {"radius_2", 0.0}, {"dz", 0.0}};

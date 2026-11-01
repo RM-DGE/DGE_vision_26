@@ -2,11 +2,11 @@
 
 本目录存放 Foxglove Studio 布局文件（Layout → Import layout 导入）。
 
-> 完整使用说明（连接、面板判读、调试工作流、FAQ）见
-> 完整使用说明见 simulation 工作区的《Foxglove使用说明.md》；本文件只讲布局文件本身与话题对照。
+> 完整启动和测试教程见 [RobotModel4_v1.01](../doc/RobotModel4_v1.01.md)；本文件说明布局和话题。
 
 | 文件 | 说明 |
 |---|---|
+| `rm_aim_sim_layout.json` | **新仿真器推荐布局**：原始像素/四角、3D、EKF 拒绝与恢复、时间、控制及计分 |
 | `dge_debug_layout.json` | **推荐日常调试布局**：识别图像 + 3D 场景（检测/跟踪/预测/瞄准）+ 三组调试曲线 + RawMessages |
 
 Foxglove 连接方式：Studio → Open connection → **Foxglove WebSocket** → `ws://<本机IP>:8765`
@@ -29,7 +29,32 @@ Foxglove 连接方式：Studio → Open connection → **Foxglove WebSocket** �
 | `/tracker/target` | json (`auto_aim_interfaces/msg/Target`) | 跟踪状态：`position` `velocity` `yaw` `v_yaw` `radius_1` `radius_2` `dz` |
 | `/tracker/info` | json (`auto_aim_interfaces/msg/TrackerInfo`) | 抖动指标：`position_diff`(m) `yaw_diff`(rad)，每帧差分 |
 | `/dge/debug` | json | `fps` `yaw` `pitch` `gimbal_yaw` `gimbal_pitch` `shoot` `armors` `targets` `state[11]` `aim_*`；EKF 一致性：`cov[11]` `sigma_*` `nis` `nis_threshold` `nis_fail_rate` `residual_norm` `ekf_updates` `ekf_frame_updates` `ekf_dt` `converged` `diverged` `uses_rmcs_ekf`；真值误差：`center_err` `yaw_err` `vyaw_err` |
-| `/sim/ground_truth` | json | 仿真器敌方真值（仅 rm_aim_sim 客户端）：每目标 `x/y/z/yaw/vyaw/is_outpost`，坐标为仿真器世界系 |
+| `/sim/ground_truth` | json | 最新状态的诊断真值：位置已减去云台世界原点，与 odom 共原点；`vyaw=null` 表示上游未提供角速度 |
+| `/sim/status` | json | `fresh`、`observation_valid`、`publisher_id/session_id`、`state_sim_time/frame_sim_time`、`observation_age_s`、`paused/ipc_enabled`、`last_seq/publication`、`stats` |
+
+## rm_aim_sim 使用方法
+
+先启动图形仿真 `./run.sh -- --config=res://configs/vision.cfg --remote`，再启动 DGE 的 `./build/auto_aim_sim configs/rm_aim_sim.yaml`。在 Foxglove 中选择 Foxglove WebSocket，连接 `ws://localhost:8765`，通过 Layout → Import layout 导入本目录的 `rm_aim_sim_layout.json`。若 Windows 的 localhost 转发不可用，可用 WSL 的 `hostname -I` 查询地址并连接 `ws://<WSL-IP>:8765`。
+
+新入口每帧发布图像、检测框、分类图、整车状态、抖动、Marker、TF、预测和 `/dge/debug`，使原日常布局的状态与 EKF 曲线也能工作。图像发送限频约 15 FPS，`/dge/debug.fps` 是算法完成帧之间的墙钟频率；它与图像发送频率、仿真物理频率不同。
+
+推荐先看图像中的四角，再看 `/tracker/target.tracking`，随后对照 `/dge/debug.anchor_err_px`、`ekf_no_update_frames`、`ekf_reinits`。`/sim/status.stats.hit_rate` 是 `hit/resolved`，仍在飞行的弹丸不进入分母。恢复或切换 session 时，跟踪和诊断历史会重置；停流时 `observation_valid=false`，暂停/停用时对应状态也会更新。
+
+`/sim/ground_truth` 来自最新状态，通常比取图时刻更晚；`/sim/status` 分别提供状态与帧时间。新入口不把该真值传入旧的自动对齐误差计算，因此 `/dge/debug.center_err/yaw_err/vyaw_err` 不作为新路线的有效指标；上游也没有可直接使用的真值角速度。需要真值误差时，先实现相同时刻和相同装甲编号的配对，不要把这些空曲线解释为零误差。
+
+Foxglove Parameters 面板仅展示/镜像配置；在面板内修改数值不会实时重建算法。算法参数应在 YAML 中修改并重启 DGE。
+
+### 实时连接自检
+
+仿真和 DGE 均运行后，在 DGE 根目录执行：
+
+```bash
+python3 tests/foxglove_ws_smoke.py --duration 8
+# DGE 仍运行、仿真已停止时：
+python3 tests/foxglove_ws_smoke.py --status-only --expect-inactive --duration 3
+```
+
+该脚本只依赖 Python 标准库，实际订阅图像、标注、3D、TF、跟踪、EKF 和计分话题，检查是否收到消息及必要字段，不向仿真发送控制。捆绑 SDK 使用 `foxglove.sdk.v1` 子协议；脚本同时提供旧协议候选。旧自制客户端若只发送 `foxglove.websocket.v1` 可能收到 HTTP 400，应使用匹配 SDK 的客户端。脚本通过不等同于已人工验收 Foxglove 应用的每个面板。
 
 坐标系：固定系 `odom`，3D 面板跟随 `gimbal_link`。
 

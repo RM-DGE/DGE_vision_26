@@ -64,6 +64,12 @@ public:
   // 每个图像帧：发布 /sim/ground_truth（仿真器敌方真值，EKF 对比用；空向量跳过）
   void publish_ground_truth(const std::vector<io::rm_aim_sim::SimTruthTarget> & truths);
 
+  // Latest state and frame have distinct simulation timestamps; never treat truth as a same-frame measurement.
+  void publish_sim_status(
+    const io::rm_aim_sim::SimState * state, bool fresh, bool observation_valid,
+    double frame_sim_time = 0, double observation_age_s = 0);
+  void reset_sim_diagnostics();
+
 private:
   struct Impl;
   std::unique_ptr<Impl> impl_;
