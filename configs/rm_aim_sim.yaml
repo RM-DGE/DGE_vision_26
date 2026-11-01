@@ -34,6 +34,9 @@ max_rectangular_error: 25 # degree
 #####-----tracker参数-----#####
 min_detect_count: 5 # 最小确认帧数
 max_temp_lost_count: 15 #最大暂存丢失帧数
+# CPU inference/render contention may exceed 100 ms; preserve EKF history up to
+# 200 ms. This does not change the IPC watchdog or stale-observation stop rule.
+max_frame_gap_s: 0.2
 
 #####-----4板 rmcs 像素 EKF-----#####
 ekf:

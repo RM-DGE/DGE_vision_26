@@ -491,26 +491,23 @@ auto RobotModel::initialize(const CameraFeature & camera, const std::vector<Armo
   Armor3d armor3d;
   if (!pnp.solve(armor3d)) return false;
 
-  const auto orientation = armor3d.orientation;
-  const auto armor_to_center = Eigen::Vector3d{
-    Eigen::AngleAxisd{ -kPredictedOtherArmorPitch, orientation * Eigen::Vector3d::UnitY() }
-    * (orientation * Eigen::Vector3d::UnitX()) };
-
-  const auto yaw = normalize_angle(std::atan2(-armor_to_center.y(), -armor_to_center.x()));
-  const auto center = Eigen::Vector3d{ armor3d.translation + 0.2 * armor_to_center };
-
-  return finish_initialize(camera, center, yaw, large_);
+  return initialize_from_pose(camera, armor3d.translation, armor3d.orientation, large_);
 }
 
 auto RobotModel::initialize_from_pose(const CameraFeature & camera,
   const Eigen::Vector3d & translation, const Eigen::Quaterniond & orientation, bool large) -> bool
 {
+  if (!translation.allFinite() || !orientation.coeffs().allFinite()
+      || orientation.norm() < kEpsilon) return false;
+  // RobotSolution places each plate at a horizontal radius from the center.
+  // Solver optimizes yaw with a fixed pitch but retains raw IPPE pitch/roll.
+  // Removing a fixed 15 degrees from that noisy pose tilts the initial radius
+  // out of the plane, moving the modeled plate away from its measured center.
+  Eigen::Vector3d armor_to_center = orientation.normalized() * Eigen::Vector3d::UnitX();
+  armor_to_center.z() = 0.0;
+  if (armor_to_center.norm() < kEpsilon) return false;
+  armor_to_center.normalize();
   large_ = large;
-
-  const auto armor_to_center = Eigen::Vector3d{
-    Eigen::AngleAxisd{ -kPredictedOtherArmorPitch, orientation * Eigen::Vector3d::UnitY() }
-    * (orientation * Eigen::Vector3d::UnitX()) };
-
   const auto yaw = normalize_angle(std::atan2(-armor_to_center.y(), -armor_to_center.x()));
   const auto center = Eigen::Vector3d{ translation + 0.2 * armor_to_center };
 
