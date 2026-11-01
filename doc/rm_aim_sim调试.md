@@ -1,6 +1,6 @@
 # rm_aim_sim 像素闭环调试
 
-分支 `codex/rm_aim_sim` 基于 `test`；调试器独立部署，协议锁定上游 `3895971a25e7712286395840b3c4cea9dffbc27c`。
+分支 `new-sim-test` 基于 `test`；调试器独立部署，协议锁定上游 `3895971a25e7712286395840b3c4cea9dffbc27c`。完整版本说明、测试结果和 Foxglove 教程见 [RobotModel4_v1.01.md](./RobotModel4_v1.01.md)。
 
 终端 1（WSL 图形模式，`--headless` 无相机像素）：
 

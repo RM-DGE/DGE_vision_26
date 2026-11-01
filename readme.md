@@ -1,5 +1,7 @@
 # 湖北第二师范学院潜云DGE战队26赛季自瞄算法仓库
 
+`new-sim-test` 分支的新仿真器测试记录与完整教程见 [RobotModel4 v1.01](doc/RobotModel4_v1.01.md)，包含 WSL 启动、场景配置、Foxglove 连接与排错。
+
 ## 说明
 - 完全参考同济大学SuperPower战队25赛季自瞄算法开源设计。
 - 仅保留了哨兵RMUL所需代码，详细请见原仓库[sp_vision_25](https://github.com/TongjiSuperPower/sp_vision_25)。
