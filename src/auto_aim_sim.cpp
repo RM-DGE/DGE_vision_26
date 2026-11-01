@@ -103,7 +103,7 @@ int main(int argc,char **argv)
         if(truth)foxglove.publish_ground_truth(client.state()->truth);
         ++frames;
         if(sim::Clock::now()-report>1s) {
-          std::cout<<sim::Json{{"frames",frames},{"armors",armors.size()},{"targets",targets.size()},{"control",command.control},{"fire",command.shoot},{"stats",client.state()->stats}}.dump()<<std::endl;
+          std::cout<<sim::Json{{"observation_age_s",age},{"sim_time",frame->metadata.sim_time},{"frames",frames},{"armors",armors.size()},{"targets",targets.size()},{"control",command.control},{"fire",command.shoot},{"stats",client.state()->stats}}.dump()<<std::endl;
           report=sim::Clock::now();
         }
       } catch(const CalibrationError &) {throw;

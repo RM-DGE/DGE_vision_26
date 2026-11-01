@@ -12,7 +12,7 @@ min_confidence: 0.8
 use_traditional: false
 
 #####-----ROI-----#####
-roi: 
+roi:
   x: 420
   y: 50
   width: 600

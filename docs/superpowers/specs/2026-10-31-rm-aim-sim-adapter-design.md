@@ -1,7 +1,7 @@
 # rm_aim_sim 调试器适配设计
 
-日期：2026-10-31  
-目标分支：`codex/rm_aim_sim`（基于 `test` 提交 `feaba15`）  
+日期：2026-10-31
+目标分支：`codex/rm_aim_sim`（基于 `test` 提交 `feaba15`）
 上游调试器：https://github.com/ForgetWW520/rm_aim_sim
 
 ## 1. 目标
@@ -255,4 +255,3 @@ cmake --build build -j"$(nproc)"
 - 旧 Bevy/Daedalus 活跃接口和冗余代码已逐文件移除，无批量删除操作。
 - 新协议、错误处理和坐标/时间转换有自动化测试。
 - 构建、测试及端到端验收结果均有可复现命令和明确记录。
-
