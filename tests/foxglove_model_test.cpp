@@ -50,8 +50,15 @@ int main(int argc, char** argv) {
           "invalid aim must not retain selected plate or future aim");
     check(idle.scene.entities.at(4).lines.empty() && idle.scene.entities.at(4).spheres.empty(),
           "invalid aim ghost must disappear");
-    check(model.scene.entities.at(4).cubes.empty() && !model.scene.entities.at(4).lines.empty(),
-          "predicted plate must be an outline, not another solid occluder");
+    const auto& prediction = model.scene.entities.at(4);
+    check(prediction.cubes.empty() && prediction.lines.size() == 1 &&
+          prediction.lines[0].type == foxglove::messages::LinePrimitive::LineType::LINE_STRIP &&
+          prediction.lines[0].points.size() == 2,
+          "prediction must contain only the lead segment, never a ghost armor outline");
+    check(prediction.spheres.size() == 1, "predicted aim point must remain visible");
+    const auto& predicted_position = *prediction.spheres[0].pose->position;
+    check((Eigen::Vector3d(predicted_position.x, predicted_position.y, predicted_position.z) -
+           aim.xyza.head<3>()).norm() < 1e-9, "predicted aim point moved");
     auto bad_id = aim;
     bad_id.armor_id = 4;
     check(tools::build_ekf_model(&target, bad_id, {2, 1}).selection["selected_id"] == -1,

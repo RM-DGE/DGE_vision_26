@@ -87,18 +87,18 @@
         "dge-grid-0000-0000": {
           "visible": true,
           "frameLocked": true,
-          "label": "10 cm grid",
+          "label": "Grid",
           "instanceId": "dge-grid-0000-0000",
           "layerId": "foxglove.Grid",
-          "frameId": "ekf_target",
-          "size": 2,
-          "divisions": 20,
+          "frameId": "odom",
+          "size": 10,
+          "divisions": 10,
           "lineWidth": 1,
-          "color": "#334454",
+          "color": "#248eff",
           "position": [
             0,
             0,
-            -0.15
+            -0.4
           ],
           "rotation": [
             0,
@@ -108,7 +108,7 @@
           "order": 1
         }
       },
-      "title": "EKF 模型 · 绿=选板 / 青边=最近观测 / 紫=预测"
+      "title": "EKF 模型 · 绿=选板 / 青边=最近观测 / 紫=预测点"
     },
     "Plot!sim_ekf": {
       "title": "EKF 拒绝与重初始化",

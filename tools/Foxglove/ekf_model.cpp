@@ -108,15 +108,6 @@ EkfModelView build_ekf_model(
     const Eigen::Vector3d p = aim.xyza.head<3>();
     view.selection["aim_position"] = {{"x", p.x()}, {"y", p.y()}, {"z", p.z()}};
     const Color predicted{1., .25, .8, .85};
-    LinePrimitive ghost;
-    ghost.type = LinePrimitive::LineType::LINE_LOOP;
-    ghost.pose = pose(p, Eigen::Quaterniond(Eigen::AngleAxisd(aim.xyza[3], Eigen::Vector3d::UnitZ()) *
-      Eigen::AngleAxisd(rmcs_ekf::kPredictedOtherArmorPitch, Eigen::Vector3d::UnitY())));
-    ghost.thickness = .002;
-    ghost.color = predicted;
-    ghost.points = {{0, width/2, height/2}, {0, -width/2, height/2},
-                    {0, -width/2, -height/2}, {0, width/2, -height/2}};
-    future.lines.push_back(ghost);
     SpherePrimitive point;
     point.pose = pose(p);
     point.size = Vector3{.012, .012, .012};
