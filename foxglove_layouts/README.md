@@ -56,17 +56,17 @@ python3 tests/foxglove_ws_smoke.py --status-only --expect-inactive --duration 3
 
 该脚本只依赖 Python 标准库，实际订阅图像、标注、3D、TF、跟踪、EKF 和计分话题，检查是否收到消息及必要字段，不向仿真发送控制。捆绑 SDK 使用 `foxglove.sdk.v1` 子协议；脚本同时提供旧协议候选。旧自制客户端若只发送 `foxglove.websocket.v1` 可能收到 HTTP 400，应使用匹配 SDK 的客户端。脚本通过不等同于已人工验收 Foxglove 应用的每个面板。
 
-坐标系：固定系 `odom`，新布局的 3D 面板跟随 `ekf_target`（EKF 目标中心，仅跟位置），默认视距 1.7 m。
+坐标系：固定系 `odom`，新布局的 3D 面板跟随 `ekf_target`（EKF 目标中心，仅跟位置），默认视距 1.35 m。
 
 ### EKF 装甲板特写（2026-11-01）
 
-更新算法并重新导入 `rm_aim_sim_layout.json`。旧的已导入布局不会自动更新。3D 主图层为 `/dge/ekf_model`；`/dge/scene` 和 `/dge/prediction` 默认关闭，可在主题中按需打开。
+更新算法并导入 `rm_aim_sim_3d_fixed.json`（与当前 `rm_aim_sim_layout.json` 内容相同，名称用于区分已导入的旧版）。本次仅参考 `dge_debug_layout.json` 的 3D 配置，复用深色背景、隐藏坐标标签和网格；其他面板及排列与前一版完全一致。3D 主图层为 `/dge/ekf_model`；旧场景、Marker 和预测叠影默认关闭，避免重复绘制。目标中心跟随、1.35 m 视距和 10 cm 网格用于观察板面尺寸。
 
-- 四块板独立编号 `#0`–`#3`，姿态和中心直接来自 `Target::full()`。标签坐标为 odom 系，单位米。
+- 四块板独立编号 0–3，姿态和中心直接来自 `Target::full()`。3D 不绘制文字，点击实体可查看板号和尺寸；精确坐标在 `/dge/selection.plates`，坐标系为 odom，单位米。
 - 绿色实心板是 Aimer 最后一轮实际选板；橙色为其他板。青色轮廓表示 **最近一次观测关联**，不保证本帧接受了测量。
-- 浅绿色板、绿点及 `AIM #n (predicted)` 是预测命中位置；与当前所选板之间的线段表示提前量。
+- 紫色线框和小点是预测命中位置；与当前所选板之间的紫色线段表示提前量。预测板只画轮廓，避免遮挡实体板。
 - 模型宽高使用 EKF 灯条角点矩形：小板 **135 × 56 mm**，大板 **230 × 56 mm**。8 mm 厚度仅为显示辅助，不是物理外壳或裁判命中区域尺寸。
-- 中心标签显示 `r1/r2/dz`、角速度及选板/最近观测编号；右下 `/dge/selection` 提供四板位置、四元数、宽高及选板标志，适合查看精确数值。
+- `r1/r2/dz`、角速度及选板/最近观测编号均放在 `/dge/selection`，与四板位置、四元数和宽高一起查看，不再覆盖在模型上。
 - 编号只在当前 EKF 初始化周期内有意义。无有效选板时 `selected_id=-1`；失去目标清除模型，停止发布后实体在 0.5 s 后过期。
 - 若视角被手动移走，选择显示坐标系 `ekf_target`，按 `1` 回中，再滚轮调距离。跟随方式见 [Foxglove 3D 文档](https://docs.foxglove.dev/docs/visualization/panels/3d)。
 

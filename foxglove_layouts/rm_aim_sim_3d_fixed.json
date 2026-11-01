@@ -1,0 +1,168 @@
+{
+  "configById": {
+    "ImageViewPanel!sim_image": {
+      "cameraTopic": "/camera/image",
+      "enabledMarkerTopics": ["/camera/annotations"],
+      "mode": "fit", "synchronize": false, "transformMarkers": false,
+      "title": "原始像素与检测四角"
+    },
+    "3D!sim_scene": {
+      "cameraState": {
+        "distance": 1.35,
+        "perspective": true,
+        "phi": 55,
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOffset": [
+          0,
+          0,
+          0
+        ],
+        "targetOrientation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "thetaOffset": 45,
+        "fovy": 55,
+        "near": 0.01,
+        "far": 5000
+      },
+      "followMode": "follow-position",
+      "followTf": "ekf_target",
+      "fixedFrame": "odom",
+      "scene": {
+        "backgroundColor": "#101118",
+        "transforms": {
+          "showLabel": false
+        },
+        "enableStats": false
+      },
+      "transforms": {
+        "frame:odom": {
+          "visible": false,
+          "showLabel": false
+        },
+        "frame:gimbal_link": {
+          "visible": false,
+          "showLabel": false
+        },
+        "frame:camera_optical_frame": {
+          "visible": false,
+          "showLabel": false
+        },
+        "frame:ekf_target": {
+          "visible": false,
+          "showLabel": false
+        }
+      },
+      "topics": {
+        "/dge/ekf_model": {
+          "visible": true
+        },
+        "/dge/scene": {
+          "visible": false
+        },
+        "/dge/prediction": {
+          "visible": false
+        },
+        "/detector/marker": {
+          "visible": false
+        },
+        "/tracker/marker": {
+          "visible": false
+        },
+        "/camera_info": {
+          "visible": false
+        },
+        "/aiming_point": {
+          "visible": false
+        }
+      },
+      "layers": {
+        "dge-grid-0000-0000": {
+          "visible": true,
+          "frameLocked": true,
+          "label": "10 cm grid",
+          "instanceId": "dge-grid-0000-0000",
+          "layerId": "foxglove.Grid",
+          "frameId": "ekf_target",
+          "size": 2,
+          "divisions": 20,
+          "lineWidth": 1,
+          "color": "#334454",
+          "position": [
+            0,
+            0,
+            -0.15
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "order": 1
+        }
+      },
+      "title": "EKF 模型 · 绿=选板 / 青边=最近观测 / 紫=预测"
+    },
+    "Plot!sim_ekf": {
+      "title": "EKF 拒绝与重初始化",
+      "paths": [
+        {"value": "/dge/debug.anchor_err_px", "enabled": true, "timestampMethod": "receiveTime"},
+        {"value": "/dge/debug.nis", "enabled": true, "timestampMethod": "receiveTime"},
+        {"value": "/dge/debug.nis_gate_threshold", "enabled": true, "timestampMethod": "receiveTime"},
+        {"value": "/dge/debug.ekf_no_update_frames", "enabled": true, "timestampMethod": "receiveTime"},
+        {"value": "/dge/debug.ekf_reinits", "enabled": true, "timestampMethod": "receiveTime"}
+      ],
+      "xAxisVal": "timestamp", "showLegend": true, "isSynced": true, "followingViewWidth": 10
+    },
+    "Plot!sim_timing": {
+      "title": "观测年龄与 EKF dt（秒）",
+      "paths": [
+        {"value": "/sim/status.observation_age_s", "enabled": true, "timestampMethod": "receiveTime"},
+        {"value": "/dge/debug.ekf_dt", "enabled": true, "timestampMethod": "receiveTime"}
+      ],
+      "xAxisVal": "timestamp", "showLegend": true, "isSynced": true, "followingViewWidth": 10
+    },
+    "Plot!sim_control": {
+      "title": "指令与同帧实际云台角（弧度）",
+      "paths": [
+        {"value": "/dge/debug.yaw", "enabled": true, "timestampMethod": "receiveTime"},
+        {"value": "/dge/debug.gimbal_yaw", "enabled": true, "timestampMethod": "receiveTime"},
+        {"value": "/dge/debug.pitch", "enabled": true, "timestampMethod": "receiveTime"},
+        {"value": "/dge/debug.gimbal_pitch", "enabled": true, "timestampMethod": "receiveTime"},
+        {"value": "/dge/debug.shoot", "enabled": true, "timestampMethod": "receiveTime"}
+      ],
+      "xAxisVal": "timestamp", "showLegend": true, "isSynced": true, "followingViewWidth": 10
+    },
+    "Plot!sim_score": {
+      "title": "计分（命中率为 0–1）",
+      "paths": [
+        {"value": "/sim/status.stats.fired", "enabled": true, "timestampMethod": "receiveTime"},
+        {"value": "/sim/status.stats.hit", "enabled": true, "timestampMethod": "receiveTime"},
+        {"value": "/sim/status.stats.resolved", "enabled": true, "timestampMethod": "receiveTime"},
+        {"value": "/sim/status.stats.hit_rate", "enabled": true, "timestampMethod": "receiveTime"}
+      ],
+      "xAxisVal": "timestamp", "showLegend": true, "isSynced": true, "followingViewWidth": 20
+    },
+    "RawMessages!sim_status": {"topicPath": "/sim/status", "title": "会话、时钟与计分", "diffEnabled": false},
+    "RawMessages!sim_target": {"topicPath": "/dge/selection", "title": "装甲板位置、尺寸与选板", "diffEnabled": false}
+  },
+  "globalVariables": {}, "userNodes": {}, "playbackConfig": {"speed": 1},
+  "layout": {
+    "direction": "row", "splitPercentage": 45,
+    "first": {"direction": "column", "first": "ImageViewPanel!sim_image", "second": "3D!sim_scene", "splitPercentage": 40},
+    "second": {"direction": "column", "splitPercentage": 50,
+      "first": {"direction": "row", "first": "Plot!sim_ekf", "second": "Plot!sim_timing", "splitPercentage": 60},
+      "second": {"direction": "column", "splitPercentage": 65,
+        "first": {"direction": "row", "first": "Plot!sim_control", "second": "Plot!sim_score", "splitPercentage": 50},
+        "second": {"direction": "row", "first": "RawMessages!sim_status", "second": "RawMessages!sim_target", "splitPercentage": 50}
+      }
+    }
+  }
+}

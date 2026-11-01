@@ -1,7 +1,5 @@
 #include "ekf_model.hpp"
 
-#include <fmt/format.h>
-
 namespace tools {
 namespace {
 using namespace foxglove::messages;
@@ -11,16 +9,6 @@ Pose pose(const Eigen::Vector3d& p, const Eigen::Quaterniond& q = Eigen::Quatern
   result.position = vec(p);
   result.orientation = Quaternion{q.x(), q.y(), q.z(), q.w()};
   return result;
-}
-TextPrimitive label(const Eigen::Vector3d& p, const std::string& value, Color color, double size = 13) {
-  TextPrimitive text;
-  text.pose = pose(p);
-  text.text = value;
-  text.color = color;
-  text.billboard = true;
-  text.scale_invariant = true;
-  text.font_size = size;
-  return text;
 }
 LinePrimitive line(const Eigen::Vector3d& a, const Eigen::Vector3d& b, Color color) {
   LinePrimitive result;
@@ -80,6 +68,9 @@ EkfModelView build_ekf_model(
   view.selection["radius_forward_m"] = state.radius_forward;
   view.selection["radius_lateral_m"] = state.radius_lateral;
   view.selection["height_lateral_m"] = state.height_lateral;
+  view.selection["rotation_speed_rad_s"] = state.rotation_speed;
+  view.selection["target_name"] = auto_aim::ARMOR_NAMES.at(static_cast<size_t>(target->name));
+  view.selection["center"] = {{"x", center.x()}, {"y", center.y()}, {"z", center.z()}};
   for (const auto& plate : plates) {
     const int id = plate.id;
     const auto& p = plate.translation;
@@ -103,12 +94,6 @@ EkfModelView build_ekf_model(
     e.lines.push_back(outline);
     e.lines.push_back(line(center, p, muted));
     e.lines.push_back(line(p, p + plate.orientation * Eigen::Vector3d(.10, 0, 0), color));
-    Eigen::Vector3d offset = p - center;
-    offset.z() = 0;
-    if (offset.norm() > 1e-9) offset.normalize();
-    const Eigen::Vector3d label_position = p + offset * .17 + Eigen::Vector3d(0, 0, .08);
-    e.texts.push_back(label(label_position, fmt::format("#{}{}{}\n({:.2f}, {:.2f}, {:.2f}) m",
-      id, picked ? " SELECTED" : "", observed ? " LAST OBS" : "", p.x(), p.y(), p.z()), color));
     e.metadata = {{"armor_id", std::to_string(id)}, {"selected", picked ? "true" : "false"},
       {"last_observed", observed ? "true" : "false"}, {"width_m", std::to_string(width)},
       {"height_m", std::to_string(height)}, {"thickness", "8mm display only"}};
@@ -122,20 +107,23 @@ EkfModelView build_ekf_model(
   if (selected >= 0) {
     const Eigen::Vector3d p = aim.xyza.head<3>();
     view.selection["aim_position"] = {{"x", p.x()}, {"y", p.y()}, {"z", p.z()}};
-    CubePrimitive ghost;
+    const Color predicted{1., .25, .8, .85};
+    LinePrimitive ghost;
+    ghost.type = LinePrimitive::LineType::LINE_LOOP;
     ghost.pose = pose(p, Eigen::Quaterniond(Eigen::AngleAxisd(aim.xyza[3], Eigen::Vector3d::UnitZ()) *
       Eigen::AngleAxisd(rmcs_ekf::kPredictedOtherArmorPitch, Eigen::Vector3d::UnitY())));
-    ghost.size = Vector3{.008, width, height};
-    ghost.color = Color{green.r, green.g, green.b, .3};
-    future.cubes.push_back(ghost);
+    ghost.thickness = .002;
+    ghost.color = predicted;
+    ghost.points = {{0, width/2, height/2}, {0, -width/2, height/2},
+                    {0, -width/2, -height/2}, {0, width/2, -height/2}};
+    future.lines.push_back(ghost);
     SpherePrimitive point;
     point.pose = pose(p);
-    point.size = Vector3{.018, .018, .018};
-    point.color = green;
+    point.size = Vector3{.012, .012, .012};
+    point.color = predicted;
     future.spheres.push_back(point);
-    future.lines.push_back(line(plates[selected].translation, p, green));
-    future.texts.push_back(label(p + Eigen::Vector3d(0, 0, -.13),
-      fmt::format("AIM #{} (predicted)", selected), green));
+    future.lines.push_back(line(plates[selected].translation, p, predicted));
+    future.metadata = {{"selected_id", std::to_string(selected)}, {"meaning", "predicted impact pose"}};
   }
   view.scene.entities.push_back(std::move(future));
   auto body = entity("ekf_center");
@@ -158,11 +146,6 @@ EkfModelView build_ekf_model(
     }
     body.lines.push_back(std::move(ring));
   }
-  body.texts.push_back(label(center + Eigen::Vector3d(0, 0, .45), fmt::format(
-    "EKF {} | {:.0f} x {:.0f} mm (lightbar corners)\nr1={:.3f} r2={:.3f} dz={:+.3f} m | w={:+.2f} rad/s\nselected={} | last observed={}",
-    auto_aim::ARMOR_NAMES.at(static_cast<size_t>(target->name)), width*1000, height*1000,
-    state.radius_forward, state.radius_lateral, state.height_lateral, state.rotation_speed,
-    selected, target->last_id()), cyan, 14));
   view.scene.entities.push_back(std::move(body));
   return view;
 }

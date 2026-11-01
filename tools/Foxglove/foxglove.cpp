@@ -867,17 +867,8 @@ void FoxgloveServer::publish_scene(
           make_arrow(center, tip, 0.02, make_color(0.2, 1.0, 1.0, 1.0)));
       }
 
-      // 目标标签
-      TextPrimitive text;
-      text.pose = make_pose(center.x(), center.y(), center.z() + 0.45, 0.0);
-      text.billboard = true;
-      text.scale_invariant = true;
-      text.font_size = 14.0;
-      text.color = kTracked;
-      text.text = fmt::format(
-        "{} | v_yaw={:+.1f}rad/s\nr1={:.3f}m r2={:.3f}m",
-        auto_aim::ARMOR_NAMES.at(static_cast<size_t>(target.name)), v_yaw, radius, radius_2);
-      entity.texts.push_back(std::move(text));
+      // Numeric details belong in /tracker/target and /dge/selection.
+      // Screen-sized billboards here obscure the armor geometry when zoomed out.
     }
     update.entities.push_back(std::move(entity));
   }
@@ -930,14 +921,6 @@ void FoxgloveServer::publish_scene(
       entity.arrows.push_back(
         make_arrow(Eigen::Vector3d::Zero(), aim, 0.012, make_color(kAim.r, kAim.g, kAim.b, 0.8)));
 
-      TextPrimitive text;
-      text.pose = make_pose(aim.x(), aim.y(), aim.z() + 0.15, 0.0);
-      text.billboard = true;
-      text.scale_invariant = true;
-      text.font_size = 12.0;
-      text.color = kAim;
-      text.text = "aim";
-      entity.texts.push_back(std::move(text));
     }
     update.entities.push_back(std::move(entity));
   }

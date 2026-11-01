@@ -7,11 +7,108 @@
       "title": "原始像素与检测四角"
     },
     "3D!sim_scene": {
-      "fixedFrame": "odom", "followMode": "follow-position", "followTf": "ekf_target",
-      "cameraState": {"distance": 1.7, "perspective": true, "phi": 55, "thetaOffset": 45, "target": [0,0,0], "targetOffset": [0,0,0.12], "targetOrientation": [0,0,0,1], "fovy": 55, "near": 0.01, "far": 5000},
-      "scene": {"backgroundColor": "#101822"},
-      "topics": {"/dge/ekf_model": {"visible": true}, "/dge/scene": {"visible": false}, "/dge/prediction": {"visible": false}, "/detector/marker": {"visible": false}, "/tracker/marker": {"visible": false}},
-      "title": "EKF 四板模型 · 绿色选板 / 青色最近观测"
+      "cameraState": {
+        "distance": 1.35,
+        "perspective": true,
+        "phi": 55,
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOffset": [
+          0,
+          0,
+          0
+        ],
+        "targetOrientation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "thetaOffset": 45,
+        "fovy": 55,
+        "near": 0.01,
+        "far": 5000
+      },
+      "followMode": "follow-position",
+      "followTf": "ekf_target",
+      "fixedFrame": "odom",
+      "scene": {
+        "backgroundColor": "#101118",
+        "transforms": {
+          "showLabel": false
+        },
+        "enableStats": false
+      },
+      "transforms": {
+        "frame:odom": {
+          "visible": false,
+          "showLabel": false
+        },
+        "frame:gimbal_link": {
+          "visible": false,
+          "showLabel": false
+        },
+        "frame:camera_optical_frame": {
+          "visible": false,
+          "showLabel": false
+        },
+        "frame:ekf_target": {
+          "visible": false,
+          "showLabel": false
+        }
+      },
+      "topics": {
+        "/dge/ekf_model": {
+          "visible": true
+        },
+        "/dge/scene": {
+          "visible": false
+        },
+        "/dge/prediction": {
+          "visible": false
+        },
+        "/detector/marker": {
+          "visible": false
+        },
+        "/tracker/marker": {
+          "visible": false
+        },
+        "/camera_info": {
+          "visible": false
+        },
+        "/aiming_point": {
+          "visible": false
+        }
+      },
+      "layers": {
+        "dge-grid-0000-0000": {
+          "visible": true,
+          "frameLocked": true,
+          "label": "10 cm grid",
+          "instanceId": "dge-grid-0000-0000",
+          "layerId": "foxglove.Grid",
+          "frameId": "ekf_target",
+          "size": 2,
+          "divisions": 20,
+          "lineWidth": 1,
+          "color": "#334454",
+          "position": [
+            0,
+            0,
+            -0.15
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "order": 1
+        }
+      },
+      "title": "EKF 模型 · 绿=选板 / 青边=最近观测 / 紫=预测"
     },
     "Plot!sim_ekf": {
       "title": "EKF 拒绝与重初始化",

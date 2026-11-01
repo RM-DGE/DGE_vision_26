@@ -38,16 +38,20 @@ int main(int argc, char** argv) {
       const auto& q = *cube.pose->orientation;
       check(Eigen::Quaterniond(q.w, q.x, q.y, q.z).angularDistance(truth.orientation) < 1e-9,
             "rendered orientation must preserve the full EKF quaternion");
-      check(plate.texts.at(0).text.find("#" + std::to_string(i)) != std::string::npos,
-            "plate ID label missing");
+      check(model.selection["plates"][i]["id"] == i, "plate ID must remain available in inspector");
       check(model.selection["plates"][i]["selected"] == (i == aim.armor_id), "wrong highlight");
     }
+    for (const auto& entity : model.scene.entities)
+      check(entity.texts.empty(), "3D geometry must not be obscured by text billboards");
     auto invalid = aim;
     invalid.valid = false;
     auto idle = tools::build_ekf_model(&target, invalid, {2, 0});
     check(idle.selection["selected_id"] == -1 && idle.selection["aim_position"].is_null(),
           "invalid aim must not retain selected plate or future aim");
-    check(idle.scene.entities.at(4).cubes.empty(), "invalid aim ghost must disappear");
+    check(idle.scene.entities.at(4).lines.empty() && idle.scene.entities.at(4).spheres.empty(),
+          "invalid aim ghost must disappear");
+    check(model.scene.entities.at(4).cubes.empty() && !model.scene.entities.at(4).lines.empty(),
+          "predicted plate must be an outline, not another solid occluder");
     auto bad_id = aim;
     bad_id.armor_id = 4;
     check(tools::build_ekf_model(&target, bad_id, {2, 1}).selection["selected_id"] == -1,
