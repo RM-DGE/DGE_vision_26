@@ -745,6 +745,7 @@ void FoxgloveServer::publish_scene(
     entity.frame_locked = false;
 
     for (const auto & armor : armors) {
+      if (!armor.xyz_in_world.allFinite() || !armor.ypr_in_world.allFinite()) continue;
       CubePrimitive cube;
       cube.pose = make_pose_ypr(
         armor.xyz_in_world.x(), armor.xyz_in_world.y(), armor.xyz_in_world.z(),
@@ -944,6 +945,24 @@ void FoxgloveServer::publish_ekf_model(
     const auto data = model.selection.dump();
     impl_->selection_ch->log(reinterpret_cast<const std::byte*>(data.data()), data.size(), ns);
   }
+}
+
+void FoxgloveServer::publish_prediction(
+  const std::list<auto_aim::Target> & targets, const auto_aim::AimPoint & aim)
+{
+  if (!impl_->prediction_ch || !has_clients()) return;
+  const auto ns = now_ns();
+  const auto model = build_ekf_model(targets.empty() ? nullptr : &targets.front(), aim, to_timestamp(ns));
+  SceneUpdate update;
+  SceneEntity prediction;
+  prediction.timestamp = to_timestamp(ns);
+  prediction.frame_id = "odom";
+  for (const auto & entity : model.scene.entities)
+    if (entity.id == "selected_at_impact") prediction = entity;
+  // Replace the legacy entity as well, clearing nearest-plate paths/ghosts.
+  prediction.id = "target_prediction";
+  update.entities.push_back(std::move(prediction));
+  impl_->prediction_ch->log(update, ns);
 }
 
 void FoxgloveServer::publish_prediction(
@@ -1179,6 +1198,7 @@ void FoxgloveServer::publish_rmvision(
   if (impl_->rm_armors_ch) {
     nlohmann::json msg = {{"header", header}, {"armors", nlohmann::json::array()}};
     for (const auto & a : armors) {
+      if (!a.xyz_in_gimbal.allFinite() || !a.ypr_in_gimbal.allFinite()) continue;
       nlohmann::json item;
       item["number"] = auto_aim::ARMOR_NAMES.at(static_cast<size_t>(a.name));
       item["type"] = auto_aim::ARMOR_TYPES.at(static_cast<size_t>(a.type));
@@ -1274,6 +1294,7 @@ void FoxgloveServer::publish_detector_markers(const std::list<auto_aim::Armor> &
   std::vector<RosMarker> markers;
   int id = 0;
   for (const auto & a : armors) {
+    if (!a.xyz_in_world.allFinite() || !a.ypr_in_world.allFinite()) continue;
     const double width = (a.type == auto_aim::big) ? 0.230 : 0.135;
     const auto pos = a.xyz_in_world;
     const double yaw = a.ypr_in_world[0];
@@ -1402,6 +1423,7 @@ void FoxgloveServer::publish_debug(
   dbg["gimbal_yaw"] = gimbal_ypr[0];
   dbg["gimbal_pitch"] = gimbal_ypr[1];
   dbg["shoot"] = command.shoot ? 1 : 0;
+  dbg["control"] = command.control ? 1 : 0;
   dbg["armors"] = static_cast<int>(armors.size());
   dbg["targets"] = static_cast<int>(targets.size());
   if (!targets.empty()) {

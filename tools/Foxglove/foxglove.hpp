@@ -61,6 +61,9 @@ public:
   // 每个图像帧：发布 /dge/prediction（跟踪目标未来一段时间的预测轨迹）
   void publish_prediction(
     const std::list<auto_aim::Target> & targets, double horizon_s = 0.6, double step_s = 0.02);
+  // The simulator shows the actual selected plate's lead segment and aim point.
+  void publish_prediction(
+    const std::list<auto_aim::Target> & targets, const auto_aim::AimPoint & aim);
 
   // Target close-up: EKF geometry, actual Aimer selection and target-follow TF.
   void publish_ekf_model(

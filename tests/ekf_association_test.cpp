@@ -48,10 +48,14 @@ int run(int argc,char** argv) {
     auto *armor=new(storage) auto_aim::Armor(0,3,1.f,cv::Rect{},
       std::vector<cv::Point2f>{{10,10},{30,10},{30,20},{10,20}});
     int priority=0;static_assert(sizeof(priority)==sizeof(armor->priority));
+    const bool unsolved_looks_valid = armor->xyz_in_world.allFinite();
     std::memcpy(&priority,&armor->priority,sizeof(priority));
     armor->~Armor();
     if(priority!=int(auto_aim::ArmorPriority::fifth)) {
       std::cerr<<"YOLO armor has no deterministic default priority\n";++failed;
+    }
+    if(unsolved_looks_valid) {
+      std::cerr<<"unsolved detection carries a publishable world pose\n";++failed;
     }
   }
   // IPPE pitch/roll are noisy, while Solver's optimized yaw and the EKF's

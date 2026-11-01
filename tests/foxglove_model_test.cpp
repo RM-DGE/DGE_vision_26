@@ -12,6 +12,26 @@ void check(bool value, const char* message) {
 int main(int argc, char** argv) {
   try {
     check(argc == 2, "config path required");
+    for(double speed : {0., 4., -4., 8., -8.}) {
+      auto moving = auto_aim::Target::synthetic(4, speed, .2, .08);
+      auto_aim::Aimer test_aimer(argv[1]);
+      auto cmd = test_aimer.aim({moving}, {}, 23, false, 0);
+      check(cmd.control && test_aimer.debug_aim_point.valid, "visible plate must be selected");
+      const auto& selected = test_aimer.debug_aim_point.xyza;
+      const double angle = std::remainder(selected[3], 2*M_PI);
+      check(std::abs(angle) <= 60*M_PI/180 + 1e-6,
+            "aimer followed a rear plate instead of switching to a camera-facing plate");
+      if(std::abs(speed)>2) {
+        check(speed>0 ? angle < 20*M_PI/180 : angle > -20*M_PI/180,
+              "spin policy must prefer incoming plates for both rotation directions");
+      }
+      const auto view = tools::build_ekf_model(&moving, test_aimer.debug_aim_point, {1,0});
+      const auto& lead = view.scene.entities.at(4).lines.at(0).points;
+      const auto from = moving.full()[test_aimer.debug_aim_point.armor_id].translation;
+      check((Eigen::Vector3d(lead[0].x,lead[0].y,lead[0].z)-from).norm()<1e-9 &&
+            (Eigen::Vector3d(lead[1].x,lead[1].y,lead[1].z)-selected.head<3>()).norm()<1e-9,
+            "prediction line must connect the actual selected plate to its impact point");
+    }
     auto target = auto_aim::Target::synthetic(4, 0, .2, .08);
     auto_aim::Aimer aimer(argv[1]);
     auto command = aimer.aim({target}, {}, 23, false, 0);

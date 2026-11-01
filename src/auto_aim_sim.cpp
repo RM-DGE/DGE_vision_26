@@ -119,7 +119,7 @@ int main(int argc,char **argv)
         foxglove.publish_tf(frame->metadata.gimbal_to_world);
         foxglove.publish_ekf_model(targets,aimer->debug_aim_point);
         foxglove.publish_scene(armors,targets,aimer->debug_aim_point.valid,aimer->debug_aim_point.xyza,frame->metadata.gimbal_to_world);
-        foxglove.publish_prediction(targets);
+        foxglove.publish_prediction(targets,aimer->debug_aim_point);
         if(truth)foxglove.publish_ground_truth(client.state()->truth);
         ++frames;
         if(sim::Clock::now()-report>1s) {

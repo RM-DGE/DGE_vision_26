@@ -34,12 +34,12 @@ io::Command Aimer::aim(
   bool to_now, double observation_age_s)
 {
   debug_aim_point = {false, Eigen::Vector4d::Zero(), -1};
-  if (targets.empty()) return {false, false, 0, 0};
+  if (targets.empty()) {lock_id_=-1; return {false, false, 0, 0};}
   const auto base = targets.front();
 
   const auto state = base.state();
   double delay_time =
-    state.rotation_speed > decision_speed_ ? high_speed_delay_time_ : low_speed_delay_time_;
+    std::abs(state.rotation_speed) > decision_speed_ ? high_speed_delay_time_ : low_speed_delay_time_;
 
   if (bullet_speed < 14) bullet_speed = 23;
 
@@ -142,8 +142,8 @@ AimPoint Aimer::choose_aim_point(const Target & target)
   const auto state = target.state();
   std::vector<Eigen::Vector4d> armor_xyza_list = target.xyza_list();
   auto armor_num = armor_xyza_list.size();
-  // 如果装甲板未发生过跳变，则只有当前装甲板的位置已知
-  if (!target.jumped()) return { true, armor_xyza_list[0], 0 };
+  // Model IDs remain defined before the first observed plate switch. A lead
+  // prediction can rotate plate 0 out of view even before that first switch.
 
   // 整车旋转中心的球坐标yaw
   auto center_yaw = std::atan2(state.y, state.x);
@@ -156,7 +156,7 @@ AimPoint Aimer::choose_aim_point(const Target & target)
   }
 
   // 不考虑小陀螺
-  if (std::abs(state.radius_forward) <= 2) {
+  if (std::abs(state.rotation_speed) <= 2) {
     // 选择在可射击范围内的装甲板
     std::vector<int> id_list;
     for (int i = 0; i < armor_num; i++) {

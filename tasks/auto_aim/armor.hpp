@@ -5,6 +5,7 @@
 #include <opencv2/opencv.hpp>
 #include <string>
 #include <vector>
+#include <limits>
 
 namespace auto_aim
 {
@@ -98,10 +99,11 @@ struct Armor
   double confidence;
   bool duplicated;
 
-  Eigen::Vector3d xyz_in_gimbal;  // 单位：m
-  Eigen::Vector3d xyz_in_world;   // 单位：m
-  Eigen::Vector3d ypr_in_gimbal;  // 单位：rad
-  Eigen::Vector3d ypr_in_world;   // 单位：rad
+  // Unsolved detections must never masquerade as finite 3D poses.
+  Eigen::Vector3d xyz_in_gimbal = Eigen::Vector3d::Constant(std::numeric_limits<double>::quiet_NaN());
+  Eigen::Vector3d xyz_in_world = xyz_in_gimbal;
+  Eigen::Vector3d ypr_in_gimbal = xyz_in_gimbal;
+  Eigen::Vector3d ypr_in_world = xyz_in_gimbal;
   Eigen::Vector3d ypd_in_world;   // 球坐标系
 
   double yaw_raw;  // rad
