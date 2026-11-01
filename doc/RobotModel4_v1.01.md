@@ -313,6 +313,48 @@ set -o pipefail
 
 ## 11. 文件速查与后续工作
 
+### 11.1 EKF 四板特写与选板
+
+2026-11-01 更新后的 `foxglove_layouts/rm_aim_sim_layout.json` 默认跟随 `ekf_target`，视距 1.7 m，显示 `/dge/ekf_model`。更新程序后需要重新导入布局；仅重连不会替换 Foxglove 保存的旧布局。
+
+四板中心和完整姿态直接来自 EKF `Target::full()`，以 `#0`～`#3` 标识。绿色实心板是 Aimer 最终选择的板，青色轮廓是最近一次观测关联的板，橙色为其他板。浅绿色板及 `AIM` 标注显示预计命中时刻的位置，与当前选板之间的线段显示提前量。目标中心上方展示双半径、高度差、角速度及板号。
+
+尺寸是算法所用的灯条角点模型：小板 135 × 56 mm，大板 230 × 56 mm；8 mm 显示厚度不是实际板厚，也不代表裁判命中区域。右下 `/dge/selection` 可展开四板 odom 坐标、四元数、尺寸和选板标志。`selected_id=-1` 表示没有有效选板；最近观测编号不代表本帧一定更新成功。编号只在本次 EKF 初始化周期内有效。
+
+视角移走时选择显示坐标系 `ekf_target`、跟随位置，并按 `1` 回中。默认隐藏整场 `/dge/scene` 和未来多帧 `/dge/prediction`，需要时在主题里打开。无目标会清除模型，发布停止后实体在 0.5 秒后过期。
+
+回归命令：
+
+```bash
+ctest --test-dir build --output-on-failure
+python3 tests/foxglove_ws_smoke.py --duration 8 --require-model
+```
+
+本次验证：WSL 下 `auto_aim_sim`、`standard`、`sentry_DGE` 构建通过，CTest 2/2 通过（协议与模型几何/选板/序列化）。独立通道、Intel + Wayland、CPU 推理、`gimbal.max_speed=0.1`、`gimbal.response_hz=0.1`、`auto_fire=false` 的诊断运行中，8 秒收到 188 帧有效模型与选板消息。该低速配置用于验证可视化，不是默认闭环命中验收；另一轮默认云台、NVIDIA 渲染运行只收到 2 帧有效选板后失去检测，不能据此宣称默认闭环已稳定。尚未在 Foxglove 应用中人工确认新版视角的最终显示效果。
+
+### 11.2 分清三种帧率再优化
+
+- 仿真窗口 FPS：Godot 渲染帧率；不能用它代替 DGE 算法处理频率。
+- `/dge/debug.fps`：DGE 完成帧之间的墙钟频率，受取图、推理和发布等影响。
+- Foxglove 图像：当前 `publish_image()` 主动限制约 15 FPS；3D 和状态随算法帧发布。
+
+本机 WSL 默认 OpenGL 为 Intel UHD，也能选择 RTX 4060 Laptop。2026-11-01 在相同相机/物理配置、无 DGE 负载、关闭 IPC 的短时对照中，各组运行 18 秒，丢弃最初两个 FPS 采样：Intel 默认路径中位数 72 FPS，RTX 4060 解除限帧 51.5 FPS，Intel + Wayland 解除限帧 77 FPS。该结果只代表本机此次空载窗口测试，不是闭环性能保证；不要假定独显一定更快。
+
+本机推荐先尝试以下命令，DGE 仍使用 CPU，不更改物理步长或相机配置：
+
+```bash
+MESA_D3D12_DEFAULT_ADAPTER_NAME=Intel \
+./run.sh --display-driver wayland --disable-vsync --max-fps 0 -- --config=res://configs/vision.cfg --remote
+```
+
+环境变量依据 [WSLg GPU 选择说明](https://github.com/microsoft/wslg/wiki/GPU-selection-in-WSLg)，引擎参数依据 [Godot 命令行说明](https://docs.godotengine.org/en/stable/tutorials/editor/command_line_tutorial.html)。先比较同一场景、同一控制端下的帧率与延迟；取消上限不保证一定更快，也可能让渲染占用更多资源。
+
+本工程为贴近真实部署，明确保留 `device: CPU`。后续仿真器优化应优先测量主窗口渲染、两级相机视口渲染及 GPU 像素读回开销。上游原始相机和曝光处理视口目前均为 `UPDATE_ALWAYS`；可研究将主窗口刷新与相机请求采样独立调度，但必须验证图像与姿态仍为同帧，不能直接跳帧后复用旧像素。当前没有修改上游源码或采样策略。
+
+Godot 默认 X11 路径在本机报告无法切换 VSync；Wayland 本次没有该警告。窗口真正显示的流畅度还受 WSLg 合成器及显示器刷新率限制，参见 [WSLg 帧率说明](https://github.com/microsoft/wslg/wiki/Controlling-WSLg-frame-rate)。降低相机分辨率需要同步内参、元数据校验和检测精度验证，本次保持 1440×1080。
+
+### 11.3 文件速查
+
 | 文件 | 作用 |
 |---|---|
 | `src/auto_aim_sim.cpp` | 仿真主循环、标定检查、像素算法调用、Foxglove 输出 |

@@ -33,7 +33,8 @@ io::Command Aimer::aim(
   std::list<Target> targets, std::chrono::steady_clock::time_point timestamp, double bullet_speed,
   bool to_now, double observation_age_s)
 {
-  if (targets.empty()) { debug_aim_point.valid = false; return {false, false, 0, 0}; }
+  debug_aim_point = {false, Eigen::Vector4d::Zero(), -1};
+  if (targets.empty()) return {false, false, 0, 0};
   const auto base = targets.front();
 
   const auto state = base.state();
@@ -67,6 +68,7 @@ io::Command Aimer::aim(
     tools::logger()->debug(
       "[Aimer] Unsolvable trajectory0: {:.2f} {:.2f} {:.2f}", bullet_speed, d0, xyz0[2]);
     debug_aim_point.valid = false;
+    debug_aim_point.armor_id = -1;
     return {false, false, 0, 0};
   }
 
@@ -97,6 +99,7 @@ io::Command Aimer::aim(
         "[Aimer] Unsolvable trajectory in iter {}: speed={:.2f}, d={:.2f}, z={:.2f}", iter + 1,
         bullet_speed, d, xyz.z());
       debug_aim_point.valid = false;
+      debug_aim_point.armor_id = -1;
       return {false, false, 0, 0};
     }
 
@@ -140,7 +143,7 @@ AimPoint Aimer::choose_aim_point(const Target & target)
   std::vector<Eigen::Vector4d> armor_xyza_list = target.xyza_list();
   auto armor_num = armor_xyza_list.size();
   // 如果装甲板未发生过跳变，则只有当前装甲板的位置已知
-  if (!target.jumped()) return { true, armor_xyza_list[0] };
+  if (!target.jumped()) return { true, armor_xyza_list[0], 0 };
 
   // 整车旋转中心的球坐标yaw
   auto center_yaw = std::atan2(state.y, state.x);
@@ -174,12 +177,12 @@ AimPoint Aimer::choose_aim_point(const Target & target)
       if (lock_id_ != id0 && lock_id_ != id1)
         lock_id_ = (std::abs(delta_angle_list[id0]) < std::abs(delta_angle_list[id1])) ? id0 : id1;
 
-      return {true, armor_xyza_list[lock_id_]};
+      return {true, armor_xyza_list[lock_id_], static_cast<int>(lock_id_)};
     }
 
     // 只有一个装甲板在可射击范围内时，退出锁定模式
     lock_id_ = -1;
-    return {true, armor_xyza_list[id_list[0]]};
+    return {true, armor_xyza_list[id_list[0]], id_list[0]};
   }
 
   double coming_angle = comming_angle_;
@@ -189,9 +192,9 @@ AimPoint Aimer::choose_aim_point(const Target & target)
   for (int i = 0; i < armor_num; i++) {
     if (std::abs(delta_angle_list[i]) > coming_angle) continue;
     if (state.rotation_speed > 0 && delta_angle_list[i] < leaving_angle)
-      return { true, armor_xyza_list[i] };
+      return { true, armor_xyza_list[i], i };
     if (state.rotation_speed < 0 && delta_angle_list[i] > -leaving_angle)
-      return { true, armor_xyza_list[i] };
+      return { true, armor_xyza_list[i], i };
   }
 
   return {false, armor_xyza_list[0]};

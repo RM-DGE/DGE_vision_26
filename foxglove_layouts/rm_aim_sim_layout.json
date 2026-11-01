@@ -7,10 +7,11 @@
       "title": "原始像素与检测四角"
     },
     "3D!sim_scene": {
-      "fixedFrame": "odom", "followMode": "follow-position", "followTf": "gimbal_link",
-      "cameraState": {"distance": 7, "perspective": true, "phi": 65, "thetaOffset": 0, "target": [0,0,0], "targetOffset": [0,0,0], "targetOrientation": [0,0,0,1], "fovy": 55, "near": 0.1, "far": 5000},
-      "topics": {"/dge/scene": {"visible": true}, "/dge/prediction": {"visible": true}},
-      "title": "检测、整车估计与预测"
+      "fixedFrame": "odom", "followMode": "follow-position", "followTf": "ekf_target",
+      "cameraState": {"distance": 1.7, "perspective": true, "phi": 55, "thetaOffset": 45, "target": [0,0,0], "targetOffset": [0,0,0.12], "targetOrientation": [0,0,0,1], "fovy": 55, "near": 0.01, "far": 5000},
+      "scene": {"backgroundColor": "#101822"},
+      "topics": {"/dge/ekf_model": {"visible": true}, "/dge/scene": {"visible": false}, "/dge/prediction": {"visible": false}, "/detector/marker": {"visible": false}, "/tracker/marker": {"visible": false}},
+      "title": "EKF 四板模型 · 绿色选板 / 青色最近观测"
     },
     "Plot!sim_ekf": {
       "title": "EKF 拒绝与重初始化",
@@ -53,12 +54,12 @@
       "xAxisVal": "timestamp", "showLegend": true, "isSynced": true, "followingViewWidth": 20
     },
     "RawMessages!sim_status": {"topicPath": "/sim/status", "title": "会话、时钟与计分", "diffEnabled": false},
-    "RawMessages!sim_target": {"topicPath": "/tracker/target", "title": "跟踪状态", "diffEnabled": false}
+    "RawMessages!sim_target": {"topicPath": "/dge/selection", "title": "装甲板位置、尺寸与选板", "diffEnabled": false}
   },
   "globalVariables": {}, "userNodes": {}, "playbackConfig": {"speed": 1},
   "layout": {
     "direction": "row", "splitPercentage": 45,
-    "first": {"direction": "column", "first": "ImageViewPanel!sim_image", "second": "3D!sim_scene", "splitPercentage": 50},
+    "first": {"direction": "column", "first": "ImageViewPanel!sim_image", "second": "3D!sim_scene", "splitPercentage": 40},
     "second": {"direction": "column", "splitPercentage": 50,
       "first": {"direction": "row", "first": "Plot!sim_ekf", "second": "Plot!sim_timing", "splitPercentage": 60},
       "second": {"direction": "column", "splitPercentage": 65,

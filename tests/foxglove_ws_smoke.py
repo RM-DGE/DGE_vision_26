@@ -53,11 +53,13 @@ def main():
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--duration", type=float, default=12)
+    parser.add_argument("--require-model", action="store_true", help="Require a tracked four-plate model and a valid Aimer selection")
     parser.add_argument("--status-only", action="store_true", help="Check disconnected/paused status without requiring image traffic")
     parser.add_argument("--expect-inactive", action="store_true", help="Require stale state and invalid observation (use after stopping simulator)")
     options = parser.parse_args()
     expected = {"/camera/image", "/camera/annotations", "/dge/scene", "/dge/prediction",
-                "/tf", "/tracker/target", "/tracker/info", "/dge/debug", "/sim/status"}
+                "/tf", "/tracker/target", "/tracker/info", "/dge/debug", "/sim/status",
+                "/dge/ekf_model", "/dge/selection"}
     if options.status_only:
         expected = {"/sim/status"}
     with socket.create_connection((options.host, options.port), timeout=5) as stream:
@@ -75,6 +77,7 @@ def main():
         if response.split(b"\r\n", 1)[0].split()[1:2] != [b"101"] or accept.lower() not in response.lower():
             raise RuntimeError("WebSocket upgrade failed: " + response.decode(errors="replace"))
         subscriptions, counts, samples = {}, {}, {}
+        selected_frames = 0
         deadline = time.monotonic() + options.duration
         while time.monotonic() < deadline:
             stream.settimeout(max(0.01, deadline - time.monotonic()))
@@ -100,13 +103,25 @@ def main():
                 topic = subscriptions.get(identity)
                 if topic:
                     counts[topic] = counts.get(topic, 0) + 1
-                    if topic in {"/sim/status", "/dge/debug", "/tracker/target"}:
+                    if topic in {"/sim/status", "/dge/debug", "/tracker/target", "/dge/selection"}:
                         samples[topic] = json.loads(payload[13:])
+                    if topic == "/dge/selection":
+                        model = samples[topic]
+                        if model["tracking"] and model["aim_valid"]:
+                            if len(model["plates"]) != 4 or sum(p["selected"] for p in model["plates"]) != 1:
+                                raise RuntimeError("Expected four plates and exactly one selected plate")
+                            if model["plates"][model["selected_id"]]["selected"] is not True:
+                                raise RuntimeError("Selected plate ID disagrees with per-plate flags")
+                            if abs(model["height_m"] - 0.056) > 1e-9:
+                                raise RuntimeError("Rendered model height differs from EKF lightbar geometry")
+                            selected_frames += 1
             elif opcode == 8:
                 raise RuntimeError("Server closed before smoke completed")
         missing = expected - counts.keys()
         if missing:
             raise RuntimeError("No data received on: " + ", ".join(sorted(missing)))
+        if options.require_model and selected_frames == 0:
+            raise RuntimeError("No valid tracked model/selection received")
         status = samples["/sim/status"]
         if "fresh" not in status or "observation_valid" not in status:
             raise RuntimeError("Simulation status fields missing")
@@ -116,7 +131,8 @@ def main():
             raise RuntimeError("Simulation state missing")
         if not options.status_only and ("fps" not in samples["/dge/debug"] or "tracking" not in samples["/tracker/target"]):
             raise RuntimeError("Algorithm diagnostics missing")
-        print(json.dumps({"result": "PASS", "received": counts, "status": status}, ensure_ascii=False))
+        print(json.dumps({"result": "PASS", "received": counts, "selected_frames": selected_frames,
+                          "selection": samples.get("/dge/selection"), "status": status}, ensure_ascii=False))
 
 
 if __name__ == "__main__":

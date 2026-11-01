@@ -16,6 +16,8 @@ struct AimPoint
 {
   bool valid;
   Eigen::Vector4d xyza;
+  // Index in Target::full()/xyza_list(), from the final selection iteration.
+  int armor_id = -1;
 };
 
 class Aimer

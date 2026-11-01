@@ -12,6 +12,7 @@
 #include "io/command.hpp"
 #include "tasks/auto_aim/armor.hpp"
 #include "tasks/auto_aim/target.hpp"
+#include "tasks/auto_aim/aimer.hpp"
 
 namespace tools
 {
@@ -60,6 +61,10 @@ public:
   // 每个图像帧：发布 /dge/prediction（跟踪目标未来一段时间的预测轨迹）
   void publish_prediction(
     const std::list<auto_aim::Target> & targets, double horizon_s = 0.6, double step_s = 0.02);
+
+  // Target close-up: EKF geometry, actual Aimer selection and target-follow TF.
+  void publish_ekf_model(
+    const std::list<auto_aim::Target>& targets, const auto_aim::AimPoint& aim);
 
   // 每个图像帧：发布 /sim/ground_truth（仿真器敌方真值，EKF 对比用；空向量跳过）
   void publish_ground_truth(const std::vector<io::rm_aim_sim::SimTruthTarget> & truths);

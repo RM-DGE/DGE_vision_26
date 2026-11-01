@@ -117,6 +117,7 @@ int main(int argc,char **argv)
         foxglove.publish_debug(fps,command,targets,armors,aimer->debug_aim_point.valid,aim_xyza,ypr);
         foxglove.publish_sim_status(&*client.state(),true,true,frame->metadata.sim_time,age);
         foxglove.publish_tf(frame->metadata.gimbal_to_world);
+        foxglove.publish_ekf_model(targets,aimer->debug_aim_point);
         foxglove.publish_scene(armors,targets,aimer->debug_aim_point.valid,aimer->debug_aim_point.xyza,frame->metadata.gimbal_to_world);
         foxglove.publish_prediction(targets);
         if(truth)foxglove.publish_ground_truth(client.state()->truth);

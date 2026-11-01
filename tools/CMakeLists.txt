@@ -6,6 +6,7 @@ add_library(tools OBJECT
     math_tools.cpp
     plotter.cpp
     Foxglove/foxglove.cpp
+    Foxglove/ekf_model.cpp
     trajectory.cpp
     recorder.cpp
     logger.cpp

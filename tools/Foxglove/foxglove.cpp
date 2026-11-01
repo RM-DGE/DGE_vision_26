@@ -1,4 +1,5 @@
 #include "foxglove.hpp"
+#include "ekf_model.hpp"
 
 #include <algorithm>
 #include <array>
@@ -429,6 +430,8 @@ struct FoxgloveServer::Impl
   std::optional<CameraCalibrationChannel> camera_info_ch;
   std::optional<FrameTransformsChannel> tf_ch;
   std::optional<SceneUpdateChannel> scene_ch;
+  std::optional<SceneUpdateChannel> ekf_model_ch;
+  std::optional<foxglove::RawChannel> selection_ch;
   std::optional<SceneUpdateChannel> prediction_ch;       // /dge/prediction
   std::optional<foxglove::RawChannel> rm_target_ch;
   std::optional<foxglove::RawChannel> rm_info_ch;
@@ -572,6 +575,11 @@ FoxgloveServer::FoxgloveServer(int port, std::string name) : impl_(std::make_uni
       name, "jsonschema", reinterpret_cast<const std::byte *>(object_schema_text.data()),
       object_schema_text.size()};
   };
+  if (auto ch = SceneUpdateChannel::create("/dge/ekf_model", impl_->context); ch)
+    impl_->ekf_model_ch = std::move(*ch);
+  if (auto ch = foxglove::RawChannel::create(
+        "/dge/selection", "json", json_schema("dge.EkfSelection"), impl_->context); ch)
+    impl_->selection_ch = std::move(*ch);
   if (auto ch = foxglove::RawChannel::create(
         "/tracker/target", "json", json_schema("auto_aim_interfaces/msg/Target"),
         impl_->context); ch) impl_->rm_target_ch = std::move(*ch);
@@ -937,6 +945,24 @@ void FoxgloveServer::publish_scene(
   impl_->scene_ch->log(update, ns);
 }
 
+void FoxgloveServer::publish_ekf_model(
+  const std::list<auto_aim::Target>& targets, const auto_aim::AimPoint& aim)
+{
+  if (!has_clients()) return;
+  const auto ns = now_ns();
+  auto model = build_ekf_model(targets.empty() ? nullptr : &targets.front(), aim, to_timestamp(ns));
+  if (model.target_tf && impl_->tf_ch) {
+    FrameTransforms transforms;
+    transforms.transforms.push_back(*model.target_tf);
+    impl_->tf_ch->log(transforms, ns);
+  }
+  if (impl_->ekf_model_ch) impl_->ekf_model_ch->log(model.scene, ns);
+  if (impl_->selection_ch) {
+    const auto data = model.selection.dump();
+    impl_->selection_ch->log(reinterpret_cast<const std::byte*>(data.data()), data.size(), ns);
+  }
+}
+
 void FoxgloveServer::publish_prediction(
   const std::list<auto_aim::Target> & targets, double horizon_s, double step_s)
 {
@@ -1045,6 +1071,7 @@ void FoxgloveServer::publish_sim_status(
 
 void FoxgloveServer::reset_sim_diagnostics()
 {
+  publish_ekf_model({}, {false, Eigen::Vector4d::Zero(), -1});
   impl_->has_last_target = false;
   impl_->has_gt_offset = false;
   publish_ground_truth({});
