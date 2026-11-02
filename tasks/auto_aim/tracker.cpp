@@ -3,6 +3,8 @@
 #include <yaml-cpp/yaml.h>
 
 #include <tuple>
+#include <cmath>
+#include <stdexcept>
 
 #include "tools/logger.hpp"
 #include "tools/math_tools.hpp"
@@ -40,6 +42,9 @@ Tracker::Tracker(const std::string & config_path, Solver & solver)
   enemy_color_ = (yaml["enemy_color"].as<std::string>() == "red") ? Color::red : Color::blue;
   min_detect_count_ = yaml["min_detect_count"].as<int>();
   max_temp_lost_count_ = yaml["max_temp_lost_count"].as<int>();
+  max_frame_gap_s_ = yaml["max_frame_gap_s"].as<double>(0.1);
+  if (!std::isfinite(max_frame_gap_s_) || max_frame_gap_s_ <= 0)
+    throw std::invalid_argument("max_frame_gap_s must be finite and positive");
   ekf_config_ = rmcs_ekf::load_config(yaml["ekf"]);
 }
 
@@ -52,8 +57,8 @@ std::list<Target> Tracker::track(
   last_timestamp_ = t;
 
   // 时间间隔过长，说明可能发生了相机离线
-  if (state_ != "lost" && dt > 0.1) {
-    tools::logger()->warn("[Tracker] Large dt: {:.3f}s", dt);
+  if (state_ != "lost" && dt > max_frame_gap_s_) {
+    tools::logger()->warn("[Tracker] reset reason=frame_gap dt={:.3f}s limit={:.3f}s", dt, max_frame_gap_s_);
     state_ = "lost";
   }
   // 只保留己方颜色且受支持的 4 板目标
@@ -112,8 +117,8 @@ std::tuple<omniperception::DetectionResult, std::list<Target>> Tracker::track(
   last_timestamp_ = t;
 
   // 时间间隔过长，说明可能发生了相机离线
-  if (state_ != "lost" && dt > 0.1) {
-    tools::logger()->warn("[Tracker] Large dt: {:.3f}s", dt);
+  if (state_ != "lost" && dt > max_frame_gap_s_) {
+    tools::logger()->warn("[Tracker] reset reason=frame_gap dt={:.3f}s limit={:.3f}s", dt, max_frame_gap_s_);
     state_ = "lost";
   }
 
@@ -261,7 +266,12 @@ bool Tracker::update_target(std::list<Armor> & armors, std::chrono::steady_clock
     found_count++;
   }
 
-  if (found_count == 0) return false;
+  if (found_count == 0) {
+    // Clear per-frame diagnostics without counting a missed detection as a
+    // rejected measurement. Recovery remains controlled by the lost state.
+    target_.update({}, solver_.camera_feature());
+    return false;
+  }
 
   std::list<Armor> matched_armors;
   for (auto & armor : armors) {

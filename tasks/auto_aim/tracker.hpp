@@ -35,6 +35,7 @@ private:
   Color enemy_color_;
   int min_detect_count_;
   int max_temp_lost_count_;
+  double max_frame_gap_s_ = 0.1;
   int detect_count_;
   int temp_lost_count_;
   std::string state_, pre_state_;
