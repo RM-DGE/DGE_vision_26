@@ -20,9 +20,13 @@ DaedalusCamera::DaedalusCamera(const std::string & config_path)
 }
 
 void DaedalusCamera::read(cv::Mat & img, std::chrono::steady_clock::time_point & timestamp)
+{ read_for(img, timestamp, std::chrono::seconds(5)); }
+
+bool DaedalusCamera::read_for(cv::Mat & img, std::chrono::steady_clock::time_point & timestamp,
+                             std::chrono::milliseconds timeout)
 {
   auto & shared = DaedalusShared::instance("");
-  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
 
   while (true) {
     // 消费全部位姿通道：仿真器的图像发布握手中，gimbal/odom/muzzle/camera 四个
@@ -32,8 +36,8 @@ void DaedalusCamera::read(cv::Mat & img, std::chrono::steady_clock::time_point &
       auto index = static_cast<ipc::PoseIndex>(i);
       if (auto pose = shared.client->recv_pose(index)) {
         if (index == ipc::POSE_GIMBAL) {
-          shared.last_gimbal_q =
-            Eigen::Quaterniond(pose->qw, pose->qx, pose->qy, pose->qz);
+          shared.stage_gimbal_pose(
+            Eigen::Quaterniond(pose->qw, pose->qx, pose->qy, pose->qz), pose->frame_seq);
         }
       }
     }
@@ -43,10 +47,21 @@ void DaedalusCamera::read(cv::Mat & img, std::chrono::steady_clock::time_point &
       cv::cvtColor(frame->image, img, cv::COLOR_RGB2BGR);
       timestamp = std::chrono::steady_clock::now();
 
-      shared.push_imu(shared.last_gimbal_q);
+      // The producer may publish between the pose poll and image poll. Fetch
+      // that pose once more, but never replace an already matched pose with a
+      // subsequent frame after releasing the image handshake.
+      if (!shared.pending_gimbal_frame || *shared.pending_gimbal_frame < frame->seq) {
+        if (auto pose = shared.client->recv_pose(ipc::POSE_GIMBAL))
+          shared.stage_gimbal_pose(
+            Eigen::Quaterniond(pose->qw, pose->qx, pose->qy, pose->qz), pose->frame_seq);
+      }
+      shared.publish_frame_imu(frame->seq, timestamp);
+      last_metadata_.frame_id = frame->seq;
+      // Simulator UNIX timestamps have no declared tick mapping here. Leave the
+      // device field empty rather than mislabeling a different clock as ticks.
       // 随帧刷新敌方真值，供 EKF 对比（见 ground_truth()）
       shared.last_ground_truth = shared.client->ground_truth();
-      return;
+      return true;
     }
 
     if (!shared.client->is_producer_alive()) {
@@ -54,9 +69,8 @@ void DaedalusCamera::read(cv::Mat & img, std::chrono::steady_clock::time_point &
     }
     if (std::chrono::steady_clock::now() > deadline) {
       // 不抛异常：置空图像让上层跳过本帧（standard.cpp 会 continue）
-      tools::logger()->error("[DaedalusCamera] 等待图像超时（仿真器在运行吗？）");
       img.release();
-      return;
+      return false;
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }

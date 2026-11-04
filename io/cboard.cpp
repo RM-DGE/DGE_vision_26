@@ -1,16 +1,16 @@
 /* C板通信模块
  *
- * IMU数据帧9字节：
+ * IMU数据帧10字节：
  * 帧头：0xAA
- * 数据：x, y, z, w（每个为int16_t，接收实际值是乘以10000）
+ * 数据：w, x, y, z（每个为int16_t，接收实际值是乘以10000），帧尾0xDD
  *
  * 状态数据帧9字节：
  * 帧头：0xBB
- * 数据：bullet_speed（int16_t，实际值乘以100）、mode（int16_t）、ft_angle（int16_t，实际值乘以10000）
+ * 数据：bullet_speed、mode、ShootMode、ft_angle（各为int16_t）
  *
- * 发送控制指令数据帧9字节：
+ * 发送控制指令数据帧8字节：
  * - 帧头：0xCC
- * - 数据：control（uint8_t）、shoot（uint8_t）、yaw（int16_t）、pitch（int16_t)
+ * - 数据：control（uint8_t）、shoot（uint8_t）、yaw（int16_t）、pitch（int16_t），帧尾0xEE
  */
 /* C板通信模块 */
 #include "cboard.hpp"
@@ -25,74 +25,18 @@ namespace io
 
 //初始化C板通信
 CBoard::CBoard(const std::string & config_path)
-: // shoot_mode(ShootMode::left_shoot),
-  // bullet_speed(0),
-  // queue_ initialization removed (using default deque constructor)
-  serial_(read_yaml(config_path), read_baudrate(config_path),
+: serial_(read_yaml(config_path), read_baudrate(config_path),
           std::bind(&CBoard::callback, this, std::placeholders::_1))
 {
-  tools::logger()->info("[Cboard] Waiting for q...");
-  auto now = std::chrono::steady_clock::now();
-  
-  // Manually push initial data with locking
-  {
-    std::lock_guard<std::mutex> lock(queue_mutex_);
-    queue_.push_back({Eigen::Quaterniond::Identity(), now - std::chrono::milliseconds(10)});
-    queue_.push_back({Eigen::Quaterniond::Identity(), now});
-    
-    // Pop the initial data into data_ahead_ and data_behind_
-    if (!queue_.empty()) {
-        data_ahead_ = queue_.front();
-        queue_.pop_front();
-    }
-    if (!queue_.empty()) {
-        data_behind_ = queue_.front();
-        queue_.pop_front();
-    }
-  }
-
-  tools::logger()->info("[Cboard] Opened.");
+  tools::logger()->info("[Cboard] Opened; alignment waits for real IMU samples.");
 }
 
 // 根据给定的时间戳，通过插值计算出该时刻对应的 IMU 四元
-Eigen::Quaterniond CBoard::imu_at(std::chrono::steady_clock::time_point timestamp)
+tools::time_sync::ImuQuery CBoard::imu_query(
+  std::chrono::steady_clock::time_point timestamp, double max_gap_ms, double max_wait_ms)
 {
-  if (data_behind_.timestamp < timestamp) data_ahead_ = data_behind_;
-
-  while (true) {
-    IMUData temp;
-    bool has_data = false;
-    
-    // Thread-safe pop
-    {
-        std::lock_guard<std::mutex> lock(queue_mutex_);
-        if (!queue_.empty()) {
-            temp = queue_.front();
-            queue_.pop_front();
-            has_data = true;
-        }
-    }
-    
-    if (!has_data) break; // Queue was empty
-    
-    data_behind_ = temp;
-    if (data_behind_.timestamp > timestamp) break;
-    data_ahead_ = data_behind_;
-  }
-
-  Eigen::Quaterniond q_a = data_ahead_.q.normalized();
-  Eigen::Quaterniond q_b = data_behind_.q.normalized();
-  auto t_a = data_ahead_.timestamp;
-  auto t_b = data_behind_.timestamp;
-  auto t_c = timestamp;
-  
-  double dt = std::chrono::duration<double>(t_b - t_a).count();
-  if (dt <= 1e-6) return q_b; 
-
-  std::chrono::duration<double> t_ac = t_c - t_a;
-  double k = t_ac.count() / dt;
-  
-  return q_a.slerp(k, q_b).normalized();
+  if (imu_generation_.load() != serial_.connection_generation()) return {};
+  return imu_buffer_.wait_query(timestamp, max_gap_ms, max_wait_ms);
 }
 
 // 发送控制指令到C板
@@ -127,6 +71,11 @@ void CBoard::callback(const std::vector<uint8_t> & frame)
   auto timestamp = std::chrono::steady_clock::now();
   
   if (frame.empty()) return;
+  const auto generation = serial_.connection_generation();
+  if (generation != imu_generation_.load()) {
+    imu_buffer_.clear();
+    imu_generation_ = generation;
+  }
   uint8_t header = frame[0];
 
   if (header == 0xAA) {
@@ -154,24 +103,17 @@ void CBoard::callback(const std::vector<uint8_t> & frame)
       return;
     }
 
-    // Thread-safe push with capacity check
-    {
-        std::lock_guard<std::mutex> lock(queue_mutex_);
-        if (queue_.size() >= queue_capacity_) {
-            queue_.pop_front();
-        }
-        // queue_.push_back({{x, y, z, w}, timestamp});
-        queue_.push_back({{w, x, y, z}, timestamp});
+    if (!imu_buffer_.push({timestamp, Eigen::Quaterniond{w, x, y, z}})) {
+      tools::logger()->warn("Rejected invalid or non-monotonic IMU receive sample");
+      return;
     }
 
     // ROS 桥接层观察者：只做 mailbox 更新，不在这里 publish。
-    ImuObserver imu_observer;
     {
         std::lock_guard<std::mutex> lock(observer_mutex_);
-        imu_observer = imu_observer_;
-    }
-    if (imu_observer) {
-        imu_observer(ImuSample{Eigen::Quaterniond{w, x, y, z}, timestamp});
+        if (imu_observer_) {
+          imu_observer_(ImuSample{Eigen::Quaterniond{w, x, y, z}, timestamp});
+        }
     }
   } 
   else if (header == 0xBB) {
@@ -190,14 +132,12 @@ void CBoard::callback(const std::vector<uint8_t> & frame)
     ft_angle = data->ft_angle / 10000.0;
 
     // ROS 桥接层观察者：状态低频，直接拷贝即可。
-    StatusObserver status_observer;
     {
         std::lock_guard<std::mutex> lock(observer_mutex_);
-        status_observer = status_observer_;
-    }
-    if (status_observer) {
-        status_observer(StatusSample{
-          bullet_speed, static_cast<int>(mode), shoot_mode, ft_angle, timestamp});
+        if (status_observer_) {
+          status_observer_(StatusSample{
+            bullet_speed, static_cast<int>(mode), shoot_mode, ft_angle, timestamp});
+        }
     }
 
     static auto last_log_time = std::chrono::steady_clock::time_point::min();

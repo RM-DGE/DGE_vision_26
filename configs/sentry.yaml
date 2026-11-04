@@ -47,6 +47,8 @@ vid_pid: "2bdf:0001"
 
 # 图像时间戳相对 IMU 的时间补偿（ms），真机按实际链路延迟调整
 imu_delay_ms: 1.0
+imu_max_gap_ms: 20.0
+imu_wait_ms: 12.0
 
 #####-----传统方法参数-----#####
 threshold: 150

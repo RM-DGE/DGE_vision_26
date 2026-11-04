@@ -135,4 +135,6 @@ predict_time: 0.120     # s
 height: 1.0      # 云台光心到地面网格的垂直距离 (m)
 grid_num: 10     # 每个方向的点数
 grid_size: 0.1   # 网格点间距 (m)
-delay: 1         # 图像-IMU 时间补偿 (ms)
+imu_delay_ms: 1.0 # 查询 t_image - imu_delay_ms，单位 ms，支持小数和负数
+imu_max_gap_ms: 20.0
+imu_wait_ms: 12.0

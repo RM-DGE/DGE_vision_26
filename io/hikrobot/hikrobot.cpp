@@ -1,6 +1,7 @@
 #include "hikrobot.hpp"
 
 #include <libusb-1.0/libusb.h>
+#include <cmath>
 
 #include "tools/logger.hpp"
 
@@ -9,7 +10,9 @@ using namespace std::chrono_literals;
 namespace io
 {
 HikRobot::HikRobot(double exposure_ms, double gain, const std::string & vid_pid)
-: exposure_us_(exposure_ms * 1e3), gain_(gain), queue_(1), daemon_quit_(false), vid_(-1), pid_(-1)
+: exposure_us_(exposure_ms * 1e3), gain_(gain), daemon_quit_(false), handle_(nullptr),
+  capturing_(false), capture_quit_(false),
+  queue_(1, [this] { ++queue_dropped_; }), vid_(-1), pid_(-1)
 {
   set_vid_pid(vid_pid);
   if (libusb_init(NULL)) tools::logger()->warn("Unable to init libusb!");
@@ -49,6 +52,21 @@ void HikRobot::read(cv::Mat & img, std::chrono::steady_clock::time_point & times
 
   img = data.img;
   timestamp = data.timestamp;
+  last_metadata_ = data.metadata;
+  last_metadata_.queue_dropped = queue_dropped_.load();
+}
+
+bool HikRobot::read_for(cv::Mat & img, std::chrono::steady_clock::time_point & timestamp,
+                        std::chrono::milliseconds timeout)
+{
+  // Camera has a single consumer. Its existing non-overwriting queue guarantees
+  // that a checked item cannot disappear before this consumer calls read().
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  do {
+    if (!queue_.empty()) { read(img, timestamp); return !img.empty(); }
+    std::this_thread::sleep_for(1ms);
+  } while (std::chrono::steady_clock::now() < deadline);
+  img.release(); return false;
 }
 
 void HikRobot::capture_start()
@@ -99,8 +117,9 @@ void HikRobot::capture_start()
     tools::logger()->info("HikRobot's capture thread started.");
 
     capturing_ = true;
+    const auto generation = ++capture_generation_;
 
-    MV_FRAME_OUT raw;
+    MV_FRAME_OUT raw{};
     MV_CC_PIXEL_CONVERT_PARAM cvt_param;
 
     while (!capture_quit_) {
@@ -141,7 +160,14 @@ void HikRobot::capture_start()
       cv::cvtColor(img, dst_image, type_map.at(pixel_type));
       img = dst_image;
 
-      queue_.push({img, timestamp});
+      CameraFrameMetadata metadata;
+      metadata.frame_id = raw.stFrameInfo.nFrameNum;
+      metadata.device_timestamp_ticks =
+        (std::uint64_t(raw.stFrameInfo.nDevTimeStampHigh) << 32) | raw.stFrameInfo.nDevTimeStampLow;
+      if (std::isfinite(raw.stFrameInfo.fExposureTime) && raw.stFrameInfo.fExposureTime > 0)
+        metadata.exposure_us = raw.stFrameInfo.fExposureTime;
+      metadata.capture_generation = generation;
+      queue_.push({img, timestamp, metadata});
 
       ret = MV_CC_FreeImageBuffer(handle_, &raw);
       if (ret != MV_OK) {

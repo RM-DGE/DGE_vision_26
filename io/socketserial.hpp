@@ -9,7 +9,7 @@
 #include <thread>
 #include <vector>
 #include <functional>
-#include <libserial/SerialPort.h>
+#include "io/serial_port.hpp"
 #include <iostream>
 
 // Include the logger definition
@@ -56,10 +56,9 @@ public:
 
     void write(const std::vector<uint8_t>& data)
     {
-        if (!connected_.load() || quit_.load()) return;
-
         {
             std::lock_guard<std::mutex> lock(write_mutex_);
+            if (!connected_.load() || quit_.load()) return;
             write_queue_.push_back(data);
             write_pending_ = true;
         }
@@ -78,14 +77,18 @@ public:
         return stats_;
     }
 
+    // Host connection epoch, not an MCU sample sequence or device timestamp.
+    std::uint64_t connection_generation() const { return connection_generation_.load(); }
+
 private:
     std::string port_;
     int baudrate_;
     std::atomic<bool> quit_;
     std::atomic<bool> connected_;
     std::atomic<bool> write_pending_;
+    std::atomic<std::uint64_t> connection_generation_{0};
     
-    LibSerial::SerialPort serial_port_;
+    SerialPort serial_port_;
     
     std::thread read_thread_;
     std::thread write_thread_;
@@ -99,14 +102,6 @@ private:
     
     std::function<void(const std::vector<uint8_t>&)> rx_handler_;
 
-    LibSerial::BaudRate get_baud_rate_enum(int baud) {
-        switch (baud) {
-            case 9600: return LibSerial::BaudRate::BAUD_9600;
-            case 115200: return LibSerial::BaudRate::BAUD_115200;
-            default: return LibSerial::BaudRate::BAUD_115200;
-        }
-    }
-
     void read_loop()
     {
         std::vector<uint8_t> frame_buffer;
@@ -115,6 +110,7 @@ private:
         while (!quit_) {
             if (!connected_.load()) {
                 try_reconnect();
+                frame_buffer.clear();  // Never splice packets across connections.
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 continue;
             }
@@ -129,14 +125,10 @@ private:
                 }
 
                 if (available > 0) {
-                    LibSerial::DataBuffer data;
+                    std::vector<std::uint8_t> data;
                     {
                         std::lock_guard<std::mutex> lock(write_mutex_);
-                        try {
-                            serial_port_.Read(data, available, 10); // 10ms timeout
-                        } catch (...) {
-                            // Ignore read timeouts
-                        }
+                        serial_port_.Read(data, available, 10); // Preserve partial data on timeout.
                     }
                     
                     std::vector<uint8_t> vec_data(data.begin(), data.end());
@@ -166,6 +158,7 @@ private:
     {
         while (!quit_) {
             std::vector<uint8_t> data_to_send;
+            std::uint64_t send_generation = 0;
             {
                 std::unique_lock<std::mutex> lock(write_mutex_);
                 write_cv_.wait(lock, [this]() { return write_pending_ || quit_; });
@@ -175,22 +168,23 @@ private:
                     data_to_send = std::move(write_queue_.front());
                     write_queue_.pop_front();
                     write_pending_ = !write_queue_.empty();
+                    send_generation = connection_generation_.load();
                 }
             }
             
             if (!data_to_send.empty() && connected_.load()) {
-                send_data(data_to_send);
+                send_data(data_to_send, send_generation);
             }
             
-            if (write_queue_.empty()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            // The condition-variable predicate handles an empty queue under lock.
         }
     }
 
-    void send_data(const std::vector<uint8_t>& data)
+    void send_data(const std::vector<uint8_t>& data, std::uint64_t generation)
     {
         try {
             std::lock_guard<std::mutex> lock(write_mutex_);
-            if (serial_port_.IsOpen()) {
+            if (!quit_ && connected_ && generation == connection_generation_.load() && serial_port_.IsOpen()) {
                 serial_port_.Write(data);
                 serial_port_.DrainWriteBuffer();
                 
@@ -277,16 +271,14 @@ private:
     void try_connect()
     {
         std::lock_guard<std::mutex> lock(write_mutex_);
-        if (serial_port_.IsOpen()) serial_port_.Close();
+        serial_port_.Close();
+        write_queue_.clear();
+        write_pending_ = false;  // Commands queued before disconnect are obsolete.
 
         try {
-            serial_port_.Open(port_);
-            serial_port_.SetBaudRate(get_baud_rate_enum(baudrate_));
-            serial_port_.SetCharacterSize(LibSerial::CharacterSize::CHAR_SIZE_8);
-            serial_port_.SetParity(LibSerial::Parity::PARITY_NONE);
-            serial_port_.SetStopBits(LibSerial::StopBits::STOP_BITS_1);
-            serial_port_.SetFlowControl(LibSerial::FlowControl::FLOW_CONTROL_NONE);
+            serial_port_.Open(port_, baudrate_);
             
+            ++connection_generation_;
             connected_ = true;
             {
                 std::lock_guard<std::mutex> lock(stats_mutex_);
@@ -311,9 +303,7 @@ private:
     void close_port()
     {
         std::lock_guard<std::mutex> lock(write_mutex_);
-        if (serial_port_.IsOpen()) {
-            serial_port_.Close();
-        }
+        serial_port_.Close();
         connected_ = false;
         write_queue_.clear();
         write_pending_ = false;

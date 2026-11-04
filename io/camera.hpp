@@ -4,12 +4,22 @@
 #include <array>
 #include <chrono>
 #include <memory>
+#include <optional>
+#include <cstdint>
 #include <opencv2/opencv.hpp>
 #include <string>
 #include <vector>
 
 namespace io
 {
+// Metadata belongs to the same frame returned by read/read_for. Device clocks are
+// diagnostic only and are never substituted for the host steady_clock timestamp.
+struct CameraFrameMetadata
+{
+  std::optional<std::uint64_t> frame_id, device_timestamp_ticks;
+  std::optional<double> exposure_us;
+  std::uint64_t capture_generation = 0, queue_dropped = 0;
+};
 // 仿真器敌方真值（camera_name: daedalus 时有效；真机相机返回空向量）
 // 注意：position 是仿真器世界系（机器人出生点为原点），与 DGE 的 odom 系
 // （云台为原点）差一个固定平移；yaw 零向也可能不同。vyaw 无坐标歧义，
@@ -27,6 +37,10 @@ class CameraBase
 public:
   virtual ~CameraBase() = default;
   virtual void read(cv::Mat & img, std::chrono::steady_clock::time_point & timestamp) = 0;
+  virtual bool read_for(cv::Mat & img, std::chrono::steady_clock::time_point & timestamp,
+                        std::chrono::milliseconds timeout)
+  { (void)timeout; read(img, timestamp); return !img.empty(); }
+  virtual CameraFrameMetadata frame_metadata() const { return {}; }
   virtual std::vector<SimTargetTruth> ground_truth() { return {}; }
 };
 
@@ -35,6 +49,9 @@ class Camera
 public:
   Camera(const std::string & config_path);
   void read(cv::Mat & img, std::chrono::steady_clock::time_point & timestamp);
+  bool read_for(cv::Mat & img, std::chrono::steady_clock::time_point & timestamp,
+                std::chrono::milliseconds timeout);
+  CameraFrameMetadata frame_metadata() const;
   std::vector<SimTargetTruth> ground_truth();
 
 private:

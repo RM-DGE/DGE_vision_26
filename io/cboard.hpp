@@ -6,13 +6,14 @@
 #include <cmath>
 #include <functional>
 #include <string>
+#include <stdexcept>
 #include <vector>
-#include <deque>   // Added for queue implementation
-#include <mutex>   // Added for thread safety
+#include <mutex>
 
 #include "io/command.hpp"
 #include "io/socketserial.hpp" 
 #include "tools/logger.hpp"
+#include "tools/imu_time_buffer.hpp"
 
 namespace io
 {
@@ -100,13 +101,32 @@ public:
   int shoot_mode = 0;
   double ft_angle = 0;
 
-  virtual Eigen::Quaterniond imu_at(std::chrono::steady_clock::time_point timestamp) = 0;
+  virtual tools::time_sync::ImuQuery imu_query(
+    std::chrono::steady_clock::time_point timestamp, double max_gap_ms = 20,
+    double max_wait_ms = 12)
+  {
+    (void)timestamp; (void)max_gap_ms; (void)max_wait_ms;
+    tools::time_sync::ImuQuery result;
+    result.status = tools::time_sync::ImuQueryStatus::invalid_sample;
+    return result;
+  }
+  // Compatibility API: failure is explicit, never a fabricated/old attitude.
+  virtual Eigen::Quaterniond imu_at(std::chrono::steady_clock::time_point timestamp)
+  {
+    const auto result = imu_query(timestamp);
+    if (!result.valid())
+      throw std::runtime_error(std::string("IMU alignment failed: ") +
+        tools::time_sync::status_name(result.status));
+    return result.q;
+  }
   virtual void send(Command command) const = 0;
 
   // ROS 桥接层用：在串口读线程里收到完整帧后回调。
-  // 回调必须只做“拷贝到 mailbox”这类短操作，禁止在回调里直接 publish。
+  // 回调必须只做“拷贝到 mailbox”这类短操作，禁止直接 publish 或重新注册观察者。
+  // 注销观察者会等候当前回调结束，便于调用方安全销毁日志队列。
   virtual void set_imu_observer(ImuObserver observer) { (void)observer; }
   virtual void set_status_observer(StatusObserver observer) { (void)observer; }
+  virtual std::uint64_t connection_generation() const { return 0; }
 };
 
 class CBoard : public CBoardBase
@@ -114,31 +134,25 @@ class CBoard : public CBoardBase
 public:
   CBoard(const std::string & config_path);
 
-  Eigen::Quaterniond imu_at(std::chrono::steady_clock::time_point timestamp) override;
+  tools::time_sync::ImuQuery imu_query(
+    std::chrono::steady_clock::time_point timestamp, double max_gap_ms = 20,
+    double max_wait_ms = 12) override;
 
   void send(Command command) const override;
 
   void set_imu_observer(ImuObserver observer) override;
   void set_status_observer(StatusObserver observer) override;
+  std::uint64_t connection_generation() const override { return serial_.connection_generation(); }
 
 private:
-  struct IMUData
-  {
-    Eigen::Quaterniond q;
-    std::chrono::steady_clock::time_point timestamp;
-  };
-
-  std::deque<IMUData> queue_;
-  mutable std::mutex queue_mutex_;
-  const size_t queue_capacity_ = 5000;
+  tools::time_sync::ImuTimeBuffer imu_buffer_;
+  std::atomic<std::uint64_t> imu_generation_{0};
 
   mutable std::mutex observer_mutex_;
   ImuObserver imu_observer_;
   StatusObserver status_observer_;
 
   mutable SerialPortMultithread serial_;
-  IMUData data_ahead_;
-  IMUData data_behind_;
 
   void callback(const std::vector<uint8_t> & frame);
 

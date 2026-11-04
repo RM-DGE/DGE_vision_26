@@ -32,6 +32,7 @@
 #include <fmt/core.h>
 
 #include <chrono>
+#include <array>
 #include <cmath>
 #include <memory>
 #include <opencv2/opencv.hpp>
@@ -56,6 +57,7 @@
 #include "tools/img_tools.hpp"
 #include "tools/logger.hpp"
 #include "tools/math_tools.hpp"
+#include "tools/time_sync_config.hpp"
 
 using namespace std::chrono_literals;
 
@@ -82,13 +84,15 @@ int main(int argc, char * argv[])
 
   tools::Exiter exiter;
 
-  // 图像-IMU 时间补偿：真机需要按实际链路延迟调整，仿真默认 1 ms
-  double imu_delay_ms = 1.0;
+  // 图像-IMU 时间补偿：真机保留 1 ms 初值，仿真同帧配对使用 0 ms。
+  const auto time_sync = tools::time_sync::load_config(YAML::LoadFile(config_path));
+  tools::logger()->info(
+    "[time_sync] query=t_image-{}ms max_gap={}ms wait={}ms; EKF keeps original image time",
+    time_sync.imu_delay_ms, time_sync.max_gap_ms, time_sync.wait_ms);
   std::string usb_left_device = "video2";
   std::string usb_right_device = "video4";
   {
     auto yaml = YAML::LoadFile(config_path);
-    if (yaml["imu_delay_ms"]) imu_delay_ms = yaml["imu_delay_ms"].as<double>();
     if (yaml["usb_left_device"])
       usb_left_device = yaml["usb_left_device"].as<std::string>();
     if (yaml["usb_right_device"])
@@ -140,18 +144,43 @@ int main(int argc, char * argv[])
   std::chrono::steady_clock::time_point timestamp;
   auto last_time = std::chrono::steady_clock::now();
   double fps = 0.0;
+  std::array<std::size_t, 6> alignment_counts{};
+  auto last_alignment_log = std::chrono::steady_clock::now();
+  double max_alignment_wait_ms = 0;
 
   while (!exiter.exit()) {
     // 1. 工业相机取图
-    camera.read(img, timestamp);
+    camera.read_for(img, timestamp, 100ms);
     if (img.empty()) {
+      cboard.send(io::Command{false, false, 0, 0});
       std::this_thread::sleep_for(10ms);
       continue;
     }
 
     // 2. 取图像时刻的云台姿态
-    Eigen::Quaterniond q = cboard.imu_at(
-      timestamp - std::chrono::microseconds(static_cast<int>(imu_delay_ms * 1000)));
+    const auto aligned = cboard.imu_query(
+      tools::time_sync::query_time(timestamp, time_sync.imu_delay_ms),
+      time_sync.max_gap_ms, time_sync.wait_ms);
+    ++alignment_counts[static_cast<std::size_t>(aligned.status)];
+    max_alignment_wait_ms = std::max(max_alignment_wait_ms, aligned.wait_ms);
+    const auto alignment_now = std::chrono::steady_clock::now();
+    if (alignment_now - last_alignment_log >= 1s) {
+      tools::logger()->info(
+        "[time_sync] ok={} empty={} before_buffer={} missing_right={} gap_too_large={} "
+        "invalid_sample={} wait_max_ms={:.3f}", alignment_counts[0], alignment_counts[1],
+        alignment_counts[2], alignment_counts[3], alignment_counts[4], alignment_counts[5],
+        max_alignment_wait_ms);
+      last_alignment_log = alignment_now;
+    }
+    if (!aligned.valid()) {
+      cboard.send(io::Command{false, false, 0, 0});
+      tools::logger()->debug("[time_sync] skipped image_ns={} reason={} wait_ms={:.3f}",
+        std::chrono::duration_cast<std::chrono::nanoseconds>(timestamp.time_since_epoch()).count(),
+        tools::time_sync::status_name(aligned.status), aligned.wait_ms);
+      if (display && cv::waitKey(1) == 'q') break;
+      continue;
+    }
+    const Eigen::Quaterniond q = aligned.q;
     solver.set_R_gimbal2world(q);
 
     Eigen::Vector3d gimbal_pos = tools::eulers(solver.R_gimbal2world(), 2, 1, 0);
@@ -252,6 +281,7 @@ int main(int argc, char * argv[])
     }
   }
 
+  cboard.send(io::Command{false, false, 0, 0});
   if (display) cv::destroyAllWindows();
 
   return 0;

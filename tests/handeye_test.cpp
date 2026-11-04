@@ -31,6 +31,7 @@
 #include "tools/exiter.hpp"
 #include "tools/img_tools.hpp"
 #include "tools/logger.hpp"
+#include "tools/time_sync_config.hpp"
 
 using namespace std::chrono_literals;
 
@@ -58,7 +59,7 @@ int main(int argc, char * argv[])
   auto height = yaml["height"].as<double>();      // 网格平面相对云台的高度
   auto grid_num = yaml["grid_num"].as<int>();     // 每个方向的点数
   auto grid_size = yaml["grid_size"].as<double>();// 点间距
-  auto delay = yaml["delay"].as<int>();           // IMU 相对图像的时间延迟(ms)
+  const auto time_sync = tools::time_sync::load_config(yaml);
   io::CBoard cboard(config_path);
   io::Camera camera(config_path);
   auto_aim::Solver solver(config_path);
@@ -75,9 +76,19 @@ int main(int argc, char * argv[])
     }
   }
   while (!exiter.exit()) {
-    camera.read(img, t);
+    camera.read_for(img, t, 100ms);
+    if (img.empty()) continue;
     // 用延迟补偿后的 IMU 姿态，保证与图像时刻对齐
-    q = cboard.imu_at(t - 1ms * delay);
+    const auto aligned = cboard.imu_query(
+      tools::time_sync::query_time(t, time_sync.imu_delay_ms),
+      time_sync.max_gap_ms, time_sync.wait_ms);
+    if (!aligned.valid()) {
+      tools::logger()->warn("[handeye] skipped unaligned image: {} wait_ms={:.3f}",
+        tools::time_sync::status_name(aligned.status), aligned.wait_ms);
+      if (display && cv::waitKey(1) == 'q') break;
+      continue;
+    }
+    q = aligned.q;
     solver.set_R_gimbal2world(q);
     cv::Mat result = img.clone();
     // 世界坐标 -> 像素坐标，并只绘制落在图像内的点

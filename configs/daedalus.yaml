@@ -3,6 +3,12 @@
 
 enemy_color: "blue"   # 仿真场内可见敌方为蓝方（装甲板灯条蓝色）；红方改回 "red"
 
+# Simulator pose/image are frame-coupled (daedalus_frame_v1), not hardware calibration.
+# Zero delay queries that exact frame; future samples only arrive on the next read.
+imu_delay_ms: 0.0
+imu_max_gap_ms: 20.0
+imu_wait_ms: 0.0
+
 #####-----神经网络参数-----#####
 yolo_name: yolov5
 classify_model: assets/tiny_resnet.onnx

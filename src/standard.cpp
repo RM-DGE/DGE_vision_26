@@ -1,5 +1,6 @@
 #include <fmt/core.h>
 #include <chrono>
+#include <array>
 #include <memory>
 #include <opencv2/opencv.hpp>
 #include <thread>
@@ -19,6 +20,7 @@
 #include "tools/plotter.hpp"
 #include <nlohmann/json.hpp>
 #include "tools/math_tools.hpp"
+#include "tools/time_sync_config.hpp"
 
 using namespace std::chrono_literals;
 
@@ -40,6 +42,10 @@ int main(int argc, char * argv[])
   tools::Plotter plotter;
   tools::FoxgloveServer foxglove(8765);
   foxglove.configure_camera(config_path);
+  const auto time_sync = tools::time_sync::load_config(YAML::LoadFile(config_path));
+  tools::logger()->info(
+    "[time_sync] query=t_image-{}ms max_gap={}ms wait={}ms; EKF keeps original image time",
+    time_sync.imu_delay_ms, time_sync.max_gap_ms, time_sync.wait_ms);
 
   // 仿真时在 yaml 里写 cboard_name: daedalus，真机不写或写 cboard
   std::unique_ptr<io::CBoardBase> cboard_ptr;
@@ -70,19 +76,46 @@ int main(int argc, char * argv[])
 
   auto last_time = std::chrono::steady_clock::now();
   double fps = 0.0;
+  std::array<std::size_t, 6> alignment_counts{};
+  auto last_alignment_log = std::chrono::steady_clock::now();
+  double max_alignment_wait_ms = 0;
 
   while (!exiter.exit()) 
   {
     // 1. 读取图像
-    camera.read(img, t);
+    camera.read_for(img, t, 100ms);
     if (img.empty()) {
+        cboard.send(io::Command{false, false, 0, 0});
         std::this_thread::sleep_for(10ms);
         continue;
     }
     cboard.mode = io::Mode::auto_aim;//强制自瞄
     cboard.bullet_speed = 24.5; // 强制弹速
 
-    Eigen::Quaterniond q = cboard.imu_at(t - 1ms);
+    const auto aligned = cboard.imu_query(
+      tools::time_sync::query_time(t, time_sync.imu_delay_ms),
+      time_sync.max_gap_ms, time_sync.wait_ms);
+    ++alignment_counts[static_cast<std::size_t>(aligned.status)];
+    max_alignment_wait_ms = std::max(max_alignment_wait_ms, aligned.wait_ms);
+    const auto alignment_now = std::chrono::steady_clock::now();
+    if (alignment_now - last_alignment_log >= 1s) {
+      tools::logger()->info(
+        "[time_sync] ok={} empty={} before_buffer={} missing_right={} gap_too_large={} "
+        "invalid_sample={} wait_max_ms={:.3f}", alignment_counts[0], alignment_counts[1],
+        alignment_counts[2], alignment_counts[3], alignment_counts[4], alignment_counts[5],
+        max_alignment_wait_ms);
+      last_alignment_log = alignment_now;
+    }
+    if (!aligned.valid()) {
+      // Explicitly clear both enables so a previous firing command cannot persist.
+      cboard.send(io::Command{false, false, 0, 0});
+      tools::logger()->debug("[time_sync] skipped image_ns={} reason={} wait_ms={:.3f}",
+        std::chrono::duration_cast<std::chrono::nanoseconds>(t.time_since_epoch()).count(),
+        tools::time_sync::status_name(aligned.status), aligned.wait_ms);
+      if (cv::waitKey(1) == 'q') break;
+      continue;
+    }
+    const Eigen::Quaterniond q = aligned.q;
 
     solver.set_R_gimbal2world(q);
 
@@ -184,5 +217,6 @@ int main(int argc, char * argv[])
     // plotter.plot(debug_data);
   }
 
-return 0;
+  cboard.send(io::Command{false, false, 0, 0});
+  return 0;
 }

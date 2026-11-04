@@ -19,12 +19,16 @@ public:
   HikRobot(double exposure_ms, double gain, const std::string & vid_pid);
   ~HikRobot() override;
   void read(cv::Mat & img, std::chrono::steady_clock::time_point & timestamp) override;
+  bool read_for(cv::Mat & img, std::chrono::steady_clock::time_point & timestamp,
+                std::chrono::milliseconds timeout) override;
+  CameraFrameMetadata frame_metadata() const override { return last_metadata_; }
 
 private:
   struct CameraData
   {
     cv::Mat img;
     std::chrono::steady_clock::time_point timestamp;
+    CameraFrameMetadata metadata;
   };
 
   double exposure_us_;
@@ -37,6 +41,8 @@ private:
   std::thread capture_thread_;
   std::atomic<bool> capturing_;
   std::atomic<bool> capture_quit_;
+  std::atomic<std::uint64_t> queue_dropped_{0}, capture_generation_{0};
+  CameraFrameMetadata last_metadata_;
   tools::ThreadSafeQueue<CameraData> queue_;
 
   int vid_, pid_;

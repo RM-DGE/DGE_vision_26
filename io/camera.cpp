@@ -41,6 +41,12 @@ void Camera::read(cv::Mat & img, std::chrono::steady_clock::time_point & timesta
   camera_->read(img, timestamp);
 }
 
+bool Camera::read_for(cv::Mat & img, std::chrono::steady_clock::time_point & timestamp,
+                      std::chrono::milliseconds timeout)
+{ return camera_->read_for(img, timestamp, timeout); }
+
+CameraFrameMetadata Camera::frame_metadata() const { return camera_->frame_metadata(); }
+
 std::vector<SimTargetTruth> Camera::ground_truth() { return camera_->ground_truth(); }
 
 }  // namespace io
