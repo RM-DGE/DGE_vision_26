@@ -42,6 +42,15 @@ time_sync_board: {columns: 9, rows: 6, square_size_m: 0.02}
         return path
     
     def reject(path, needle):
+        before = {p.relative_to(root) for p in root.rglob('*')}
+        terminal = subprocess.run([str(binary), '--session', str(path)], cwd=root,
+                                  text=True, capture_output=True)
+        assert terminal.returncode == 2, (terminal.stdout, terminal.stderr)
+        result = yaml.safe_load(terminal.stdout)
+        assert isinstance(result, dict), ('terminal result missing', terminal.stdout, terminal.stderr)
+        assert result['status'] == 'invalid_data' and needle in result['reason'], result
+        assert result['offline_validation_passed'] is False, result
+        assert {p.relative_to(root) for p in root.rglob('*')} == before, 'terminal mode created files'
         output = root / (path.name + '-output')
         proc = subprocess.run([str(binary), '--session', str(path), '--output', str(output)],
                               text=True, capture_output=True)
@@ -194,10 +203,20 @@ def main():
     make_session(train, truth_ms, 0)
     make_session(validation, truth_ms, .8)
     output = root / "result"
-    proc = subprocess.run([str(binary), "--session", str(train), "--output", str(output),
-                           "--validation", str(validation), "--min-frames", "60",
-                           "--min-duration-s", "2", "--min-delay-ms", "-12",
-                           "--max-delay-ms", "12", "--step-ms", "0.2"],
+    command = [str(binary), "--session", str(train), "--validation", str(validation),
+               "--min-frames", "60", "--min-duration-s", "2", "--min-delay-ms", "-12",
+               "--max-delay-ms", "12", "--step-ms", "0.2"]
+    before = {p.relative_to(root) for p in root.rglob('*')}
+    terminal = subprocess.run(command, cwd=root, text=True, capture_output=True, timeout=180)
+    assert terminal.returncode == 0, (terminal.returncode, terminal.stdout, terminal.stderr)
+    result = yaml.safe_load(terminal.stdout)
+    assert result['status'] == 'candidate', result
+    assert abs(result['candidate_imu_delay_ms'] - truth_ms) < 1.2, result
+    assert result['offline_validation_passed'] is True, result
+    assert result['online_verification'] == 'pending_required', result
+    assert result['validation']['candidate_rms_m'] < result['validation']['current_rms_m'], result
+    assert {p.relative_to(root) for p in root.rglob('*')} == before, 'terminal mode created files'
+    proc = subprocess.run(command + ["--output", str(output)],
                           text=True, capture_output=True, timeout=180)
     print(proc.stdout)
     print(proc.stderr)
@@ -210,6 +229,8 @@ def main():
     assert summary["reference_point"] == "chessboard_center", summary
     assert summary["deployable"] is False, summary
     assert "validated" != summary["status"], "Offline rendering cannot validate hardware timing"
+    assert result['candidate_imu_delay_ms'] == summary['candidate_imu_delay_ms'], result
+    assert result['validation']['candidate_rms_m'] == summary['validation']['training_candidate']['rms_m'], result
     print("rendered time-sync end-to-end passed; retained fixtures:", root)
 
 

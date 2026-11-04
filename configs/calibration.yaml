@@ -1,13 +1,6 @@
-# 用法：
-#   1) 采集内参/手眼图片： ./build/capture configs/calibration.yaml -o=assets/img_with_q
-#   2) 内参：             ./build/calibrate_camera assets/img_with_q -c=configs/calibration.yaml
-#   3) 手眼：             ./build/calibrate_robotworld_handeye assets/img_with_q -c=configs/calibration.yaml
-#   4) 验证：             ./build/calibrate_validate assets/img_with_q -c=configs/calibration.yaml
-
-
-pattern_cols: 9
-pattern_rows: 6
-square_size_mm: 25.0
+pattern_cols: 11
+pattern_rows: 8
+square_size_mm: 60.0
 
 #####-----机械安装先验-----#####
 # R_gimbal2imubody：gimbal 系 -> IMU body 系的旋转，必须按机械安装/CAD 填写。
@@ -20,7 +13,7 @@ gain: 10.0
 vid_pid: "2bdf:0001"
 
 #####-----CBoard 串口-----#####
-capture_imu: true
+capture_imu: true  # 按 S 同时保存图片和 IMU 四元数，供内参和手眼标定使用
 serial_device: "/dev/ttyACM0"
 serial_baudrate: 115200
 

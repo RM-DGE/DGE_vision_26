@@ -3,14 +3,14 @@
  * @brief 手眼标定验证：把世界坐标系下的网格点投影到相机画面
  *
  * 测试内容：
- *   1. 从 yaml 读取网格高度 height、每边点数 grid_num、点间距 grid_size、IMU 延迟 delay；
- *   2. 按当前云台 IMU 姿态生成世界系网格，并用 Solver 投影到图像上；
- *   3. 若网格点与真实场地标定点对齐，说明手眼标定参数正确；
+ *   1. 从 yaml 读取网格高度 height、每边点数 grid_num、点间距 grid_size、imu_delay_ms；
+ *   2. 生成固定世界系网格，用图像时刻减 imu_delay_ms 对齐的姿态投影到图像上；
+ *   3. 人工观察网格贴合与运动漂移，程序不自动判断标定是否通过；
  *   4. 画面上还会叠加当前 yaw/pitch/roll 角度。
  *
- * 使用方法（先在 CMakeLists.txt 中取消 handeye_test 相关注释并重新编译）：
+ * 使用方法（正常编译即可）：
  *   cmake -B build && cmake --build build -j
- *   ./build/handeye_test -c=configs/handeye.yaml         # 只计算并打印日志
+ *   ./build/handeye_test -c=configs/handeye.yaml         # 无显示窗口，记录对齐失败日志
  *   ./build/handeye_test -c=configs/handeye.yaml -d      # 显示投影结果
  *
  * 操作：显示模式下按 q 或 Ctrl+C 退出。

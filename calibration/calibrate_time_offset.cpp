@@ -385,6 +385,30 @@ void write_summary(const fs::path & output, const YAML::Node & summary)
   stream.flush();
   ensure(bool(stream), "summary write failed");
 }
+void print_summary(const YAML::Node & summary)
+{
+  YAML::Node terminal;
+  for (const auto * key :
+       {"status", "reason", "candidate_imu_delay_ms", "offline_validation_passed",
+        "online_verification"})
+    if (summary[key]) terminal[key] = summary[key];
+  if (summary["settings"] && summary["settings"]["baseline_delay_ms"])
+    terminal["current_imu_delay_ms"] = summary["settings"]["baseline_delay_ms"];
+  for (const auto * name : {"training", "validation"}) {
+    const auto session = summary[name];
+    if (!session || !session["common_frames"]) continue;
+    terminal[name]["common_frames"] = session["common_frames"];
+    terminal[name]["common_query_coverage"] = session["common_query_coverage"];
+    if (session["current"] && session["current"]["valid"].as<bool>())
+      terminal[name]["current_rms_m"] = session["current"]["rms_m"];
+    // Validation must report the training candidate, not its own independently fitted optimum.
+    const auto candidate =
+      std::string(name) == "training" ? session["best"] : session["training_candidate"];
+    if (candidate && candidate["valid"].as<bool>())
+      terminal[name]["candidate_rms_m"] = candidate["rms_m"];
+  }
+  std::cout << std::setprecision(17) << terminal << '\n';
+}
 }  // namespace
 int main(int argc, char ** argv)
 {
@@ -414,11 +438,12 @@ int main(int argc, char ** argv)
     for (int i = 1; i < argc; ++i) {
       std::string key = argv[i];
       if (key == "--help") {
-        std::cout
-          << "calibrate_time_offset --session DIR --output NEW_DIR [--validation INDEPENDENT_DIR]\n"
-             "  --min-delay-ms -20 --max-delay-ms 20 --step-ms 0.1 --max-gap-ms 20\n"
-             "  --min-frames 300 --min-duration-s 20 --max-reprojection-px 1.5 "
-             "--segment-tolerance-ms 1\n";
+        std::cout << "calibrate_time_offset --session DIR [--validation INDEPENDENT_DIR] [--output "
+                     "NEW_DIR]\n"
+                     "  Prints results to the terminal; --output optionally exports diagnostics.\n"
+                     "  --min-delay-ms -20 --max-delay-ms 20 --step-ms 0.1 --max-gap-ms 20\n"
+                     "  --min-frames 300 --min-duration-s 20 --max-reprojection-px 1.5 "
+                     "--segment-tolerance-ms 1\n";
         return 0;
       }
       ensure(key.rfind("--", 0) == 0, "expected --option value");
@@ -428,11 +453,13 @@ int main(int argc, char ** argv)
       ensure(i + 1 < argc && !args.count(key), "missing or duplicate option: " + key);
       args[key] = argv[++i];
     }
-    ensure(args.count("session") && args.count("output"), "--session and --output are required");
-    output = args["output"];
-    ensure(!fs::exists(output), "output directory already exists; choose a fresh directory");
-    ensure(fs::create_directories(output), "cannot create fresh output directory");
-    created = true;
+    ensure(args.count("session"), "--session is required");
+    if (args.count("output")) {
+      output = args["output"];
+      ensure(!fs::exists(output), "output directory already exists; choose a fresh directory");
+      ensure(fs::create_directories(output), "cannot create fresh output directory");
+      created = true;
+    }
     OffsetScanOptions options;
     for (const auto & entry : std::vector<std::pair<std::string, double *>>{
            {"min-delay-ms", &options.min_delay_ms},
@@ -462,7 +489,7 @@ int main(int argc, char ** argv)
     summary["training"] = session_yaml(session, result);
     summary["status"] = result.status;
     summary["reason"] = result.reason;
-    diagnostic_files(output, "", result);
+    if (created) diagnostic_files(output, "", result);
     if (result.best.valid) summary["candidate_imu_delay_ms"] = result.best.delay_ms;
     if (args.count("validation")) {
       ensure(
@@ -477,7 +504,7 @@ int main(int argc, char ** argv)
       const auto verify = calibrate_time_offset(
         validation.observations, validation.imu, validation.geometry, options);
       summary["validation"] = session_yaml(validation, verify);
-      diagnostic_files(output, "validation_", verify);
+      if (created) diagnostic_files(output, "validation_", verify);
       const auto fixed = score_offset(
         verify.common_frames, validation.imu, validation.geometry, result.best.delay_ms,
         options.max_gap_ms);
@@ -525,15 +552,16 @@ int main(int argc, char ** argv)
     summary["online_verification_requirements"] =
       "measure alignment wait, failure distribution and coverage under typical runtime load; "
       "approve runtime budget before deployment";
-    write_summary(output, summary);
+    if (created) write_summary(output, summary);
+    print_summary(summary);
     const std::string status = summary["status"].as<std::string>();
-    std::cout << status << ": " << summary["reason"].as<std::string>()
-              << "; online verification pending\n";
     return status == "candidate" ? 0 : status == "inconclusive" ? 3 : 2;
   } catch (const std::exception & error) {
     std::cerr << "invalid_data: " << error.what() << '\n';
     summary["status"] = "invalid_data";
     summary["reason"] = error.what();
+    summary["offline_validation_passed"] = false;
+    print_summary(summary);
     if (created) try {
         if (!fs::exists(output / "scan.csv")) diagnostic_files(output, "", {});
         write_summary(output, summary);

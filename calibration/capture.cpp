@@ -108,7 +108,6 @@ int main(int argc, char * argv[])
   // 新建输出文件夹
   std::filesystem::create_directory(output_folder);
 
-  tools::logger()->info("默认标定板尺寸为10列7行");
   // 主循环，保存图片和对应四元数
   capture_loop(config_path, "can0", output_folder);
 

@@ -90,7 +90,7 @@ $$
 → 解码四元数、入姿态队列、通知观察者
 ~~~
 
-[相机打点](../io/hikrobot/hikrobot.cpp) 在颜色转换之前；[IMU 打点](../io/cboard.cpp) 是接收处理时间。[当前 IMU 包](../io/cboard.hpp) 仅含帧头、四个 int16 四元数分量、帧尾，没有源采样时刻与 MCU 序号。
+[相机打点](C:/Users/hhh/Desktop/hhh/io/hikrobot/hikrobot.cpp) 在颜色转换之前；[IMU 打点](C:/Users/hhh/Desktop/hhh/io/cboard.cpp) 是接收处理时间。[当前 IMU 包](C:/Users/hhh/Desktop/hhh/io/cboard.hpp) 仅含帧头、四个 int16 四元数分量、帧尾，没有源采样时刻与 MCU 序号。
 
 ### 1.2、实施前的入口差异与本版统一结果
 
@@ -102,17 +102,27 @@ $$
 | calibration/capture | 按图像时间查询，保存图片及一组已匹配姿态 |
 | 若干未启用的旧 sentry 入口 | 仍保留固定 1ms |
 
-[standard](../src/standard.cpp)、[sentry_DGE](../src/sentry_DGE.cpp)、[handeye_test](../tests/handeye_test.cpp)、[capture](../calibration/capture.cpp)。
+[standard](C:/Users/hhh/Desktop/hhh/src/standard.cpp)、[sentry_DGE](C:/Users/hhh/Desktop/hhh/src/sentry_DGE.cpp)、[handeye_test](C:/Users/hhh/Desktop/hhh/tests/handeye_test.cpp)、[capture](C:/Users/hhh/Desktop/hhh/calibration/capture.cpp)。
 
 实施前的 imu_at 消费队列，缺少完整时间范围检查，不适合多轮离线 delay 搜索。以上历史行为对应基线提交 `5852b846955abbe08eff7b91f70c6f2595369d2b`。
 
-v0.51 已将启用的 standard、sentry_DGE、handeye_test 统一到 `double imu_delay_ms` 和有状态的非消耗式 `imu_query`。实机配置初值 1ms；仿真同帧配对为 0ms。采集工具独立保存原始图像时间与 IMU 接收序列；旧 capture/Recorder 的每图匹配姿态不能替代这一数据集。当前实现见 [姿态查询](../tools/imu_time_buffer.cpp)、[参数解析](../tools/time_sync_config.cpp) 和 [采集入口](../calibration/capture_time_sync.cpp)。
+v0.51 已将启用的 standard、sentry_DGE、handeye_test 统一到 `double imu_delay_ms` 和有状态的非消耗式 `imu_query`。实机配置初值 1ms；仿真同帧配对为 0ms。采集工具独立保存原始图像时间与 IMU 接收序列；旧 capture/Recorder 的每图匹配姿态不能替代这一数据集。当前实现见 [姿态查询](C:/Users/hhh/Desktop/hhh/tools/imu_time_buffer.cpp)、[参数解析](C:/Users/hhh/Desktop/hhh/tools/time_sync_config.cpp) 和 [采集入口](C:/Users/hhh/Desktop/hhh/calibration/capture_time_sync.cpp)。
 
-### 1.3、现有录像为何不够
+### 1.3、原有标定采集与延时采集的分工
 
-Recorder 的每帧记录为“时间 + 一组四元数”，默认按 30Hz 保存图像。这里的 q 通常已经按当前 delay 匹配过，缺少独立的原始 100Hz 姿态时间序列。改变 delay 后无法重新查询真实的前后样本，因此旧录像不能自动充当完整时间标定数据。[录像器](../tools/recorder.cpp)。
+`calibration/capture.cpp` 启动时已打开相机与 IMU，按小写 s 同时保存同编号图片和四元数，按 q 退出。当前配置默认采集 IMU，无需在内参和手眼步骤间重复开启或切换开关。四元数 `.txt` 顺序为 w、x、y、z，没有原始接收时间序列。
 
-已有 ImuSample 和 set_imu_observer 可以取得每条通过解析校验的原始姿态及接收时间。独立采集器可复用该接口。观察者回调必须轻量，不能在串口线程内编码图像、写盘或求解 PnP。[接口](../io/cboard.hpp)、[回调](../io/cboard.cpp)。
+固定底盘和棋盘格，每次改变云台姿态后停稳保存。视角覆盖充分时，同一批数据依次用于 `calibrate_camera`、`calibrate_robotworld_handeye` 和 `calibrate_validate`。前两个程序逐图显示，需按键继续；结果在终端打印，由操作者写回配置。`calibrate_validate.cpp` 是原有外参验证程序，输出位置、姿态波动和 PASS/FAIL，不搜索延时。
+
+空间标定通过后，另用 `capture_time_sync` 记录动态过程。它自行打开两路设备，自动保存图像时间戳和独立 IMU 接收序列，不需要按 s。增加这一步是因为延时搜索需要完整时间序列，不是因为原采集没有打开 IMU。两种采集程序先后运行，退出前一个后再启动下一个。
+
+完整文件清单和唯一一套操作命令见 [使用说明](RobotModel4_v0.51.md)。
+
+### 1.4、现有录像为何不够
+
+Recorder 的每帧记录为“时间 + 一组四元数”，默认按 30Hz 保存图像。这里的 q 通常已经按当前 delay 匹配过，缺少独立的原始 100Hz 姿态时间序列。改变 delay 后无法重新查询真实的前后样本，因此旧录像不能自动充当完整时间标定数据。[录像器](C:/Users/hhh/Desktop/hhh/tools/recorder.cpp)。
+
+已有 ImuSample 和 set_imu_observer 可以取得每条通过解析校验的原始姿态及接收时间。独立采集器可复用该接口。观察者回调必须轻量，不能在串口线程内编码图像、写盘或求解 PnP。[接口](C:/Users/hhh/Desktop/hhh/io/cboard.hpp)、[回调](C:/Users/hhh/Desktop/hhh/io/cboard.cpp)。
 
 现有观察接口是单槽，ROS 桥也使用它。采集与桥接共存时，需要统一分发，不能后注册者覆盖先注册者，也不能把只保留最新值的 mailbox 当作无丢失原始 IMU 日志。
 
@@ -193,7 +203,7 @@ hhh 若使用相同原始打点，则 $\Delta=-(c+\delta^\*)$。但武科的图�
 2. 单帧 PnP 成功不代表解可靠；需重投影、深度、角点顺序及模糊检查。
 3. 两帧可算出 RMS，不足以证明可辨识；需要足够动作与独立验证。
 4. 原程序无有效候选时可保留 double 最大有限值，但最终只检查 isfinite，不能可靠阻止输出无效 Best delay；hhh 必须使用显式候选有效计数和结果状态。
-5. 打印一个最小值无法说明精度，必须保留整条误差曲线和分段结果。
+5. 最小值本身不能说明精度；hhh 计算完整扫描曲线与分段结果后再判定状态。日常在终端看摘要，必要时显式导出曲线诊断。
 
 以上是本地源码静态核对，不是对原队实车效果的结论。
 
@@ -246,7 +256,7 @@ $$
 
 $R_{GC},\mathbf t_{GC}$ 是相机 OpenCV 坐标到云台坐标的外参。固定底盘实验中，云台参考原点在世界中应固定；若机械轴系使参考原点随 Pitch 变化，则必须使用正确轴系几何，不能把其平移误差解释为延迟。
 
-hhh 的四元数还经过 R_gimbal2imubody 坐标变换，不能直接把原始 q 当成 $R_{WG}$。标定程序必须复用与在线相同的坐标约定。[Solver 姿态变换](../tasks/auto_aim/solver.cpp)。
+hhh 的四元数还经过 R_gimbal2imubody 坐标变换，不能直接把原始 q 当成 $R_{WG}$。标定程序必须复用与在线相同的坐标约定。[Solver 姿态变换](C:/Users/hhh/Desktop/hhh/tasks/auto_aim/solver.cpp)。
 
 ### 5.2、目标函数与时间敏感性
 
@@ -282,11 +292,11 @@ $$
 处理顺序固定为：
 
 1. 校验元数据、时间顺序、四元数、图片对应关系。
-2. 在图像上检测角点、亚像素细化，求 PnP 并检查正深度、重投影误差、图案顺序。
+2. 在图像上检测角点、亚像素细化，求 PnP 并检查正深度、重投影误差；参考点取内角点网格中心。
 3. 质量筛选只依赖图像和固定的几何规则，不依赖候选 delay 或目标 EKF 的输出。
 4. 对每个候选检查插值可用性，取全部候选均可用的图像交集 S。
 5. 在同一个 S 上计算全部候选的 RMS；没有足够公共样本则判为数据不足。
-6. 保存完整曲线，计算各完整运动片段的最优值，在独立采集会话复验。
+6. 计算完整曲线和各连续时间块的最优值，在独立采集会话复验；默认打印摘要，按需导出诊断文件。
 
 初始采集质量设置：每个用于求解或复验的会话至少 300 张有效图像，覆盖至少 20s 的动态过程；PnP 角点重投影 RMS 初始上限为 1.5px。它们只是起步门槛，须记录并根据静止噪声和图像质量审查，达到门槛也不保证可辨识。低质量数据不能通过不断放宽门槛获得“合格”结果。
 
@@ -294,18 +304,21 @@ $$
 
 ### 5.4、结果状态与参数应用
 
-结果包含 candidate_delay_ms，但只有状态 validated 才可作为部署候选：
+候选值字段是 `candidate_imu_delay_ms`。当前程序只有以下三个状态：
 
 | 状态 | 含义 |
 |---|---|
 | invalid_data | 数据损坏、元数据冲突、时间不合法或公共样本不足 |
 | inconclusive | 运动不足、曲线平坦、多处相近极小值、最小值在边界、分段结果不一致 |
-| candidate | 有可用最小值，但尚无独立复验 |
-| validated | 独立复验支持改善，且在线查询可用性满足运行预算 |
+| candidate | 扫描得到可辨识候选；独立复验情况另看 `offline_validation_passed` |
 
-结果中保存每段最小值、曲线形状和对原 1ms 的改善量。若使用置信区间，应按完整运动片段或时间块重采样，不能把相邻帧当成独立样本给出过窄区间。
+只有 `status: candidate` 且 `offline_validation_passed: true` 才进入上车验证。未提供独立会话时该布尔值为 false；独立复验不支持训练候选时，状态转为 inconclusive。即使状态不是 candidate，也可能打印扫描最小值，不能只取数字回填。
 
-无标定数据时不能预先写一个“最优 delay”。工具输出结果和候选配置，不自动覆盖运行 YAML。扫描步长不作为测量精度；固定偏移消除的也不是随机抖动。
+离线程序始终保留 `online_verification: pending_required`，不会输出 validated。在线等待时间、失败分布和实际画面由操作者验收；可选报告中的 `deployable` 也始终为 false。
+
+默认在终端打印状态、原因、候选值、当前配置值、公共帧数及前后 RMS。验证集的 `candidate_rms_m` 使用训练候选值计算。传入可选 `--output` 才保存完整扫描曲线、残差和摘要，其中还有分段结果、接收间隔统计等诊断数据。基线来自采集配置的当前值，缺省 1ms。
+
+无标定数据时不能预先写一个“最优 delay”。工具不会自动覆盖运行 YAML；通过复验后人工回填运行配置，不修改采集快照。扫描步长不作为测量精度；固定偏移消除的也不是随机抖动。
 
 统一配置名为 double imu_delay_ms。旧 handeye 的 delay 在新键缺失时作为兼容输入并告警；两键冲突则配置失败。正负号、单位在结果、配置、日志和查询函数中保持一致。
 
@@ -325,18 +338,20 @@ $$
 
 ### 6.1、会话文件与字段
 
-所有相对时间都减去同一个会话 t0，保存为 int64 纳秒；结果计算再转 double 秒，避免直接用很大的绝对时刻做差。文件名序号不替代时间戳。
+所有相对时间都减去同一个会话 t0，保存为 int64 纳秒，计算时按需换算成秒或毫秒。文件名序号不替代时间戳。以下是连续采集的原始数据，不是求解后的报告：
 
 | 文件 | 必需内容 |
 |---|---|
-| session.yaml | schema_version=1，session_id，clock=steady_clock，timestamp_semantics，camera/IMU 类型，帧率、曝光、保存率、源码 HEAD，配置校验摘要，记录计数和异常计数 |
+| session.yaml | schema_version=1，session_id，clock=steady_clock，timestamp_semantics，camera/IMU 类型、曝光、图像保存率、源码 HEAD、配置校验摘要、记录计数和异常计数 |
+| images/ | 按保存率记录的原始图像 PNG |
 | images.csv | frame_id、t_image_ns、image_path、可选 camera_frame_id、device_timestamp_ticks、exposure_us |
 | imu.csv | sample_id、t_imu_receive_ns、qw、qx、qy、qz、valid |
 | calibration.yaml | K、畸变、R_camera2gimbal、t_camera2gimbal、R_gimbal2imubody、棋盘格内角点行列与格长、长度单位 |
 | events.csv | t_event_ns、event_type、关联本地序号、原因 |
-| result/scan.csv | delay_ms、rms_m、common_frame_count、candidate_valid |
-| result/residuals.csv | frame_id、candidate_delay_ms、世界位置、残差、PnP质量 |
-| result/summary.yaml | 结果状态、候选值、当前参数、独立复验统计、查询覆盖率、配置摘要 |
+
+会话中的 `calibration.yaml` 是采集程序自动保存的配置快照，来源是 `--config` 指定的文件；正常流程使用 `configs/handeye.yaml`。无需另建或手改此快照。
+
+求解器默认只向终端打印结果。只有显式传入 `--output NEW_DIR`，才在该新目录生成 `summary.yaml`、`scan.csv`、`residuals.csv`；提供独立复验时还会生成 `validation_scan.csv` 和 `validation_residuals.csv`。它们不属于必需的采集文件，默认流程没有 `result/` 目录。
 
 不可获取的设备时间戳或帧号写空值，不填 0 冒充真实数据。设备 tick 未知频率、起点或事件语义时仅留作诊断，不直接用于融合。
 
@@ -355,7 +370,7 @@ frame_id、sample_id 是 PC 本地记录序号，不代表 MCU 的采样序号�
                                                     ↓
                                                   imu.csv
 
-两路记录完成 → 离线检测与时间搜索 → result/
+两路记录完成 → 离线检测与时间搜索 → 终端摘要（可选导出诊断文件）
 ~~~
 
 图像队列拥有独立图像数据，不能保存指向已归还 SDK 缓冲区的悬空引用。记录线程按条目自身时间写盘，不以写盘时刻替代采集时间。
@@ -366,14 +381,11 @@ frame_id、sample_id 是 PC 本地记录序号，不代表 MCU 的采样序号�
 
 ### 6.3、操作步骤
 
-1. **确认空间关系。** 固定底盘、固定棋盘格；核对实际内角点数、格长、相机内参、畸变、外参和坐标轴方向。先录约 10s 静止数据作为图像/PnP噪声参考，不用它单独求 delay。
-2. **记录运行条件。** 使用预期工作曝光和帧率，保证棋盘格清晰；保存相机配置及软件版本。无需为了标定切换到另一套打点路径。
-3. **开始自动记录。** 一次启动两路数据记录；不逐张按键保存，也不在每帧只记录匹配后的一个 q。
-4. **录制训练动作。** 约 30～60s，包含 Yaw、Pitch 的加减速、反向和组合动作；角度及速度以标定板持续可见、图像清晰为准。
-5. **记录独立复验。** 另录一段不同节奏的动作，至少一次在典型计算负载下记录。训练段和复验段按完整时间片段分开，避免随机拆相邻帧造成信息泄漏。
-6. **停止与检查。** 核对已接受记录数、写入数、丢弃数、时间跨度和异常事件；确认图像与 CSV 一一对应。
-7. **离线求解。** 质量筛选、公共帧集合、全区间扫描、分段曲线检查；输出 candidate 或原因明确的失败状态。
-8. **复验与应用。** 在相同有效帧上比较当前配置值（初值 1ms）和候选值，检查在线等待/失败率。通过后更新运行配置，再用网格叠加做直观检查。
+1. **完成空间标定。** 用原 `capture` 在不同稳定姿态下保存图片与四元数，依次计算内参、手眼并运行 `calibrate_validate`。确认后将参数写入自动采集和实际运行配置。
+2. **自动记录两段动态数据。** 固定底盘与棋盘格，用 `capture_time_sync` 录制训练、独立复验两个会话，各约 30～60s，使用不同节奏的 Yaw/Pitch 加减速、反向和组合动作。保持曝光等配置相同，图像清晰，设备由程序自行打开。
+3. **停止与检查。** 确认 `complete=true`。记录不完整时，根据 `events.csv` 和 `session.yaml` 中的原因处理后重录；记录完整仍需满足求解器的有效帧数、时长和可辨识性检查。
+4. **离线求解与复验。** 同时指定训练、验证会话，在终端检查状态、候选值、前后 RMS 和 `offline_validation_passed`。默认不生成报告，诊断曲线可按需导出。
+5. **回填并在线验证。** 候选状态且独立复验通过后，手动回填运行配置的 `imu_delay_ms`。先运行 `handeye_test` 观察网格，再退出它并运行实际自瞄，检查典型负载下的等待时间、失败分布与动态效果。
 
 低曝光、良好照明和有变化的运动有利于减少模糊与退化；Kalibr 官方也强调时间戳低抖动、运动激励和避免对称标定板位姿翻转。[采集原则](https://github.com/ethz-asl/kalibr/wiki/camera-imu-calibration)
 
@@ -406,7 +418,7 @@ Linux 仿真用于验证采集接口、时间格式、正负号、插值、人�
 
 ### 7.2、实机验收
 
-每个训练和验证会话至少报告：
+实机验收关注以下指标。终端摘要用于日常操作；需要完整扫描和分段诊断时显式传入 `--output`，不要求每次生成报告：
 
 - 采集配置中的当前 delay、候选值、完整 $J(\Delta)$ 曲线和有效公共帧数。
 - 标定板世界坐标 RMS、P95 距离残差，按完整动作片段分别统计。
