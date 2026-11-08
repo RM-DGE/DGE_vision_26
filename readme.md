@@ -296,7 +296,6 @@ sp_vision_25
 │   ├── calibrate_handeye.cpp            // 手眼标定程序
 │   ├── calibrate_robotworld_handeye.cpp // 手眼标定程序（同时计算标定板位置）
 │   ├── calibrate_validate.cpp           // 外参验收（世界系板位姿重复性）
-│   ├── chessboard.hpp                   // 棋盘格检测与 3D 角点
 │   └── capture.cpp                      // 相机标定数据采集程序
 ├── CMakeLists.txt // CMake配置文件
 ├── configs        // 每台机器人的YAML配置文件
@@ -322,7 +321,7 @@ sp_vision_25
 │   ├── camera_detect_test.cpp    // 识别器测试程序（工业相机）
 │   ├── camera_test.cpp           // 相机测试程序
 │   ├── camera_thread_test.cpp    // 相机线程测试程序
-│   ├── cboard_test.cpp           // C板测试程序
+│   ├── cboard_serial_test.cpp    // C板测试程序
 │   ├── detector_video_test.cpp   // 识别器测试程序（视频）
 │   ├── dm_test.cpp               // 达妙IMU测试程序
 │   ├── fire_test.cpp             // 开火测试程序

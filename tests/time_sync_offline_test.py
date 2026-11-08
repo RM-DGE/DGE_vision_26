@@ -51,15 +51,9 @@ time_sync_board: {columns: 9, rows: 6, square_size_m: 0.02}
         assert result['status'] == 'invalid_data' and needle in result['reason'], result
         assert result['offline_validation_passed'] is False, result
         assert {p.relative_to(root) for p in root.rglob('*')} == before, 'terminal mode created files'
-        output = root / (path.name + '-output')
-        proc = subprocess.run([str(binary), '--session', str(path), '--output', str(output)],
-                              text=True, capture_output=True)
-        assert proc.returncode != 0, (path,proc.stdout,proc.stderr)
-        summary = (output/'summary.yaml').read_text()
-        assert 'invalid_data' in summary and needle in summary, (path,summary)
-    
-    reject(fixture('empty'), 'insufficient')
-    assert 'baseline_delay_ms: -2.5' in (root/'empty-output'/'summary.yaml').read_text(), 'baseline must come from capture config'
+        return result
+
+    assert reject(fixture('empty'), 'insufficient')['current_imu_delay_ms'] == -2.5
     path = fixture('truncated-imu')
     (path/'imu.csv').write_text('sample_id,t_imu_receive_ns,qw,qx,qy,qz,valid\n0,0,1,0,0,0,1\n')
     reject(path, 'record count')
@@ -82,11 +76,10 @@ time_sync_board: {columns: 9, rows: 6, square_size_m: 0.02}
     path = fixture('header')
     (path/'images.csv').write_text('wrong_header\n')
     reject(path, 'header')
-    output = root/'existing-output'
-    output.mkdir()
-    (output/'preserve.txt').write_text('must remain')
-    proc = subprocess.run([str(binary),'--session',str(root/'empty'),'--output',str(output)],capture_output=True)
-    assert proc.returncode != 0 and (output/'preserve.txt').read_text() == 'must remain'
+    output = root/'unrequested-output'
+    proc = subprocess.run([str(binary), '--session', str(root/'empty'), '--output', str(output)],
+                          text=True, capture_output=True)
+    assert proc.returncode == 2 and 'unknown option' in proc.stderr and not output.exists()
     print('time_offset_cli_test passed; fixtures:', root)
 
 """Render a stationary board and exercise the real PNG -> PnP -> delay CLI.
@@ -156,15 +149,15 @@ def make_session(path, delay_ms, phase):
     meta = dict(schema_version=1, session_id=path.name, clock="steady_clock",
                 timestamp_semantics="host_receive_v1", complete=True,
                 calibration_fingerprint=fingerprint(content), source_head="synthetic-test")
-    meta["counters"] = dict(images_written=120, imu_written=651, events_written=0,
-                            images_accepted=120, imu_accepted=651, images_dropped=0,
+    meta["counters"] = dict(images_written=310, imu_written=2251, events_written=0,
+                            images_accepted=310, imu_accepted=2251, images_dropped=0,
                             images_failed=0, imu_dropped=0, imu_failed=0, imu_invalid=0,
                             events_dropped=0, camera_source_dropped=0)
     (path / "session.yaml").write_text(yaml.safe_dump(meta))
     with (path / "imu.csv").open("w", newline="") as stream:
         writer = csv.writer(stream)
         writer.writerow(["sample_id", "t_imu_receive_ns", "qw", "qx", "qy", "qz", "valid"])
-        for i in range(651):
+        for i in range(2251):
             writer.writerow([i, i * 10000000, *quaternion(i / 100, phase), 1])
     (path / "events.csv").write_text("t_event_ns,event_type,local_id,reason\n")
     K = np.array(config["camera_matrix"], dtype=float).reshape(3, 3)
@@ -175,8 +168,8 @@ def make_session(path, delay_ms, phase):
         writer = csv.writer(stream)
         writer.writerow(["frame_id", "t_image_ns", "image_path", "camera_frame_id",
                          "device_timestamp_ticks", "exposure_us"])
-        for i in range(120):
-            time = .2 + i * .05
+        for i in range(310):
+            time = .2 + i * .07
             R = rotation(sample_at(time-delay_ms/1000, phase)).T
             rvec, _ = cv2.Rodrigues(R)
             canvas = np.full((480*scale, 640*scale), 180, dtype=np.uint8)
@@ -198,14 +191,13 @@ def main():
     binary = pathlib.Path(sys.argv[1]).resolve()
     root = pathlib.Path(sys.argv[2]).resolve() / ("rendered-fixtures-" + uuid.uuid4().hex)
     root.mkdir(parents=True)
-    train, validation = root / "train", root / "validation"
+    sessions = root / "data" / "time_sync"
+    sessions.mkdir(parents=True)
+    train, validation = sessions / "train_01", sessions / "validate_01"
     truth_ms = 6.4
     make_session(train, truth_ms, 0)
     make_session(validation, truth_ms, .8)
-    output = root / "result"
-    command = [str(binary), "--session", str(train), "--validation", str(validation),
-               "--min-frames", "60", "--min-duration-s", "2", "--min-delay-ms", "-12",
-               "--max-delay-ms", "12", "--step-ms", "0.2"]
+    command = [str(binary)]
     before = {p.relative_to(root) for p in root.rglob('*')}
     terminal = subprocess.run(command, cwd=root, text=True, capture_output=True, timeout=180)
     assert terminal.returncode == 0, (terminal.returncode, terminal.stdout, terminal.stderr)
@@ -216,21 +208,6 @@ def main():
     assert result['online_verification'] == 'pending_required', result
     assert result['validation']['candidate_rms_m'] < result['validation']['current_rms_m'], result
     assert {p.relative_to(root) for p in root.rglob('*')} == before, 'terminal mode created files'
-    proc = subprocess.run(command + ["--output", str(output)],
-                          text=True, capture_output=True, timeout=180)
-    print(proc.stdout)
-    print(proc.stderr)
-    assert proc.returncode == 0, (proc.returncode, root)
-    summary = yaml.safe_load((output / "summary.yaml").read_text())
-    # Output schema checks intentionally follow the CLI contract, not private logic.
-    assert summary["status"] == "candidate", summary
-    assert abs(summary["candidate_imu_delay_ms"] - truth_ms) < 1.2, summary
-    assert summary["offline_validation_passed"] is True, summary
-    assert summary["reference_point"] == "chessboard_center", summary
-    assert summary["deployable"] is False, summary
-    assert "validated" != summary["status"], "Offline rendering cannot validate hardware timing"
-    assert result['candidate_imu_delay_ms'] == summary['candidate_imu_delay_ms'], result
-    assert result['validation']['candidate_rms_m'] == summary['validation']['training_candidate']['rms_m'], result
     print("rendered time-sync end-to-end passed; retained fixtures:", root)
 
 

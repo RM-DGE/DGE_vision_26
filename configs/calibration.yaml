@@ -13,7 +13,6 @@ gain: 10.0
 vid_pid: "2bdf:0001"
 
 #####-----CBoard 串口-----#####
-capture_imu: true  # 按 S 同时保存图片和 IMU 四元数，供内参和手眼标定使用
 serial_device: "/dev/ttyACM0"
 serial_baudrate: 115200
 

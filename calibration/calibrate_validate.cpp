@@ -28,7 +28,6 @@
 #include <opencv2/opencv.hpp>
 #include <vector>
 
-#include "chessboard.hpp"
 #include "tools/math_tools.hpp"
 
 const std::string keys =
@@ -78,7 +77,10 @@ int main(int argc, char * argv[])
   cv::Matx33d camera_matrix(camera_matrix_data.data());
   cv::Mat distort_coeffs(distort_coeffs_data);
 
-  const auto object_points = calibration::object_points(pattern_size, square_size_mm);
+  std::vector<cv::Point3f> object_points;
+  for (int row = 0; row < pattern_rows; ++row)
+    for (int col = 0; col < pattern_cols; ++col)
+      object_points.emplace_back(col * square_size_mm, row * square_size_mm, 0);
 
   struct Sample
   {
@@ -95,7 +97,7 @@ int main(int argc, char * argv[])
     if (img.empty()) break;
 
     std::vector<cv::Point2f> corners;
-    const auto found = calibration::find_chessboard(img, pattern_size, corners);
+    const auto found = cv::findChessboardCornersSB(img, pattern_size, corners);
     if (!found) {
       fmt::print("[skip] {}: findChessboardCorners failed\n", img_path);
       continue;

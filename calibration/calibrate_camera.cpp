@@ -4,13 +4,23 @@
 #include <fstream>
 #include <opencv2/opencv.hpp>
 
-#include "chessboard.hpp"
 #include "tools/img_tools.hpp"
 
 const std::string keys =
   "{help h usage ? |                          | 输出命令行参数说明}"
   "{config-path c  | configs/calibration.yaml | yaml配置文件路径 }"
   "{@input-folder  | assets/img_with_q        | 输入文件夹路径   }";
+
+std::vector<cv::Point3f> centers_3d(const cv::Size & pattern_size, const float center_distance)
+{
+  std::vector<cv::Point3f> centers_3d;
+
+  for (int i = 0; i < pattern_size.height; i++)
+    for (int j = 0; j < pattern_size.width; j++)
+      centers_3d.push_back({j * center_distance, i * center_distance, 0});
+
+  return centers_3d;
+}
 
 void load(
   const std::string & input_folder, const std::string & config_path, cv::Size & img_size,
@@ -21,13 +31,10 @@ void load(
   auto yaml = YAML::LoadFile(config_path);
   auto pattern_cols = yaml["pattern_cols"].as<int>();
   auto pattern_rows = yaml["pattern_rows"].as<int>();
-  auto square_size_mm = yaml["square_size_mm"]
-                          ? yaml["square_size_mm"].as<double>()
-                          : yaml["center_distance_mm"].as<double>();
+  auto center_distance_mm = yaml["square_size_mm"]
+                              ? yaml["square_size_mm"].as<double>()
+                              : yaml["center_distance_mm"].as<double>();
   cv::Size pattern_size(pattern_cols, pattern_rows);
-  const auto object_points = calibration::object_points(pattern_size, square_size_mm);
-  fmt::print(
-    "棋盘格内角点: {} x {}，方格边长 {:.2f} mm\n", pattern_cols, pattern_rows, square_size_mm);
 
   for (int i = 1; true; i++) {
     // 读取图片
@@ -38,13 +45,13 @@ void load(
     // 设置图片尺寸
     img_size = img.size();
 
-    // 识别棋盘格内角点
-    std::vector<cv::Point2f> corners;
-    auto success = calibration::find_chessboard(img, pattern_size, corners);
+    // 识别标定板
+    std::vector<cv::Point2f> centers_2d;
+    auto success = cv::findChessboardCornersSB(img, pattern_size, centers_2d);
 
     // 显示识别结果
     auto drawing = img.clone();
-    cv::drawChessboardCorners(drawing, pattern_size, corners, success);
+    cv::drawChessboardCorners(drawing, pattern_size, centers_2d, success);
     cv::resize(drawing, drawing, {}, 0.5, 0.5);  // 缩小图片尺寸便于显示完全
     cv::imshow("Press any to continue", drawing);
     cv::waitKey(0);
@@ -54,8 +61,8 @@ void load(
     if (!success) continue;
 
     // 记录所需的数据
-    img_points.emplace_back(corners);
-    obj_points.emplace_back(object_points);
+    img_points.emplace_back(centers_2d);
+    obj_points.emplace_back(centers_3d(pattern_size, center_distance_mm));
   }
 }
 

@@ -32,8 +32,9 @@ std::map<std::string, std::string> arguments(int argc, char ** argv)
       continue;
     }
     if (
-      key != "--config" && key != "--output" && key != "--duration" && key != "--image-fps" &&
-      key != "--cols" && key != "--rows" && key != "--square-m")
+      key != "--config" && key != "--board-config" && key != "--output" &&
+      key != "--duration" && key != "--image-fps" && key != "--cols" && key != "--rows" &&
+      key != "--square-m")
       throw std::invalid_argument("unknown option " + key);
     if (i + 1 >= argc || result.count(key))
       throw std::invalid_argument("missing or duplicate value for " + key);
@@ -60,6 +61,62 @@ int board_count(
     throw std::invalid_argument("board count must be an integer in [2,100]: " + name);
   return static_cast<int>(value);
 }
+YAML::Node field(const YAML::Node & node, const char * key)
+{
+  const auto missing = YAML::Node(YAML::NodeType::Undefined);
+  if (!node || !node.IsMap()) return missing;
+  const auto value = node[key];
+  return value && value.IsScalar() ? value : missing;
+}
+int board_count_value(const YAML::Node & value, const std::string & name)
+{
+  if (!value || !value.IsScalar())
+    throw std::invalid_argument("missing board geometry: " + name);
+  const double parsed = value.as<double>();
+  if (!std::isfinite(parsed) || parsed != std::floor(parsed) || parsed < 2 || parsed > 100)
+    throw std::invalid_argument("board count must be an integer in [2,100]: " + name);
+  return static_cast<int>(parsed);
+}
+double board_size_value(const YAML::Node & value, const std::string & name)
+{
+  if (!value || !value.IsScalar())
+    throw std::invalid_argument("missing board geometry: " + name);
+  const double parsed = value.as<double>();
+  if (!std::isfinite(parsed) || parsed <= 0)
+    throw std::invalid_argument("board size must be positive: " + name);
+  return parsed;
+}
+struct BoardGeometry
+{
+  int columns = 0;
+  int rows = 0;
+  double square_size_m = 0;
+};
+BoardGeometry load_board(const YAML::Node & yaml)
+{
+  BoardGeometry board;
+  const auto sync = yaml["time_sync_board"];
+  if (sync && sync.IsMap()) {
+    board.columns = board_count_value(field(sync, "columns"), "time_sync_board.columns");
+    board.rows = board_count_value(field(sync, "rows"), "time_sync_board.rows");
+    board.square_size_m =
+      board_size_value(field(sync, "square_size_m"), "time_sync_board.square_size_m");
+    return board;
+  }
+  // Legacy spatial-calibration keys, still used by configs/calibration.yaml.
+  board.columns = board_count_value(field(yaml, "pattern_cols"), "pattern_cols");
+  board.rows = board_count_value(field(yaml, "pattern_rows"), "pattern_rows");
+  const auto square_mm = field(yaml, "square_size_mm");
+  const auto center_mm = field(yaml, "center_distance_mm");
+  if (square_mm)
+    board.square_size_m = board_size_value(square_mm, "square_size_mm") / 1000.0;
+  else if (center_mm)
+    board.square_size_m = board_size_value(center_mm, "center_distance_mm") / 1000.0;
+  else
+    throw std::invalid_argument(
+      "missing board geometry: expected square_size_mm or center_distance_mm");
+  return board;
+}
 }  // namespace
 
 int main(int argc, char ** argv)
@@ -69,9 +126,13 @@ int main(int argc, char ** argv)
     if (args.count("--help")) {
       std::cout
         << "capture_time_sync --config CONFIG --output FRESH_SESSION_DIR "
-           "[--duration 30] [--image-fps 30] --cols COLS --rows ROWS --square-m METERS\n"
-           "Board options may instead come from config time_sync_board. The operator moves the "
-           "gimbal; "
+           "[--board-config BOARD_CONFIG] [--duration 30] [--image-fps 30] "
+           "[--cols COLS] [--rows ROWS] [--square-m METERS]\n"
+           "Board geometry is read from --config. Use --board-config only when the runtime "
+           "config has no board section. Accepted schemas:\n"
+           "  time_sync_board: {columns, rows, square_size_m}\n"
+           "  legacy: pattern_cols, pattern_rows, square_size_mm or center_distance_mm\n"
+           "--cols/--rows/--square-m override the file values. The operator moves the gimbal; "
            "this program sends no control commands. Ctrl-C stops and drains accepted records.\n";
       return 0;
     }
@@ -80,15 +141,18 @@ int main(int argc, char ** argv)
     const auto config_path = args.at("--config");
     const auto yaml = YAML::LoadFile(config_path);
     auto snapshot = YAML::Clone(yaml);
-    const auto board = yaml["time_sync_board"];
+    // Keep device/extrinsic config separate from the board definition when a
+    // calibration file still uses pattern_cols/pattern_rows/square_size_mm.
+    const auto board_path =
+      args.count("--board-config") ? args.at("--board-config") : config_path;
+    const auto board_yaml = args.count("--board-config") ? YAML::LoadFile(board_path) : yaml;
+    const auto board = load_board(board_yaml);
     // Explicit geometry must exist before constructing a device or output session.
-    snapshot["time_sync_board"]["columns"] =
-      board_count(args, "--cols", board && board["columns"] ? board["columns"].as<int>() : 0);
-    snapshot["time_sync_board"]["rows"] =
-      board_count(args, "--rows", board && board["rows"] ? board["rows"].as<int>() : 0);
-    snapshot["time_sync_board"]["square_size_m"] = number(
-      args, "--square-m",
-      board && board["square_size_m"] ? board["square_size_m"].as<double>() : 0);
+    snapshot["time_sync_board"]["columns"] = board_count(args, "--cols", board.columns);
+    snapshot["time_sync_board"]["rows"] = board_count(args, "--rows", board.rows);
+    snapshot["time_sync_board"]["square_size_m"] =
+      number(args, "--square-m", board.square_size_m);
+    snapshot["time_sync_board_source"] = board_path;
     snapshot["length_unit"] = "m";
     tools::time_sync::validate_calibration_geometry(snapshot);
 

@@ -7,7 +7,7 @@
 - 将在线固定减 1ms 改为 `imu_delay_ms`，支持正、负和小数毫秒；IMU 缓存可重复查询，检查缺样和插值间隔。
 - `standard`、`sentry_DGE` 对齐失败时跳过视觉更新，并关闭控制与发射使能；`handeye_test` 跳过该帧投影。
 - 增加连续图像、IMU 自动采集，以及棋盘格延时搜索和独立数据复验。原来的 `capture` 仍在启动时打开相机和 IMU，按 s 同时保存图片与四元数。
-- 延时求解结果默认在终端打印；只有主动传入 `--output` 才导出诊断文件。
+- 延时求解直接读取采集目录，结果只在终端打印。
 - 修复串口重连处理，仿真按相同帧号匹配图像与姿态；测试集中为 3 份，统一由根 `CMakeLists.txt` 构建。
 
 真机延时仍以 **1ms** 为初值，仿真使用 **0ms**。真实延时要通过下面的动态采集测得。
@@ -16,12 +16,11 @@
 
 | 类型 | 文件 | 用途 |
 |---|---|---|
-| 原有，清理提示 | `calibration/capture.cpp` | 启动相机与 IMU，按 s 保存同编号 `.jpg` 和 `.txt`；删除与 YAML 冲突的固定棋盘尺寸提示 |
+| 原有采集 | `calibration/capture.cpp` | 按 SP25 流程启动相机与 IMU，按 s 保存同编号 `.jpg` 和 `.txt`。棋盘格内角点数从 YAML 读取 |
 | 原有沿用 | `calibration/calibrate_camera.cpp` | 使用图片计算内参、畸变，终端打印结果 |
 | 原有沿用 | `calibration/calibrate_robotworld_handeye.cpp` | 使用图片和四元数计算相机到云台外参；本流程采用此程序 |
 | 原有沿用 | `calibration/calibrate_validate.cpp` | 检查固定棋盘格在世界系的位置、姿态波动，终端打印 PASS/FAIL |
 | 原有保留 | `calibration/calibrate_handeye.cpp` | 另一种手眼求解入口，本流程无需再运行 |
-| 原有沿用 | `calibration/chessboard.hpp` | 棋盘格角点检测与空间点生成 |
 | 新增 | `calibration/capture_time_sync.cpp` | 自动记录动态图像和独立 IMU 时间序列 |
 | 新增 | `calibration/calibrate_time_offset.cpp` | 搜索、复验延时，默认终端输出 |
 | 新增 | `tools/imu_time_buffer.hpp/.cpp` | IMU 时间缓存与插值 |
@@ -105,18 +104,18 @@ mkdir -p data/calibration data/time_sync
 退出其他占用相机、串口的程序。固定底盘与棋盘格，由操作者转动云台，包含 **Yaw/Pitch 加减速、反向和组合运动**，保持棋盘清晰可见。自动记录期间不按 s，程序不发送云台控制指令。
 
 ```bash
-./build/capture_time_sync --config configs/handeye.yaml --output data/time_sync/train_01 --duration 45 --image-fps 30 --cols 11 --rows 8 --square-m 0.060
-./build/capture_time_sync --config configs/handeye.yaml --output data/time_sync/validate_01 --duration 45 --image-fps 30 --cols 11 --rows 8 --square-m 0.060
+./build/capture_time_sync --config configs/standard3.yaml --output data/time_sync/train_01 --duration 45 --image-fps 30
+./build/capture_time_sync --config configs/standard3.yaml --output data/time_sync/validate_01 --duration 45 --image-fps 30
 ```
 
-第一段结束后再录第二段，使用不同运动节奏，配置保持一致。**此处格长单位是米**；`--image-fps 30` 是图像保存率，IMU 独立记录收到的姿态样本，不随图像降采样。输出目录必须尚不存在，重录时更换目录名。
+`--config` 是实际运行配置，必须同时提供相机内参、手眼外参、串口和 `time_sync_board`。本工程的 `configs/standard3.yaml` 已写入标定板几何，因此不再需要第二个配置文件。旧配置若没有 `time_sync_board`，可用 `--board-config configs/calibration.yaml` 单独提供，程序也兼容 `pattern_cols`、`pattern_rows` 和 `square_size_mm|center_distance_mm`。命令行 `--cols/--rows/--square-m` 仍可覆盖文件值。第一段结束后再录第二段，使用不同运动节奏，配置保持一致。`--image-fps 30` 是图像保存率，IMU 独立记录收到的姿态样本，不随图像降采样。输出目录必须尚不存在，重录时更换目录名。
 
 每段生成 `images/`、`images.csv`、`imu.csv`、`session.yaml`、`calibration.yaml`、`events.csv`，供离线求解使用。其中 `calibration.yaml` 是本次采集配置的自动快照。结束后确认终端 `complete=true`；若为 false，查看该段 `events.csv` 和 `session.yaml` 中的原因后重录。记录完整不代表数据已满足延时求解条件。
 
 ### ⑤ 计算并复验延时，直接看终端
 
 ```bash
-./build/calibrate_time_offset --session data/time_sync/train_01 --validation data/time_sync/validate_01
+./build/calibrate_time_offset
 ```
 
 终端打印候选延时、当前延时、公共帧数和前后 RMS，重点看：
@@ -128,7 +127,7 @@ mkdir -p data/calibration data/time_sync
 
 `invalid_data` 表示数据或参数不合格，`inconclusive` 表示无法确定可靠结果，具体看 `reason`。只有候选状态且独立复验通过后，才进入下一步。默认搜索 −20～+20ms、步长 0.1ms，每段至少需要 300 张有效公共图像且跨度不少于 20s；步长不等于实际标定精度。
 
-**默认不创建结果目录或报告。** 仅需保存完整扫描曲线诊断时，才在命令末尾追加 `--output data/time_sync/result_01`；此时程序才创建 `summary.yaml`、扫描及残差 CSV。正常流程无需这一步。
+从工程根目录运行时，程序读取第④步留下的 `data/time_sync/train_01`，若同级有 `validate_01`，会自动复验。只有训练数据时可以计算候选值，`offline_validation_passed` 为 false。自定义采集路径时用 `--session` 和 `--validation` 指定两段数据。结果仅打印到终端。
 
 ### ⑥ 回填延时并上车验证
 
