@@ -1,60 +1,28 @@
-# pattern_cols: 6
-# pattern_rows: 9
-# square_size_mm: 26.0
+pattern_cols: 11
+pattern_rows: 8
+square_size_mm: 60.0
 
-# #####-----机械安装先验-----#####
-# # R_gimbal2imubody：gimbal 系 -> IMU body 系的旋转，必须按机械安装/CAD 填写。
-# R_gimbal2imubody: [1, 0, 0, 0, 1, 0, 0, 0, 1]
-
-# #####-----相机-----#####
-# camera_name: "hikrobot"
-# exposure_ms: 5.0
-# gain: 16.0
-# vid_pid: "2bdf:0001"
-
-# #####-----CBoard 串口-----#####
-# capture_imu: true  # 按 S 同时保存图片和 IMU 四元数，供内参和手眼标定使用
-# serial_device: "/dev/ttyACM0"
-# serial_baudrate: 115200
-
-# #####-----相机内参-----#####
-# camera_matrix: [1, 0, 0, 0, 1, 0, 0, 0, 1]
-# distort_coeffs: [0, 0, 0, 0, 0]
-
-# #####-----相机安装外参（手眼/机械测量结果）-----#####
-# # R_camera2gimbal：OpenCV 相机系 -> gimbal 系（行优先 9 个数）。
-# # t_camera2gimbal：相机光心在 gimbal 系下的平移，单位 m。
-# # 机械测量给出 t 的初值；R 以棋盘格手眼结果为准。
-# R_camera2gimbal: [1, 0, 0, 0, 1, 0, 0, 0, 1]
-# t_camera2gimbal: [0, 0, 0]
-
-pattern_cols: 9
-pattern_rows: 6
-center_distance_mm: 26
-
-R_gimbal2imubody: [1, 0, 0, 0, 1, 0,  0, 0, 1]
-
-camera_name: "hikrobot"
-exposure_ms: 3
-gain: 16.0
-vid_pid: "2bdf:0001"
-
-#####-----cboard参数-----#####
-serial_device: "/dev/ttyACM0"   # 串口设备
-serial_baudrate: 115200         # 波特率
-
-# 重投影误差: 0.2884px
-camera_matrix: [2244.1813680839482, 0, 761.73000277995345, 0, 2238.7971914956015, 627.65647659996728, 0, 0, 1]
-distort_coeffs: [-0.11778666120465334, 0.10509413428255092, 0.0036826019237248763, 0.0032478807137049088, 0]
-
+#####-----机械安装先验-----#####
+# R_gimbal2imubody：gimbal 系 -> IMU body 系的旋转，必须按机械安装/CAD 填写。
 R_gimbal2imubody: [1, 0, 0, 0, 1, 0, 0, 0, 1]
 
-# # 相机同理想情况的偏角: yaw-0.96 pitch-1.72 roll0.75 degree
-# R_camera2gimbal: [0.016416708860268914, -0.03024836878117353, 0.99940758845241684, -0.99977912030631921, 0.012621744957705072, 0.016804825311356793, -0.013122586243562552, -0.99946271953500132, -0.030034480018463539]
-# t_camera2gimbal: [0.11784256876889478, 0.028110219843569772, -0.0017176624086528616]
+#####-----相机-----#####
+camera_name: "hikrobot"
+exposure_ms: 3.0
+gain: 10.0
+vid_pid: "2bdf:0001"
 
-# 相机同理想情况的偏角: yaw0.53 pitch-0.95 roll0.53 degree
-# 标定板第一个内角点到世界坐标系原点的水平距离: 1.18 m
-# 标定板同竖直摆放时的偏角: yaw-4.76 pitch-0.86 roll90.66 degree
-R_camera2gimbal: [-0.0094560173553146117, -0.016508730851043422, 0.99981900639138876, -0.9999131948047415, 0.0093305920511166287, -0.0093028440463433348, -0.0091753251250804614, -0.9998201847620718, -0.016595528047809154]
-t_camera2gimbal: [0.11076664743169042, 0.024253252308502036, -0.0012670086271705549]
+#####-----CBoard 串口-----#####
+serial_device: "/dev/ttyACM0"
+serial_baudrate: 115200
+
+#####-----相机内参-----#####
+camera_matrix: [1, 0, 0, 0, 1, 0, 0, 0, 1]
+distort_coeffs: [0, 0, 0, 0, 0]
+
+#####-----相机安装外参（手眼/机械测量结果）-----#####
+# R_camera2gimbal：OpenCV 相机系 -> gimbal 系（行优先 9 个数）。
+# t_camera2gimbal：相机光心在 gimbal 系下的平移，单位 m。
+# 机械测量给出 t 的初值；R 以棋盘格手眼结果为准。
+R_camera2gimbal: [1, 0, 0, 0, 1, 0, 0, 0, 1]
+t_camera2gimbal: [0, 0, 0]
