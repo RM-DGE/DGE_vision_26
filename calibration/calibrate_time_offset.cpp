@@ -8,10 +8,11 @@
 #include <iostream>
 #include <map>
 #include <opencv2/calib3d.hpp>
+#include <opencv2/imgcodecs.hpp>
+#include <opencv2/imgproc.hpp>
 #include <sstream>
 #include <stdexcept>
 
-#include "chessboard.hpp"
 #include "tools/time_offset_calibration.hpp"
 #include "tools/time_sync_config.hpp"
 #include "tools/time_sync_session.hpp"
@@ -26,9 +27,7 @@ struct Session
   CalibrationGeometry geometry;
   std::vector<TimedImu> imu;
   std::vector<BoardObservation> observations;
-  std::size_t image_count = 0, detection_failures = 0, pnp_failures = 0, invalid_imu = 0,
-              event_count = 0;
-  std::vector<double> imu_intervals_ms;
+  std::size_t invalid_imu = 0;
   double baseline_delay_ms = 1;
 };
 void ensure(bool ok, const std::string & reason)
@@ -193,7 +192,6 @@ Session read_session(const fs::path & root)
   for (const auto & row : imu_rows) {
     const auto id = integer(row[0]), time = integer(row[1]);
     ensure(id > last_id && time > last_time, "IMU IDs/times must be strictly monotonic");
-    if (last_time >= 0) session.imu_intervals_ms.push_back((time - last_time) / 1e6);
     last_id = id;
     last_time = time;
     Eigen::Quaterniond q(number(row[2]), number(row[3]), number(row[4]), number(row[5]));
@@ -219,7 +217,6 @@ Session read_session(const fs::path & root)
       row[1].find("reset") == std::string::npos && row[1].find("reconnect") == std::string::npos,
       "reference reset/reconnect requires separate session");
   }
-  session.event_count = events.size();
   const auto images = read_csv(
     root / "images.csv", {"frame_id", "t_image_ns", "image_path", "camera_frame_id",
                           "device_timestamp_ticks", "exposure_us"});
@@ -236,12 +233,13 @@ Session read_session(const fs::path & root)
     const auto path = image_path(root, row[2]);
     const cv::Mat image = cv::imread(path.string());
     ensure(!image.empty(), "unreadable image_path: " + row[2]);
-    ++session.image_count;
     std::vector<cv::Point2f> corners;
-    if (!calibration::find_chessboard(image, cv::Size(cols, rows), corners)) {
-      ++session.detection_failures;
-      continue;
-    }
+    const int flags = cv::CALIB_CB_NORMALIZE_IMAGE | cv::CALIB_CB_EXHAUSTIVE | cv::CALIB_CB_ACCURACY;
+    if (!cv::findChessboardCornersSB(image, cv::Size(cols, rows), corners, flags)) continue;
+    cv::Mat gray;
+    cv::cvtColor(image, gray, cv::COLOR_BGR2GRAY);
+    cv::cornerSubPix(gray, corners, cv::Size(11, 11), cv::Size(-1, -1),
+      cv::TermCriteria(cv::TermCriteria::EPS + cv::TermCriteria::COUNT, 30, 0.001));
     std::vector<cv::Mat> rotations, translations;
     const int solutions = cv::solvePnPGeneric(
       object, corners, camera, distort, rotations, translations, false, cv::SOLVEPNP_IPPE);
@@ -271,7 +269,6 @@ Session read_session(const fs::path & root)
       }
     }
     if (!std::isfinite(best_error) || !best_point.allFinite()) {
-      ++session.pnp_failures;
       continue;
     }
     session.observations.push_back(
@@ -297,135 +294,26 @@ Session read_session(const fs::path & root)
   ensure(session.invalid_imu == 0, "complete session contains invalid IMU rows");
   return session;
 }
-double percentile(std::vector<double> data, double p)
-{
-  if (data.empty()) return std::numeric_limits<double>::quiet_NaN();
-  std::sort(data.begin(), data.end());
-  return data[static_cast<std::size_t>(std::ceil(p * data.size())) - 1];
-}
-YAML::Node score_yaml(const OffsetScore & score)
+YAML::Node terminal_scores(const OffsetCalibrationResult & result, const OffsetScore & candidate)
 {
   YAML::Node node;
-  node["delay_ms"] = score.delay_ms;
-  node["valid"] = score.valid;
-  node["frame_count"] = score.frame_count;
-  if (score.valid) {
-    node["rms_m"] = score.rms_m;
-    node["p95_m"] = score.p95_m;
-  }
-  return node;
-}
-YAML::Node session_yaml(const Session & session, const OffsetCalibrationResult & result)
-{
-  YAML::Node node;
-  node["session_id"] = session.id;
-  node["timestamp_semantics"] = session.semantics;
-  node["calibration_fingerprint"] = session.fingerprint;
-  node["source_head"] = session.source_head;
-  node["image_count"] = session.image_count;
-  node["detection_failures"] = session.detection_failures;
-  node["pnp_failures"] = session.pnp_failures;
-  node["invalid_imu_rows"] = session.invalid_imu;
-  node["imu_valid_samples"] = session.imu.size();
-  node["event_count"] = session.event_count;
-  for (const auto & entry :
-       std::vector<std::pair<std::string, double>>{{"p50", .5}, {"p95", .95}, {"p99", .99}})
-    if (!session.imu_intervals_ms.empty())
-      node["imu_receive_interval_ms"][entry.first] =
-        percentile(session.imu_intervals_ms, entry.second);
-  node["status"] = result.status;
-  node["reason"] = result.reason;
-  node["quality_frames"] = result.quality_frames;
   node["common_frames"] = result.common_frames.size();
   node["common_query_coverage"] = result.common_coverage;
-  node["common_duration_s"] = result.duration_s;
-  node["best"] = score_yaml(result.best);
-  node["current"] = score_yaml(result.baseline);
-  for (std::size_t k = 0; k < result.segment_best_delay_ms.size(); ++k) {
-    YAML::Node segment;
-    segment["index"] = k;
-    segment["best_delay_ms"] = result.segment_best_delay_ms[k];
-    segment["candidate_rms_m"] = result.segment_candidate_rms_m[k];
-    segment["current_rms_m"] = result.segment_baseline_rms_m[k];
-    node["contiguous_segments"].push_back(segment);
-  }
+  if (result.baseline.valid) node["current_rms_m"] = result.baseline.rms_m;
+  if (candidate.valid) node["candidate_rms_m"] = candidate.rms_m;
   return node;
-}
-void diagnostic_files(
-  const fs::path & directory, const std::string & prefix, const OffsetCalibrationResult & result)
-{
-  std::ofstream scan(directory / (prefix + "scan.csv"));
-  ensure(bool(scan), "cannot create scan.csv");
-  scan << std::setprecision(17);
-  scan << "delay_ms,rms_m,p95_m,common_frame_count,candidate_valid\n";
-  for (const auto & value : result.scan) {
-    scan << value.delay_ms << ',';
-    if (value.valid) scan << value.rms_m;
-    scan << ',';
-    if (value.valid) scan << value.p95_m;
-    scan << ',' << value.frame_count << ',' << value.valid << '\n';
-  }
-  std::ofstream residuals(directory / (prefix + "residuals.csv"));
-  ensure(bool(residuals), "cannot create residuals.csv");
-  residuals << std::setprecision(17);
-  residuals << "frame_id,candidate_delay_ms,world_x_m,world_y_m,world_z_m,residual_m,pnp_rms_px\n";
-  for (const auto & value : result.residuals)
-    residuals << value.frame_id << ',' << result.best.delay_ms << ',' << value.point_world_m.x()
-              << ',' << value.point_world_m.y() << ',' << value.point_world_m.z() << ','
-              << value.distance_m << ',' << value.reprojection_error_px << '\n';
-  scan.flush();
-  residuals.flush();
-  ensure(bool(scan) && bool(residuals), "diagnostic write failed");
-}
-void write_summary(const fs::path & output, const YAML::Node & summary)
-{
-  std::ofstream stream(output / "summary.yaml");
-  ensure(bool(stream), "cannot create summary.yaml");
-  stream << std::setprecision(17) << summary << '\n';
-  stream.flush();
-  ensure(bool(stream), "summary write failed");
-}
-void print_summary(const YAML::Node & summary)
-{
-  YAML::Node terminal;
-  for (const auto * key :
-       {"status", "reason", "candidate_imu_delay_ms", "offline_validation_passed",
-        "online_verification"})
-    if (summary[key]) terminal[key] = summary[key];
-  if (summary["settings"] && summary["settings"]["baseline_delay_ms"])
-    terminal["current_imu_delay_ms"] = summary["settings"]["baseline_delay_ms"];
-  for (const auto * name : {"training", "validation"}) {
-    const auto session = summary[name];
-    if (!session || !session["common_frames"]) continue;
-    terminal[name]["common_frames"] = session["common_frames"];
-    terminal[name]["common_query_coverage"] = session["common_query_coverage"];
-    if (session["current"] && session["current"]["valid"].as<bool>())
-      terminal[name]["current_rms_m"] = session["current"]["rms_m"];
-    // Validation must report the training candidate, not its own independently fitted optimum.
-    const auto candidate =
-      std::string(name) == "training" ? session["best"] : session["training_candidate"];
-    if (candidate && candidate["valid"].as<bool>())
-      terminal[name]["candidate_rms_m"] = candidate["rms_m"];
-  }
-  std::cout << std::setprecision(17) << terminal << '\n';
 }
 }  // namespace
 int main(int argc, char ** argv)
 {
-  fs::path output;
-  bool created = false;
   YAML::Node summary;
-  summary["schema_version"] = 1;
   summary["status"] = "invalid_data";
   summary["offline_validation_passed"] = false;
   summary["online_verification"] = "pending_required";
-  summary["deployable"] = false;
-  summary["reference_point"] = "chessboard_center";
   try {
     std::map<std::string, std::string> args;
     const std::vector<std::string> allowed = {
       "session",
-      "output",
       "validation",
       "min-delay-ms",
       "max-delay-ms",
@@ -438,9 +326,9 @@ int main(int argc, char ** argv)
     for (int i = 1; i < argc; ++i) {
       std::string key = argv[i];
       if (key == "--help") {
-        std::cout << "calibrate_time_offset --session DIR [--validation INDEPENDENT_DIR] [--output "
-                     "NEW_DIR]\n"
-                     "  Prints results to the terminal; --output optionally exports diagnostics.\n"
+        std::cout << "calibrate_time_offset [--session DIR] [--validation INDEPENDENT_DIR]\n"
+                     "  Default: data/time_sync/train_01, plus validate_01 if present.\n"
+                     "  Results are printed to the terminal.\n"
                      "  --min-delay-ms -20 --max-delay-ms 20 --step-ms 0.1 --max-gap-ms 20\n"
                      "  --min-frames 300 --min-duration-s 20 --max-reprojection-px 1.5 "
                      "--segment-tolerance-ms 1\n";
@@ -453,13 +341,13 @@ int main(int argc, char ** argv)
       ensure(i + 1 < argc && !args.count(key), "missing or duplicate option: " + key);
       args[key] = argv[++i];
     }
-    ensure(args.count("session"), "--session is required");
-    if (args.count("output")) {
-      output = args["output"];
-      ensure(!fs::exists(output), "output directory already exists; choose a fresh directory");
-      ensure(fs::create_directories(output), "cannot create fresh output directory");
-      created = true;
+    if (!args.count("session")) {
+      args["session"] = "data/time_sync/train_01";
+      if (!args.count("validation") && fs::exists("data/time_sync/validate_01"))
+        args["validation"] = "data/time_sync/validate_01";
     }
+    ensure(
+      fs::is_directory(args["session"]), "missing capture_time_sync session: " + args["session"]);
     OffsetScanOptions options;
     for (const auto & entry : std::vector<std::pair<std::string, double *>>{
            {"min-delay-ms", &options.min_delay_ms},
@@ -472,24 +360,14 @@ int main(int argc, char ** argv)
       if (args.count(entry.first)) *entry.second = number(args[entry.first]);
     if (args.count("min-frames"))
       options.min_frames = static_cast<std::size_t>(integer(args["min-frames"]));
-    summary["settings"]["min_delay_ms"] = options.min_delay_ms;
-    summary["settings"]["max_delay_ms"] = options.max_delay_ms;
-    summary["settings"]["step_ms"] = options.step_ms;
-    summary["settings"]["max_gap_ms"] = options.max_gap_ms;
-    summary["settings"]["min_frames"] = options.min_frames;
-    summary["settings"]["min_duration_s"] = options.min_duration_s;
-    summary["settings"]["max_reprojection_px"] = options.max_reprojection_px;
-    summary["settings"]["baseline_delay_ms"] = options.baseline_delay_ms;
-    summary["settings"]["segment_tolerance_ms"] = options.segment_tolerance_ms;
     const Session session = read_session(args["session"]);
     options.baseline_delay_ms = session.baseline_delay_ms;
-    summary["settings"]["baseline_delay_ms"] = options.baseline_delay_ms;
+    summary["current_imu_delay_ms"] = options.baseline_delay_ms;
     const auto result =
       calibrate_time_offset(session.observations, session.imu, session.geometry, options);
-    summary["training"] = session_yaml(session, result);
+    summary["training"] = terminal_scores(result, result.best);
     summary["status"] = result.status;
     summary["reason"] = result.reason;
-    if (created) diagnostic_files(output, "", result);
     if (result.best.valid) summary["candidate_imu_delay_ms"] = result.best.delay_ms;
     if (args.count("validation")) {
       ensure(
@@ -503,12 +381,10 @@ int main(int argc, char ** argv)
         "validation calibration fingerprint mismatch");
       const auto verify = calibrate_time_offset(
         validation.observations, validation.imu, validation.geometry, options);
-      summary["validation"] = session_yaml(validation, verify);
-      if (created) diagnostic_files(output, "validation_", verify);
       const auto fixed = score_offset(
         verify.common_frames, validation.imu, validation.geometry, result.best.delay_ms,
         options.max_gap_ms);
-      summary["validation"]["training_candidate"] = score_yaml(fixed);
+      summary["validation"] = terminal_scores(verify, fixed);
       std::vector<double> gains;
       for (std::size_t k = 0; k < options.segment_count && !verify.common_frames.empty(); ++k) {
         auto begin =
@@ -537,23 +413,13 @@ int main(int argc, char ** argv)
                           gains.size() == options.segment_count &&
                           *std::min_element(gains.begin(), gains.end()) > options.flat_absolute_m &&
                           gain > std::max(options.flat_absolute_m, gain_deviation);
-      summary["validation"]["rms_improvement_m"] = gain;
-      summary["validation"]["segment_improvement_stddev_m"] = gain_deviation;
-      summary["validation"]["acceptance_policy"] =
-        "distinct session, same semantics and snapshot, identifiable consistent optima; every "
-        "contiguous block improves and total gain exceeds block gain standard deviation";
       summary["offline_validation_passed"] = passed;
       if (!passed && result.status == "candidate") {
         summary["status"] = "inconclusive";
         summary["reason"] = "independent_validation_failed";
       }
-    } else
-      summary["validation"]["status"] = "not_provided";
-    summary["online_verification_requirements"] =
-      "measure alignment wait, failure distribution and coverage under typical runtime load; "
-      "approve runtime budget before deployment";
-    if (created) write_summary(output, summary);
-    print_summary(summary);
+    }
+    std::cout << std::setprecision(17) << summary << '\n';
     const std::string status = summary["status"].as<std::string>();
     return status == "candidate" ? 0 : status == "inconclusive" ? 3 : 2;
   } catch (const std::exception & error) {
@@ -561,13 +427,7 @@ int main(int argc, char ** argv)
     summary["status"] = "invalid_data";
     summary["reason"] = error.what();
     summary["offline_validation_passed"] = false;
-    print_summary(summary);
-    if (created) try {
-        if (!fs::exists(output / "scan.csv")) diagnostic_files(output, "", {});
-        write_summary(output, summary);
-      } catch (const std::exception & write_error) {
-        std::cerr << write_error.what() << '\n';
-      }
+    std::cout << std::setprecision(17) << summary << '\n';
     return 2;
   }
 }

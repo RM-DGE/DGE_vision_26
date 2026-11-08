@@ -106,6 +106,36 @@ void HikRobot::capture_start()
   set_float_value("ExposureTime", exposure_us_);
   set_float_value("Gain", gain_);
   MV_CC_SetFrameRate(handle_, 150);
+  MVCC_ENUMVALUE exposure_mode{};
+MVCC_ENUMVALUE exposure_auto{};
+MVCC_ENUMVALUE gain_auto{};
+MVCC_ENUMVALUE pixel_format{};
+MVCC_FLOATVALUE exposure{};
+MVCC_FLOATVALUE gain{};
+
+const auto r1 = MV_CC_GetEnumValue(handle_, "ExposureMode", &exposure_mode);
+const auto r2 = MV_CC_GetEnumValue(handle_, "ExposureAuto", &exposure_auto);
+const auto r3 = MV_CC_GetEnumValue(handle_, "GainAuto", &gain_auto);
+const auto r4 = MV_CC_GetEnumValue(handle_, "PixelFormat", &pixel_format);
+const auto r5 = MV_CC_GetFloatValue(handle_, "ExposureTime", &exposure);
+const auto r6 = MV_CC_GetFloatValue(handle_, "Gain", &gain);
+
+tools::logger()->info(
+  "readback ret: mode={:#x}, exp_auto={:#x}, gain_auto={:#x}, "
+  "pixel={:#x}, exposure={:#x}, gain={:#x}",
+  r1, r2, r3, r4, r5, r6);
+
+tools::logger()->info(
+  "readback: ExposureMode={}, ExposureAuto={}, GainAuto={}, "
+  "PixelFormat={:#x}, ExposureTime={} us, Gain={}",
+  exposure_mode.nCurValue,
+  exposure_auto.nCurValue,
+  gain_auto.nCurValue,
+  pixel_format.nCurValue,
+  exposure.fCurValue,
+  gain.fCurValue);
+
+
 
   ret = MV_CC_StartGrabbing(handle_);
   if (ret != MV_OK) {

@@ -133,8 +133,9 @@ struct TimeSyncRecorder::Impl
       options.timestamp_semantics != "host_receive_v1" &&
       options.timestamp_semantics != "daedalus_frame_v1")
       throw std::invalid_argument("unsupported timestamp semantics");
-    // create_directory is atomic with respect to an existing session; never reuse a target.
-    if (!std::filesystem::create_directory(options.output))
+    // create_directories creates missing parents (e.g. data/time_sync) and is
+    // atomic with respect to an existing session; never reuse a target.
+    if (!std::filesystem::create_directories(options.output))
       throw std::runtime_error(
         "session output must be a fresh directory: " + options.output.string());
     std::filesystem::create_directory(options.output / "images");

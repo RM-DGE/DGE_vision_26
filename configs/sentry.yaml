@@ -31,17 +31,16 @@ fov_v: 56.7
 left_camera_yaw_deg: 120
 right_camera_yaw_deg: -120
 usb_frame_rate: 30
-usb_exposure: 200 # 单位约 100us；500 会把实际帧率压到 ~16fps
+usb_exposure: 50 # 单位约 100us；500 会把实际帧率压到 ~16fps
 usb_gamma: 160
 usb_gain: 10 #0-96
 
-# 固定设备路径，避免插拔后 /dev/videoN 变化；按实际左右安装交换这两个路径。
-usb_left_device: "v4l/by-path/pci-0000:00:14.0-usb-0:2.1:1.0-video-index0"
-usb_right_device: "v4l/by-path/pci-0000:00:14.0-usb-0:2.3:1.0-video-index0"
+usb_left_device: "v4l/by-path/pci-0000:c4:00.3-usb-0:3.1:1.0-video-index0"
+usb_right_device: "v4l/by-path/pci-0000:c4:00.3-usb-0:3.2:1.0-video-index0"
 
 #####-----工业相机参数-----#####
 camera_name: "hikrobot"
-exposure_ms: 0.8
+exposure_ms: 2.5
 gain: 16.9
 vid_pid: "2bdf:0001"
 
@@ -112,10 +111,6 @@ ekf:
   nis_max_consecutive_rejects: 5
   nis_reject_cov_inflation: 0.01
 
-  # v0.32 观测侧（可 A/B 回退）
-  init_prefer_solver_pose: true   # 初始化优先用 Solver 世界系板位姿；false = 优先 RobustPnp
-  skip_tracking_pnp: false        # true: 跟踪阶段 4 板目标跳过逐板 PnP（省 CPU，Foxglove detections 方块失去位姿）
-
 #####-----aimer参数-----#####
 yaw_offset: -0.8 # degree -2.5
 pitch_offset: -1  # degree 2
@@ -139,15 +134,21 @@ mode: 1
 #####-----工业相机标定参数-----#####
 R_gimbal2imubody: [1, 0, 0, 0, 1, 0, 0, 0, 1]
 
-# 重投影误差: 0.1833px
-camera_matrix: [2414.9359264386621, 0, 717.26243105567414, 0, 2418.0489262208148, 582.68540529942845, 0, 0, 1]
-distort_coeffs: [-0.0209453389287673, 0.15028138841073832, -0.0006517722113234505, -0.0016861906197686788, 0]
+# 重投影误差: 0.2884px
+camera_matrix: [2244.1813680839482, 0, 761.73000277995345, 0, 2238.7971914956015, 627.65647659996728, 0, 0, 1]
+distort_coeffs: [-0.11778666120465334, 0.10509413428255092, 0.0036826019237248763, 0.0032478807137049088, 0]
 
-# 相机同理想情况的偏角: yaw-1.11 pitch0.01 roll-0.06 degree
-# 标定板到世界坐标系原点的水平距离: 1.20 m
-# 标定板同竖直摆放时的偏角: yaw123.89 pitch14.05 roll-0.86 degree
-R_camera2gimbal: [0.01928451708725664, 0.00012696140743255463, 0.99981402834802846, -0.99981344688553653, -0.0010834913551969569, 0.019284643459122196, 0.0010857382619952124, -0.99999940496346484, 0.00010604311483339372]
-t_camera2gimbal: [0.13089617453251859, 0.0038468007459533785, 0.094139945222010288]
+R_gimbal2imubody: [1, 0, 0, 0, 1, 0, 0, 0, 1]
+
+# # 相机同理想情况的偏角: yaw-0.96 pitch-1.72 roll0.75 degree
+# R_camera2gimbal: [0.016416708860268914, -0.03024836878117353, 0.99940758845241684, -0.99977912030631921, 0.012621744957705072, 0.016804825311356793, -0.013122586243562552, -0.99946271953500132, -0.030034480018463539]
+# t_camera2gimbal: [0.11784256876889478, 0.028110219843569772, -0.0017176624086528616]
+
+# 相机同理想情况的偏角: yaw0.53 pitch-0.95 roll0.53 degree
+# 标定板第一个内角点到世界坐标系原点的水平距离: 1.18 m
+# 标定板同竖直摆放时的偏角: yaw-4.76 pitch-0.86 roll90.66 degree
+R_camera2gimbal: [-0.0094560173553146117, -0.016508730851043422, 0.99981900639138876, -0.9999131948047415, 0.0093305920511166287, -0.0093028440463433348, -0.0091753251250804614, -0.9998201847620718, -0.016595528047809154]
+t_camera2gimbal: [0.11076664743169042, 0.024253252308502036, -0.0012670086271705549]
 
 #####-----cboard串口参数-----#####
 serial_device: "/dev/ttyACM0"
@@ -171,10 +172,4 @@ ros2:
   target_pos_topic: "/auto_aim_target_pos"
   target_info_topic: "/auto_aim_target_info"
   imu_frame_id: "imu_link"
-  # IMU 原始帧 1 kHz；导航不需要全量，默认降采样到 200 Hz。
-  # 测试时可在临时配置里改成 1000，测原始链路。
-  imu_publish_rate: 200.0
-  status_publish_rate: 20.0
-  max_cmd_age_ms: 20.0
-  nav_timeout_ms: 1500.0
-  status_online_timeout_ms: 200.0
+  

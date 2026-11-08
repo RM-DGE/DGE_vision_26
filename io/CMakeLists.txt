@@ -43,10 +43,14 @@ add_library(io STATIC
 target_include_directories(io PUBLIC Daedalus)
 
 # hikrobot
-target_include_directories(io PUBLIC hikrobot/include)
+# 方案 A：x86_64 直接用系统安装的 MVS（/opt/MVS），保证编译链接的库与运行时
+# 实际加载的是同一份（避免“链接仓库旧 SDK、运行 /opt/MVS 新 SDK”的拼装）。
+# aarch64 暂保留仓库自带库。
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
-  target_link_directories(io PUBLIC hikrobot/lib/amd64)
+  target_include_directories(io PUBLIC /opt/MVS/include)
+  target_link_directories(io PUBLIC /opt/MVS/lib/64)
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+  target_include_directories(io PUBLIC hikrobot/include)
   target_link_directories(io PUBLIC hikrobot/lib/arm64)
 else()
   message(FATAL_ERROR "Unsupported architecture: ${CMAKE_HOST_SYSTEM_PROCESSOR}!")
