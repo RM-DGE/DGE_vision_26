@@ -733,6 +733,7 @@ void FoxgloveServer::publish_scene(
     entity.frame_locked = false;
 
     for (const auto & armor : armors) {
+      if (!armor.pose_valid) continue;
       CubePrimitive cube;
       cube.pose = make_pose_ypr(
         armor.xyz_in_world.x(), armor.xyz_in_world.y(), armor.xyz_in_world.z(),
@@ -1017,7 +1018,8 @@ void FoxgloveServer::publish_ground_truth(const std::vector<io::SimTargetTruth> 
   impl_->gt_ch->log(reinterpret_cast<const std::byte *>(data.data()), data.size(), ns);
 }
 
-void FoxgloveServer::publish_image(const cv::Mat & bgr, int quality)
+void FoxgloveServer::publish_image(
+  const cv::Mat & bgr, int quality, const cv::Mat & result_image)
 {
   if (bgr.empty() || !impl_->image_ch) return;
   if (!has_clients()) return;
@@ -1038,8 +1040,14 @@ void FoxgloveServer::publish_image(const cv::Mat & bgr, int quality)
   msg.data.resize(buf.size());
   std::memcpy(msg.data.data(), buf.data(), buf.size());
   impl_->image_ch->log(msg, ns);
-  // 原布局主视图：/detector/result_img/compressed（同一份 JPEG）
-  if (impl_->result_img_ch) impl_->result_img_ch->log(msg, ns);
+  if (impl_->result_img_ch) {
+    if (!result_image.empty()) {
+      cv::imencode(".jpg", result_image, buf, params);
+      msg.data.resize(buf.size());
+      std::memcpy(msg.data.data(), buf.data(), buf.size());
+    }
+    impl_->result_img_ch->log(msg, ns);
+  }
 }
 
 void FoxgloveServer::publish_number_image(const std::list<auto_aim::Armor> & armors)
@@ -1127,6 +1135,7 @@ void FoxgloveServer::publish_rmvision(
   if (impl_->rm_armors_ch) {
     nlohmann::json msg = {{"header", header}, {"armors", nlohmann::json::array()}};
     for (const auto & a : armors) {
+      if (!a.pose_valid) continue;
       nlohmann::json item;
       item["number"] = auto_aim::ARMOR_NAMES.at(static_cast<size_t>(a.name));
       item["type"] = auto_aim::ARMOR_TYPES.at(static_cast<size_t>(a.type));
@@ -1216,6 +1225,7 @@ void FoxgloveServer::publish_detector_markers(const std::list<auto_aim::Armor> &
   std::vector<RosMarker> markers;
   int id = 0;
   for (const auto & a : armors) {
+    if (!a.pose_valid) continue;
     const double width = (a.type == auto_aim::big) ? 0.230 : 0.135;
     const auto pos = a.xyz_in_world;
     const double yaw = a.ypr_in_world[0];
@@ -1343,9 +1353,45 @@ void FoxgloveServer::publish_debug(
   dbg["pitch"] = command.pitch;
   dbg["gimbal_yaw"] = gimbal_ypr[0];
   dbg["gimbal_pitch"] = gimbal_ypr[1];
+  // Display-only telemetry: invalid commands must not look like a zero-angle target.
+  constexpr double rad_to_deg = 180.0 / 3.14159265358979323846;
+  dbg["target_valid"] = targets.empty() ? 0 : 1;
+  dbg["aim_valid"] = aim_valid ? 1 : 0;
+  dbg["control"] = command.control ? 1 : 0;
+  dbg["gimbal_yaw_deg"] = gimbal_ypr[0] * rad_to_deg;
+  dbg["gimbal_pitch_deg"] = gimbal_ypr[1] * rad_to_deg;
+  dbg["command_yaw_deg"] = nullptr;
+  dbg["command_pitch_deg"] = nullptr;
+  dbg["tracking_yaw_error_deg"] = nullptr;
+  dbg["tracking_pitch_error_deg"] = nullptr;
+  if (command.control && aim_valid && !targets.empty()) {
+    dbg["command_yaw_deg"] = command.yaw * rad_to_deg;
+    dbg["command_pitch_deg"] = command.pitch * rad_to_deg;
+    dbg["tracking_yaw_error_deg"] =
+      tools::limit_rad(command.yaw - gimbal_ypr[0]) * rad_to_deg;
+    dbg["tracking_pitch_error_deg"] =
+      tools::limit_rad(command.pitch - gimbal_ypr[1]) * rad_to_deg;
+  }
   dbg["shoot"] = command.shoot ? 1 : 0;
   dbg["armors"] = static_cast<int>(armors.size());
   dbg["targets"] = static_cast<int>(targets.size());
+  dbg["pixel_nis_max"] = nullptr;
+  dbg["pixel_residuals"] = nlohmann::json::array();
+  for (int id = 0; id < 8; ++id) {
+    dbg["pixel_residuals"].push_back({{"id", id}, {"upper_u", nullptr},
+      {"upper_v", nullptr}, {"lower_u", nullptr}, {"lower_v", nullptr}, {"nis", nullptr}});
+  }
+  dbg["ekf_status"] = nlohmann::json::array();
+  const auto status_row = [&dbg](const std::string & name, const std::string & value,
+                                const std::string & meaning) {
+    dbg["ekf_status"].push_back({{"项目", name}, {"当前", value}, {"含义", meaning}});
+  };
+  std::size_t pose_index=0;
+  for (const auto & armor : armors) {
+    status_row("板位姿 " + std::to_string(pose_index++), armor.pose_status,
+      armor.pose_valid ? "统一解算 RMS=" + std::to_string(armor.pose_rms_px) + " px" : "无有效三维检测位姿");
+  }
+  status_row("目标", targets.empty() ? "无目标" : "存在", "存在可包含暂丢保留期");
   if (!targets.empty()) {
     const auto & target = targets.front();
     const auto state = target.state();
@@ -1356,6 +1402,43 @@ void FoxgloveServer::publish_debug(
       state.radius_lateral, state.height_lateral};
 
     const auto diag = target.diagnostics();
+    const auto recovery = target.recovery_status();
+    const char * health_names[] = {"INIT", "HEALTHY", "COASTING", "DEGRADED", "LOST"};
+    dbg["health"] = health_names[static_cast<int>(recovery.health)];
+    dbg["reliable"] = recovery.reliable;
+    dbg["candidate_active"] = recovery.candidate_active;
+    dbg["candidate_id"] = recovery.candidate_id;
+    dbg["recovery_count"] = recovery.recovery_count;
+    dbg["recovery_event"] = recovery.event;
+    dbg["last_accepted_age"] = recovery.last_accepted_age;
+    dbg["nis_valid"] = diag.nis_valid;
+    dbg["nis_count"] = diag.nis_count;
+    status_row("跟踪健康", health_names[static_cast<int>(recovery.health)], "按图像时间判断的生命周期");
+    status_row("预测可靠", recovery.reliable ? "是" : "否", "保留轨迹不等于允许信任预测");
+    status_row("恢复候选", recovery.candidate_active ? "后续帧验证中" : "无", recovery.event);
+    status_row("恢复接管次数", std::to_string(recovery.recovery_count), "候选通过独立后续帧验证后接管");
+    for (int id = 0; id < 8; ++id) {
+      const auto & pixel = diag.pixel_innovations[id];
+      if (!pixel.valid) continue;
+      auto & entry = dbg["pixel_residuals"][id];
+      entry["upper_u"] = pixel.residual[0];
+      entry["upper_v"] = pixel.residual[1];
+      entry["lower_u"] = pixel.residual[2];
+      entry["lower_v"] = pixel.residual[3];
+      entry["nis"] = pixel.nis;
+      if (dbg["pixel_nis_max"].is_null() ||
+          pixel.nis > dbg["pixel_nis_max"].get<double>()) dbg["pixel_nis_max"] = pixel.nis;
+    }
+    status_row("接受 / 拒绝", std::to_string(diag.frame_update_count) + " / " +
+      std::to_string(diag.frame_rejected_count), "本帧更新计数；拒绝含门控与投影无效");
+    status_row("关联板编号", std::to_string(diag.last_observed_id), "模型板编号 0–3；非实体身份");
+    status_row("连续未更新", std::to_string(diag.no_update_frames), "有检测但没有接受更新的连续帧数");
+    status_row("重建次数", std::to_string(diag.reinit_count), "当前目标内自动重建计数");
+    status_row("NIS 门控配置", diag.nis_gate_enabled ? "启用" : "关闭",
+      "启用后仍有预热期；曲线参考线不代表门控开启");
+    status_row("门控阈值", std::to_string(diag.nis_gate_threshold), "仅门控实际生效时用于拒绝观测");
+    status_row("滤波状态", diag.diverged ? "发散" : (diag.converged ? "收敛" : "未收敛"),
+      "内部判据，不代表真实误差大小");
     const auto sigma = [](double variance) {
       return std::sqrt(std::max(0.0, variance));
     };
@@ -1399,7 +1482,7 @@ void FoxgloveServer::publish_debug(
     dbg["ekf_no_update_frames"] = diag.no_update_frames;
     dbg["ekf_reinits"] = diag.reinit_count;
     dbg["uses_rmcs_ekf"] = 1.0;  // DGE 现在只有 4 板 rmcs 像素 EKF
-    dbg["ekf_init_source"] = target.init_source();  // v0.32: 1=Solver 位姿, 2=RobustPnp
+    dbg["ekf_init_source"] = target.init_source();  // 1=统一约束像素位姿，0=未初始化
 
     // rmcs-style validation: compare against simulator ground truth.
     // Position has a fixed odom offset; align it on first lock, then report

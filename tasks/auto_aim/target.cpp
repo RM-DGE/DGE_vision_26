@@ -28,12 +28,15 @@ auto to_armor2d(const Armor & armor) -> rmcs_ekf::Armor2d
 
 Target::Target(
   const Armor & armor, std::chrono::steady_clock::time_point t,
-  const rmcs_ekf::Config & ekf_config, const rmcs_ekf::CameraFeature & camera)
+  const rmcs_ekf::Config & ekf_config, const rmcs_ekf::CameraFeature & camera,
+  const rmcs_ekf::RecoverySettings & recovery_settings)
 : name(armor.name)
 , armor_type(armor.type)
 , priority(armor.priority)
 , t_(t)
+, recovery_(recovery_settings)
 {
+  color_=armor.color;
   if (armor.points.size() < 4) {
     tools::logger()->warn(
       "[Target] armor has {} corners, expected at least 4", armor.points.size());
@@ -42,34 +45,12 @@ Target::Target(
 
   rmcs_model_.configure(ekf_config);
 
-  // v0.32: 两条初始化路径。Solver 位姿已经过 sp_vision 的 yaw 重投影优化，
-  // 并与 DGE 的 R/t_camera2gimbal 外参一致，默认优先；RobustPnp 作兜底。
-  const auto init_from_solver = [&]() {
-    const auto orientation = rmcs_ekf::euler_to_quaternion(
-      armor.ypr_in_world[0], armor.ypr_in_world[1], armor.ypr_in_world[2]);
-    return rmcs_model_.initialize_from_pose(
-      camera, armor.xyz_in_world, orientation, armor.type == ArmorType::big);
-  };
-  const auto init_from_pnp = [&]() {
-    return rmcs_model_.initialize(camera, { to_armor2d(armor) });
-  };
-
-  bool initialized = false;
-  if (ekf_config.init_prefer_solver_pose) {
-    initialized = init_from_solver();
-    init_source_ = initialized ? 1 : 0;
-    if (!initialized && init_from_pnp()) {
-      initialized = true;
-      init_source_ = 2;
-    }
-  } else {
-    initialized = init_from_pnp();
-    init_source_ = initialized ? 2 : 0;
-    if (!initialized && init_from_solver()) {
-      initialized = true;
-      init_source_ = 1;
-    }
-  }
+  const auto observation=to_armor2d(armor);
+  const bool initialized=armor.pose_valid && rmcs_model_.initialize_from_pose(
+    camera,armor.xyz_in_world,rmcs_ekf::euler_to_quaternion(
+      armor.ypr_in_world[0],armor.ypr_in_world[1],armor.ypr_in_world[2]),
+    armor.type==ArmorType::big,&observation);
+  init_source_=initialized ? 1 : 0; // unified constrained pixel pose
 
   if (!initialized) {
     tools::logger()->warn("[Target] rmcs EKF init failed");
@@ -77,6 +58,7 @@ Target::Target(
   }
 
   isinit = true;
+  recovery_.reset(std::chrono::duration<double>(t_.time_since_epoch()).count());
 }
 
 auto Target::synthetic(double x, double vyaw, double radius, double h) -> Target
@@ -106,12 +88,15 @@ auto Target::synthetic(double x, double vyaw, double radius, double h) -> Target
 
 void Target::predict(std::chrono::steady_clock::time_point t)
 {
+  frame_valid_=false;
   const auto dt = tools::delta_time(t, t_);
   if (!std::isfinite(dt) || dt <= 0.0) {
     tools::logger()->debug("[Target] ignoring non-positive predict dt: dt={:.4f}s", dt);
     return;
   }
   rmcs_model_.predict(dt);
+  prediction_=rmcs_model_;
+  frame_valid_=true;
   t_ = t;
 }
 
@@ -126,14 +111,20 @@ auto Target::at(double dt) const -> Target
 
 void Target::update(const std::list<Armor> & armors, const rmcs_ekf::CameraFeature & camera)
 {
+  if(!frame_valid_) return;
+  frame_valid_=false;
   std::vector<rmcs_ekf::Armor2d> armors2d;
   armors2d.reserve(armors.size());
   for (const auto & armor : armors) {
-    if (armor.points.size() < 4) continue;
+    if (armor.points.size() < 4 || armor.color!=color_ || armor.name!=name || armor.type!=armor_type) continue;
     armors2d.push_back(to_armor2d(armor));
   }
 
   rmcs_model_.correct(armors2d, {}, camera);
+  // Conservatively reject same-class mixtures that cannot form one four-plate vehicle.
+  const bool identity_consistent=armors2d.size()<=2;
+  recovery_.process(rmcs_model_,prediction_,armors2d,camera,
+    std::chrono::duration<double>(t_.time_since_epoch()).count(),identity_consistent);
 }
 
 auto Target::state() const -> rmcs_ekf::State { return rmcs_model_.state(); }
@@ -154,7 +145,7 @@ auto Target::xyza_list() const -> std::vector<Eigen::Vector4d>
   return result;
 }
 
-auto Target::converge() const -> bool { return rmcs_model_.converge(); }
+auto Target::converge() const -> bool { return reliable() && rmcs_model_.converge(); }
 
 auto Target::diverged() const -> bool { return rmcs_model_.diverged(); }
 

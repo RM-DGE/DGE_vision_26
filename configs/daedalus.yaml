@@ -47,16 +47,8 @@ max_temp_lost_count: 75 #最大暂存丢失帧数（仿真检测偶发丢帧，�
 # 27 赛季全兵种 4 块小装甲板；仅 4 板目标走该 EKF。
 # 状态顺序：[x, y, z, vx, vy, vz, a, w, rf, rl, hl]
 ekf:
-  # 旧的 diagonal/半径随机游走参数；CWNA/DWNA 下只用于 rf/rl/hl。
-  # 过程噪声（对角线）
-  noise_x: 1e-4
-  noise_y: 1e-4
-  noise_z: 1e-8
-  noise_vx: 2e-1
-  noise_vy: 2e-1
-  noise_vz: 1e-8
-  noise_rotation_angle: 1e-3
-  noise_rotation_speed: 1.0
+  init_max_rms_px: 8.0  # 统一初值的四角点 RMS 上限，需用采集数据复核
+  # 半径/高差没有速度状态，直接用噪声率做 q*dt 随机游走。
   noise_radius_forward: 1e-8
   noise_radius_lateral: 1e-8
   noise_height_lateral: 1e-8
@@ -65,19 +57,15 @@ ekf:
   # 仿真调参：DGE YOLO 的角点噪声比 rmcs 实机检测更大，故比 rmcs 默认 40 放宽
   noise_observation: 100.0
 
-  # 过程噪声模型：cwna | dwna | diag_rate
+  # V0.60 单一路线：CWNA 连续白噪声加速度
   # cwna: 连续白噪声加速度，Q_pp=q*dt^3/3, Q_pv=q*dt^2/2, Q_vv=q*dt
-  # dwna: sp25 原版，Q_pp=q*dt^4/4, Q_pv=q*dt^3/2, Q_vv=q*dt^2
-  # diag_rate: 旧的 diag(noise_*)*dt
-  process_model: cwna
   # CWNA 参数：q 是加速度谱密度
   # q_accel_xy / q_accel_z: (m/s²)²·s；q_alpha: (rad/s²)²·s
   q_accel_xy: 1.0
   q_accel_z: 1e-4
   q_alpha: 10.0
-  # dwna 对照时，100 Hz 起点建议 q_accel_xy≈100, q_alpha≈900
 
-  # 状态夹紧
+  # 状态有效范围；后验越界直接拒绝，不夹紧
   radius_forward_min: 0.1
   radius_forward_max: 0.4
   radius_lateral_min: 0.1
@@ -93,8 +81,6 @@ ekf:
   yaw_part_max_deg: 90.0
 
   # PnP pitch 先验（4 板普通机器人保持 false）
-  fixed_outpost_pitch: false
-  fixed_normal_pitch: false
 
   # 初始协方差（v0.3 收紧；rmcs 原值 64/64/0.4/100 会让首帧被单板噪声拖飞）
   initial_cov_position: 0.04
@@ -109,8 +95,6 @@ ekf:
   # 关联/恢复
   anchor_max_corner_error: 40.0
   anchor_max_relative_error: 0.5
-  auto_reinit_after_no_update: 10
-  max_no_update_frames: 30
 
   # rmcs 收敛/发散判据
   converge_min_update: 10
@@ -135,11 +119,8 @@ ekf:
   nis_gate_enabled: true
   nis_gate_threshold: 13.277
   nis_gate_warmup_updates: 10
-  nis_max_consecutive_rejects: 5
-  nis_reject_cov_inflation: 0.01
 
-  # v0.32 观测侧（可 A/B 回退）
-  init_prefer_solver_pose: true   # 初始化优先用 Solver 世界系板位姿；false = 优先 RobustPnp
+  # 初始化与可视化兼容选项
   skip_tracking_pnp: false        # true: 跟踪阶段 4 板目标跳过逐板 PnP（省 CPU，Foxglove detections 方块失去位姿）
 
 #####-----aimer参数-----#####
@@ -204,3 +185,23 @@ daedalus:
   pitch_sign: 1
   imu_left: [1, 0, 0, 0]
   imu_right: [1, 0, 0, 0]
+
+#####-----V0.60 恢复管理器-----#####
+recovery:
+  trigger_s: 0.04
+  window_s: 0.12
+  sample_s: 0.015
+  expiry_s: 0.15
+  confirm_s: 0.02
+  coast_s: 0.15
+  lost_s: 0.5
+  max_rms_px: 5.0
+  improvement_ratio: 0.7
+  identity_distance_m: 0.8
+  future_position_variance: 0.04
+  covariance_inflation: 2.0
+  max_fit_ms: 20.0
+  min_frames: 3
+  max_frames: 8
+  max_seeds: 4
+  iterations: 8

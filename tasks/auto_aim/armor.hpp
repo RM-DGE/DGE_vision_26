@@ -4,6 +4,7 @@
 #include <Eigen/Dense>
 #include <opencv2/opencv.hpp>
 #include <string>
+#include <limits>
 #include <vector>
 
 namespace auto_aim
@@ -104,7 +105,10 @@ struct Armor
   Eigen::Vector3d ypr_in_world;   // 单位：rad
   Eigen::Vector3d ypd_in_world;   // 球坐标系
 
-  double yaw_raw;  // rad
+  bool pose_valid = false;
+  double pose_rms_px = std::numeric_limits<double>::quiet_NaN();
+  std::string pose_status = "not_solved";
+  double yaw_raw;  // rad; legacy alias of validated yaw in the unified solver
 
   Armor(const Lightbar & left, const Lightbar & right);
   Armor(

@@ -26,7 +26,8 @@ public:
 
   bool has_clients() const;  // 无客户端时可跳过图像编码
 
-  void publish_image(const cv::Mat & bgr, int quality = 70);            // /camera/image + /detector/result_img/compressed
+  // result_image 用于发布绘制后的窗口画面，省略时使用原图。
+  void publish_image(const cv::Mat & bgr, int quality = 70, const cv::Mat & result_image = {});
   void publish_annotations(const std::list<auto_aim::Armor> & armors);  // /camera/annotations
   // 数字分类图案拼接图（/detector/number_img，原布局第二个 ImageViewPanel）
   void publish_number_image(const std::list<auto_aim::Armor> & armors);

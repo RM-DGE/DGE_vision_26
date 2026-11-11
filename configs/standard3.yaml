@@ -42,12 +42,10 @@ max_temp_lost_count: 15 #最大暂存丢失帧数
 
 #####-----4板 rmcs 像素 EKF-----#####
 ekf:
+  init_max_rms_px: 8.0  # 统一初值的四角点 RMS 上限，需用采集数据复核
   noise_observation: 40.0
-  # 过程噪声模型：cwna | dwna | diag_rate
+  # V0.60 单一路线：CWNA 连续白噪声加速度
   # cwna: Q_pp=q*dt^3/3, Q_pv=q*dt^2/2, Q_vv=q*dt
-  # dwna: sp25 原版，Q_pp=q*dt^4/4, Q_pv=q*dt^3/2, Q_vv=q*dt^2
-  # diag_rate: 旧的 diag(noise_*)*dt
-  process_model: cwna
   # q_accel_xy / q_accel_z: (m/s²)²·s；q_alpha: (rad/s²)²·s
   q_accel_xy: 1.0
   q_accel_z: 1e-4
@@ -62,8 +60,6 @@ ekf:
   initial_cov_height: 0.001
   anchor_max_corner_error: 40.0
   anchor_max_relative_error: 0.5
-  auto_reinit_after_no_update: 10
-  max_no_update_frames: 30
   converge_max_cov_xy: 0.04
   converge_max_cov_v: 1.0
   converge_max_cov_w: 1.0
@@ -74,11 +70,8 @@ ekf:
   nis_gate_enabled: true
   nis_gate_threshold: 13.277
   nis_gate_warmup_updates: 10
-  nis_max_consecutive_rejects: 5
-  nis_reject_cov_inflation: 0.01
 
-  # v0.32 观测侧（可 A/B 回退）
-  init_prefer_solver_pose: true   # 初始化优先用 Solver 世界系板位姿；false = 优先 RobustPnp
+  # 初始化与可视化兼容选项
   skip_tracking_pnp: false        # true: 跟踪阶段 4 板目标跳过逐板 PnP（省 CPU，Foxglove detections 方块失去位姿）
 
 #####-----aimer数-----#####
@@ -179,3 +172,23 @@ model: "assets/yolo11_buff_int8.xml"
 #####-----buff_aimer参数-----#####
 fire_gap_time: 0.700   # s
 predict_time: 0.120     # s
+
+#####-----V0.60 恢复管理器-----#####
+recovery:
+  trigger_s: 0.04
+  window_s: 0.12
+  sample_s: 0.015
+  expiry_s: 0.15
+  confirm_s: 0.02
+  coast_s: 0.15
+  lost_s: 0.5
+  max_rms_px: 5.0
+  improvement_ratio: 0.7
+  identity_distance_m: 0.8
+  future_position_variance: 0.04
+  covariance_inflation: 2.0
+  max_fit_ms: 20.0
+  min_frames: 3
+  max_frames: 8
+  max_seeds: 4
+  iterations: 8

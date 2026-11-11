@@ -12,6 +12,47 @@ message(STATUS "--------------------CMAKE_BUILD_TYPE: ${CMAKE_BUILD_TYPE}-------
 find_package(OpenCV REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(yaml-cpp REQUIRED)
+# Fingerprint compiled estimator sources independently of uncommitted Git state.
+file(GLOB_RECURSE EKF_STAMP_SOURCES CONFIGURE_DEPENDS
+  "${PROJECT_SOURCE_DIR}/tasks/auto_aim/*.cpp" "${PROJECT_SOURCE_DIR}/tasks/auto_aim/*.hpp"
+  "${PROJECT_SOURCE_DIR}/tools/ekf_*.cpp" "${PROJECT_SOURCE_DIR}/tools/ekf_*.hpp")
+set(EKF_STAMP_INPUT "")
+foreach(EKF_FILE IN LISTS EKF_STAMP_SOURCES)
+  file(SHA256 "${EKF_FILE}" EKF_FILE_HASH)
+  string(APPEND EKF_STAMP_INPUT "${EKF_FILE_HASH}")
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${EKF_FILE}")
+endforeach()
+string(SHA256 EKF_SOURCE_HASH "${EKF_STAMP_INPUT}")
+add_compile_definitions(HHH_EKF_SOURCE_HASH="${EKF_SOURCE_HASH}")
+option(EKF_ONLY "Build v0.60 algorithm checks and replay without hardware dependencies" OFF)
+if(EKF_ONLY)
+  include(CTest)
+  find_package(fmt REQUIRED)
+  find_package(spdlog REQUIRED)
+  find_package(nlohmann_json REQUIRED)
+  add_library(ekf_core STATIC
+    tasks/auto_aim/rmcs_ekf/rmcs_ekf.cpp
+    tasks/auto_aim/rmcs_ekf/projection.cpp
+    tasks/auto_aim/rmcs_ekf/association.cpp
+    tasks/auto_aim/rmcs_ekf/recovery.cpp
+    tools/logger.cpp
+    tools/math_tools.cpp
+    tasks/auto_aim/armor.cpp
+    tasks/auto_aim/solver.cpp
+    tasks/auto_aim/target.cpp
+    tasks/auto_aim/tracker.cpp)
+  target_include_directories(ekf_core PUBLIC ${PROJECT_SOURCE_DIR} ${OpenCV_INCLUDE_DIRS})
+  target_link_libraries(ekf_core PUBLIC Eigen3::Eigen yaml-cpp ${OpenCV_LIBS} fmt::fmt spdlog::spdlog nlohmann_json::nlohmann_json)
+  add_executable(ekf_replay tools/ekf_replay.cpp)
+  target_link_libraries(ekf_replay PRIVATE ekf_core)
+  if(BUILD_TESTING AND EXISTS "${PROJECT_SOURCE_DIR}/tests/v060_algorithm_test.cpp")
+    add_executable(v060_algorithm_test tests/v060_algorithm_test.cpp)
+    target_link_libraries(v060_algorithm_test PRIVATE ekf_core)
+    add_test(NAME v060_algorithm COMMAND v060_algorithm_test)
+  endif()
+  return()
+endif()
+
 include(CTest)
 option(TIME_SYNC_ONLY "Build offline time calibration and tests without hardware/detector dependencies" OFF)
 # These targets have no detector, camera SDK, serial, or ROS dependency.

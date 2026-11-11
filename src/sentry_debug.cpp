@@ -113,11 +113,12 @@ int main(int argc, char * argv[])
           armor = a;
         }
       }  //always left
-      solver.solve(armor);
+      if (solver.solve(armor)) {
       data["armor_x"] = armor.xyz_in_world[0];
       data["armor_y"] = armor.xyz_in_world[1];
       data["armor_yaw"] = armor.ypr_in_world[0] * 57.3;
       data["armor_yaw_raw"] = armor.yaw_raw * 57.3;
+      }
     }
 
     if (!targets.empty()) {

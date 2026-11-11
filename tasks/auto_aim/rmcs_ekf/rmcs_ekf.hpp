@@ -6,7 +6,7 @@
 //   - State order: [x, y, z, vx, vy, vz, a, w, rf, rl, hl]
 //   - Observation is per-lightbar pixel coordinates (4D per lightbar),
 //     using the full camera projection model.
-//   - Initialization uses rmcs' robust IPPE + reprojection-yaw search.
+//   - Initialization uses one constrained IPPE pixel-pose solver.
 //   - Convergence / divergence checks use posterior covariance and state bounds.
 //
 // The code is intentionally self-contained and C++17-only so it can live in
@@ -14,10 +14,13 @@
 
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <deque>
 #include <optional>
+#include <limits>
 #include <vector>
+#include <string>
 
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
@@ -110,8 +113,9 @@ struct State
 
 inline auto normalize_angle(double angle) -> double
 {
-  while (angle > kPi) angle -= 2.0 * kPi;
-  while (angle <= -kPi) angle += 2.0 * kPi;
+  if (!std::isfinite(angle)) return std::numeric_limits<double>::quiet_NaN();
+  angle = std::remainder(angle, 2.0 * kPi);
+  if (angle <= -kPi) angle += 2.0 * kPi;
   return angle;
 }
 
@@ -235,7 +239,7 @@ struct RobotSolution
 };
 
 // ---------------------------------------------------------------------------
-// Robust PnP (port of rmcs RobustPnpSolution, 4-armor only)
+// Shared constrained IPPE pose solver (4-armor model only)
 // ---------------------------------------------------------------------------
 
 struct RobustPnp
@@ -243,45 +247,19 @@ struct RobustPnp
   CameraFeature camera;
   Armor2d armor;
 
-  bool fixed_outpost_pitch = false;
-  bool fixed_normal_pitch = false;
-
-  auto solve(Armor3d & output) const -> bool;
+  double noise_observation = 40.0;
+  double max_rms_px = 8.0;
+  auto solve(Armor3d & output, std::string * reason=nullptr, double * rms=nullptr) const -> bool;
 };
 
 // ---------------------------------------------------------------------------
 // EKF configuration
 // ---------------------------------------------------------------------------
 
-// Process-noise model selection.
-enum class ProcessModel
-{
-  // Continuous white-noise acceleration, exactly discretized:
-  //   Q_pp = q*dt^3/3, Q_pv = q*dt^2/2, Q_vv = q*dt
-  CWNA,
-  // sp25's original piecewise white-noise acceleration:
-  //   Q_pp = q*dt^4/4, Q_pv = q*dt^3/2, Q_vv = q*dt^2
-  DWNA,
-  // Legacy rmcs diagonal: Q = diag(noise_*) * dt
-  DIAG_RATE,
-};
-
 struct Config
 {
-  // Legacy diagonal process noise (DIAG_RATE only). Radii/height also use
-  // their noise_* values as a q*dt random walk in CWNA/DWNA.
-  // Process noise (diagonal Q)
-  double noise_x = 1e-4;
-  double noise_y = 1e-4;
-  double noise_z = 1e-8;
-
-  double noise_vx = 2e-1;
-  double noise_vy = 2e-1;
-  double noise_vz = 1e-8;
-
-  double noise_rotation_angle = 1e-3;
-  double noise_rotation_speed = 1e0;
-
+  // Process noise (diagonal Q, q*dt random walk; radii/height have no
+  // velocity state, so they are driven directly by these rates).
   double noise_radius_forward = 1e-8;
   double noise_radius_lateral = 1e-8;
   double noise_height_lateral = 1e-8;
@@ -289,18 +267,14 @@ struct Config
   // Observation noise (pixel^2)
   double noise_observation = 40.0;
 
-  // Process-noise model. CWNA is the default; DWNA keeps sp25's original
-  // dt powers for A/B; DIAG_RATE reproduces the old diagonal noise_* * dt.
-  ProcessModel process_model = ProcessModel::CWNA;
-
-  // CWNA/DWNA acceleration noise. For CWNA these are continuous acceleration
-  // PSD: q_accel_xy / q_accel_z in (m/s^2)^2*s, q_alpha in (rad/s^2)^2*s.
-  // For DWNA they are interpreted as sp25's discrete acceleration variance.
+  // Continuous white-noise acceleration (CWNA) intensity, exactly discretized:
+  //   Q_pp = q*dt^3/3, Q_pv = q*dt^2/2, Q_vv = q*dt
+  // q_accel_xy / q_accel_z in (m/s^2)^2*s, q_alpha in (rad/s^2)^2*s.
   double q_accel_xy = 1.0;
   double q_accel_z = 1e-4;
   double q_alpha = 10.0;
 
-  // State clamps
+  // State validity bounds; a violating posterior is rejected without clipping.
   double radius_forward_min = 0.1;
   double radius_forward_max = 0.4;
   double radius_lateral_min = 0.1;
@@ -309,15 +283,14 @@ struct Config
   double height_lateral_max = +0.2;
   double velocity_min = -10.0;
   double velocity_max = +10.0;
-  double rotation_speed_limit = 8.0 * kPi;  // |w| clamp, rad/s; <= 0 disables
+  double rotation_speed_limit = 8.0 * kPi;  // |w| bound, rad/s; <= 0 disables
 
   // Visibility model (full plate < yaw_full, partial < yaw_part)
   double yaw_full_max = 70.0 * kPi / 180.0;
   double yaw_part_max = 90.0 * kPi / 180.0;
 
-  // PnP pitch prior
-  bool fixed_outpost_pitch = false;
-  bool fixed_normal_pitch = false;
+  // Shared pose quality
+  double init_max_rms_px = 8.0;  // startup pixel RMS ceiling; validate against recorded data
 
   // Convergence
   int converge_min_update = 10;
@@ -347,40 +320,30 @@ struct Config
   double initial_cov_radius = 1e-3;         // rf, rl (m^2)
   double initial_cov_height = 1e-3;         // hl (m^2)
 
+  double association_miss_penalty = 30.0;
+  double association_clutter_penalty = 30.0;
+  double association_ambiguity_gap = 2.0;
+  double nis_gate_warmup_s = 0.1;
+
   // Association / recovery
   // Gross-error gate on the anchor plate: mean corner error in pixels, and a
   // scale-aware floor relative to the predicted plate width. <= 0 disables.
   double anchor_max_corner_error = 40.0;
   double anchor_max_relative_error = 0.5;
 
-  // If detections keep arriving but no lightbar is accepted for this many
-  // frames, re-initialize from the current detections (0 disables).
-  int auto_reinit_after_no_update = 10;
-
-  // Hard divergence: too many frames without an accepted update (0 disables).
-  int max_no_update_frames = 30;
-
   // Consistency monitoring (NIS, 4-D pixel innovation)
   // chi-square(4) 95% quantile = 9.488; 99% = 13.277.
   double nis_threshold = 9.488;
   int nis_window = 100;
 
-  // Innovation gating. Disabled by default to preserve rmcs behavior.
+  // Innovation gating is enabled by default.
   // When enabled, an update whose NIS exceeds nis_gate_threshold is rejected
   // instead of being allowed to pull the state. A threshold <= 0 falls back
   // to nis_threshold.
-  bool nis_gate_enabled = false;
-  double nis_gate_threshold = 0.0;
+  bool nis_gate_enabled = true;
+  double nis_gate_threshold = 13.277;
   int nis_gate_warmup_updates = 10;
-  int nis_max_consecutive_rejects = 5;
-  // Added to the position/velocity/angle diagonal after too many consecutive
-  // rejections, so the filter can re-open its gate instead of staying stuck.
-  double nis_reject_cov_inflation = 0.01;
 
-  // ---- v0.32 观测侧开关（全部可在 YAML 关闭做 A/B）----
-  // 初始化优先使用 sp_vision Solver 已解算的世界系板位姿（与 DGE 外参一致）；
-  // false = 优先 RobustPnp（v0.3 行为）。
-  bool init_prefer_solver_pose = true;
   // 跟踪阶段 4 板目标跳过逐板 Solver::solve（像素 EKF 不需要）。会让 Foxglove
   // detections 方块失去世界系位姿，默认 false。
   bool skip_tracking_pnp = false;
@@ -395,23 +358,51 @@ auto load_config(const YAML::Node & node) -> Config;
 /// 滤波器健康状态，供 Foxglove / PlotJuggler / 控制台使用。
 /// variance 的顺序与 StateVector 一致：
 /// [x, y, z, vx, vy, vz, a, w, rf, rl, hl]
+// Fixed model endpoint-pair IDs; a slot is valid only for this correct() call.
+struct PixelInnovation
+{
+  bool valid = false;
+  std::array<double, 4> residual{};  // upper u/v, lower u/v, before this sequential update
+  double nis = 0.0;
+};
+
+enum class RejectReason { InvalidObservation, DuplicateObservation, CandidateLimit,
+  UnsupportedCamera, NoAssociation, AmbiguousAssociation, Projection, InnovationSystem,
+  NisGate, StateBounds, Covariance, UnsupportedLightbar };
+struct UpdateReport {
+  std::array<int,4> matched_observation_by_plate{{-1,-1,-1,-1}};
+  std::array<bool,4> matched_swapped_by_plate{};
+  double association_ms=0, update_ms=0; // Performance telemetry only, never filter time.
+  std::size_t detection_count=0, legal_armor_count=0, associated_armor_count=0;
+  std::size_t nis_count=0, accepted_lightbar_count=0, rejected_lightbar_count=0;
+  std::size_t accepted_frame_count=0, trimmed_count=0, duplicate_count=0;
+  bool nis_valid=false, ambiguous=false, estimated_quality=false;
+  double association_cost=0, association_second_cost=0;
+  double prediction_rms=std::numeric_limits<double>::quiet_NaN();
+  std::vector<RejectReason> reject_reasons;
+};
+
 struct Diagnostics
 {
+  std::array<PixelInnovation, 8> pixel_innovations{};
   State state;
+  UpdateReport report;
+  bool nis_valid = false;
+  std::size_t nis_count = 0;
   Eigen::Matrix<double, 11, 1> variance{ Eigen::Matrix<double, 11, 1>::Zero() };
   Eigen::Matrix2d covariance_xy{ Eigen::Matrix2d::Zero() };
 
-  double nis = 0.0;                // 当前帧单条最大 NIS（4 维；与 9.488 同口径）
+  double nis = 0.0;                // 当前帧单条最大 NIS；最大值不服从单条卡方分布
   double nis_threshold = 9.488;    // chi-square(4) 95%
-  bool nis_gate_enabled = false;   // 是否启用 NIS 门控
-  double nis_gate_threshold = 0.0; // 门控阈值；<=0 时使用 nis_threshold
+  bool nis_gate_enabled = true;   // 是否启用 NIS 门控
+  double nis_gate_threshold = 13.277; // 门控阈值；<=0 时使用 nis_threshold
   double nis_fail_rate = 0.0;      // 最近 nis_window 次更新的失败比例
   double nis_mean = 0.0;           // 当前帧 NIS 均值（仅参考，阈值判读用 nis）
   double anchor_error = 0.0;       // 当前帧 anchor 平均角点误差（像素）
   double residual_norm = 0.0;      // 当前帧新息向量平均范数（像素）
   double dt = 0.0;                 // 最近一次 predict 的 dt
 
-  std::size_t update_count = 0;    // 累计 correct 帧数
+  std::size_t update_count = 0;    // 累计至少接受一根灯条的帧数
   std::size_t frame_update_count = 0;  // 当前帧被接受的灯条数
   std::size_t frame_rejected_count = 0;  // 当前帧因 NIS/投影无效被拒绝的灯条数
   std::size_t nis_rejected_count = 0;    // 累计 NIS 拒绝次数
@@ -454,10 +445,10 @@ public:
   // Test/utility: initialize directly from a synthetic state without a camera.
   auto initialize_synthetic(const State & state) -> void;
 
-  // Fallback: initialize from an already-solved armor pose (sp_vision Solver).
+  // Initialize from the validated shared pose; optionally verify its measured corners.
   // Useful when the detector's PnP is too noisy for the robust-PnP branch.
   auto initialize_from_pose(const CameraFeature & camera, const Eigen::Vector3d & translation,
-    const Eigen::Quaterniond & orientation, bool large) -> bool;
+    const Eigen::Quaterniond & orientation, bool large, const Armor2d * observation=nullptr) -> bool;
 
   auto predict(double dt) -> void;
 
@@ -469,7 +460,18 @@ public:
   auto extrapolated(double dt) const -> RobotModel;
 
   auto correct(const std::vector<Armor2d> & armors, const std::vector<Lightbar2d> & lightbars,
-    const CameraFeature & camera) -> void;
+    const CameraFeature & camera) -> UpdateReport;
+
+  const Config & config() const { return config_; }
+  bool is_large() const { return large_; }
+  double elapsed() const { return elapsed_s_; }
+  const StateVector & state_vector() const { return state_; }
+  const UpdateReport & last_report() const { return report_; }
+  bool import_snapshot(const StateVector & x, const Covariance & P, bool large, double elapsed=0);
+  bool valid_state(const StateVector & x) const;
+  static Covariance transition(double dt);
+  ProcessNoise process_covariance(double dt) const;
+  Covariance future_covariance(double dt) const;
 
   auto state() const -> State;
   auto full() const -> std::array<Armor3d, 4>;
@@ -512,7 +514,7 @@ private:
   };
 
   auto reset_covariance() -> void;
-  auto set_noise() -> void;
+  auto set_observation_noise() -> void;
   auto extrapolate_state(const StateVector & state, double dt) const -> StateVector;
   auto propagate_covariance(double dt) -> void;
   auto refresh_observable() const -> void;
@@ -529,7 +531,6 @@ private:
   Config config_;
   StateVector state_{ StateVector::Zero() };
   Covariance covariance_{ Covariance::Identity() };
-  ProcessNoise process_noise_{ ProcessNoise::Zero() };
   ObservationNoise observation_noise_{ ObservationNoise::Zero() };
 
   mutable Observable observable_;
@@ -539,7 +540,10 @@ private:
   bool jumped_ = false;
   int last_observed_id_ = -1;
   std::size_t update_count_ = 0;
-  std::chrono::steady_clock::time_point init_timestamp_{ std::chrono::steady_clock::now() };
+  double elapsed_s_ = 0.0;
+  UpdateReport report_;
+
+  std::array<PixelInnovation, 8> pixel_innovations_{};
 
   // Consistency diagnostics
   double last_dt_ = 0.0;

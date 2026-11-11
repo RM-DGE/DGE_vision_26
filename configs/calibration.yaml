@@ -9,7 +9,7 @@ R_gimbal2imubody: [1, 0, 0, 0, 1, 0, 0, 0, 1]
 #####-----相机-----#####
 camera_name: "hikrobot"
 exposure_ms: 3.0
-gain: 10.0
+gain: 16.0
 vid_pid: "2bdf:0001"
 
 #####-----CBoard 串口-----#####

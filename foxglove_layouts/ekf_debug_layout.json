@@ -1,0 +1,568 @@
+{
+  "configById": {
+    "ImageViewPanel!dge_img": {
+      "cameraTopic": "/detector/result_img/compressed",
+      "enabledMarkerTopics": [],
+      "mode": "fit",
+      "pan": {
+        "x": 0,
+        "y": 0
+      },
+      "rotation": 0,
+      "synchronize": false,
+      "transformMarkers": false,
+      "zoom": 1,
+      "foxglovePanelTitle": "窗口"
+    },
+    "3D!dge_3d": {
+      "cameraState": {
+        "distance": 1.6,
+        "perspective": true,
+        "phi": 90,
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOffset": [
+          0,
+          0,
+          0
+        ],
+        "targetOrientation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "thetaOffset": 0,
+        "fovy": 55,
+        "near": 0.1,
+        "far": 5000
+      },
+      "followMode": "follow-pose",
+      "followTf": "camera_optical_frame",
+      "fixedFrame": "odom",
+      "scene": {
+        "backgroundColor": "#101118",
+        "transforms": {
+          "showLabel": false
+        },
+        "enableStats": false
+      },
+      "transforms": {
+        "frame:odom": {
+          "visible": true
+        },
+        "frame:gimbal_link": {
+          "visible": true
+        },
+        "frame:camera_optical_frame": {
+          "visible": true
+        }
+      },
+      "topics": {
+        "/dge/scene": {
+          "visible": true
+        },
+        "/dge/prediction": {
+          "visible": true
+        },
+        "/detector/marker": {
+          "visible": true,
+          "namespaces": {
+            "classification": {
+              "visible": false
+            },
+            "armors": {
+              "visible": true
+            }
+          },
+          "showOutlines": false
+        },
+        "/tracker/marker": {
+          "visible": true,
+          "showOutlines": false
+        },
+        "/camera_info": {
+          "visible": false
+        },
+        "/aiming_point": {
+          "visible": true
+        }
+      },
+      "layers": {
+        "dge-grid-0000-0000": {
+          "visible": true,
+          "frameLocked": true,
+          "label": "Grid",
+          "instanceId": "dge-grid-0000-0000",
+          "layerId": "foxglove.Grid",
+          "frameId": "odom",
+          "size": 10,
+          "divisions": 10,
+          "lineWidth": 1,
+          "color": "#248eff",
+          "position": [
+            0,
+            0,
+            -0.4
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "order": 1
+        }
+      },
+      "publish": {
+        "type": "point",
+        "poseTopic": "/move_base_simple/goal",
+        "pointTopic": "/clicked_point",
+        "poseEstimateTopic": "/initialpose",
+        "poseEstimateXDeviation": 0.5,
+        "poseEstimateYDeviation": 0.5,
+        "poseEstimateThetaDeviation": 0.26179939
+      },
+      "imageMode": {},
+      "title": "3D 场景（检测 / 跟踪 / 预测 / 瞄准）",
+      "foxglovePanelTitle": "3D 跟踪与预测"
+    },
+    "Plot!ekf_debug_1": {
+      "foxglovePanelTitle": "水平像素残差（默认编号0，可勾选其他编号）",
+      "paths": [
+        {
+          "value": "/dge/debug.pixel_residuals[0].upper_u",
+          "label": "编号0 上端点",
+          "color": "#22d3ee",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.pixel_residuals[0].lower_u",
+          "label": "编号0 下端点",
+          "color": "#22d3ee",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.pixel_residuals[1].upper_u",
+          "label": "编号1 上端点",
+          "color": "#fb923c",
+          "enabled": false,
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.pixel_residuals[1].lower_u",
+          "label": "编号1 下端点",
+          "color": "#fb923c",
+          "enabled": false,
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.pixel_residuals[2].upper_u",
+          "label": "编号2 上端点",
+          "color": "#a78bfa",
+          "enabled": false,
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.pixel_residuals[2].lower_u",
+          "label": "编号2 下端点",
+          "color": "#a78bfa",
+          "enabled": false,
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.pixel_residuals[3].upper_u",
+          "label": "编号3 上端点",
+          "color": "#34d399",
+          "enabled": false,
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.pixel_residuals[3].lower_u",
+          "label": "编号3 下端点",
+          "color": "#34d399",
+          "enabled": false,
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.pixel_residuals[4].upper_u",
+          "label": "编号4 上端点",
+          "color": "#f472b6",
+          "enabled": false,
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.pixel_residuals[4].lower_u",
+          "label": "编号4 下端点",
+          "color": "#f472b6",
+          "enabled": false,
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.pixel_residuals[5].upper_u",
+          "label": "编号5 上端点",
+          "color": "#facc15",
+          "enabled": false,
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.pixel_residuals[5].lower_u",
+          "label": "编号5 下端点",
+          "color": "#facc15",
+          "enabled": false,
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.pixel_residuals[6].upper_u",
+          "label": "编号6 上端点",
+          "color": "#60a5fa",
+          "enabled": false,
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.pixel_residuals[6].lower_u",
+          "label": "编号6 下端点",
+          "color": "#60a5fa",
+          "enabled": false,
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.pixel_residuals[7].upper_u",
+          "label": "编号7 上端点",
+          "color": "#f87171",
+          "enabled": false,
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.pixel_residuals[7].lower_u",
+          "label": "编号7 下端点",
+          "color": "#f87171",
+          "enabled": false,
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        }
+      ],
+      "showXAxisLabels": true,
+      "showYAxisLabels": true,
+      "showLegend": true,
+      "legendDisplay": "top",
+      "showPlotValuesInLegend": true,
+      "isSynced": true,
+      "xAxisVal": "timestamp",
+      "followingViewWidth": 10,
+      "yAxisLabel": "px"
+    },
+    "Plot!ekf_debug_2": {
+      "foxglovePanelTitle": "垂直像素残差（默认编号0，可勾选其他编号）",
+      "paths": [
+        {
+          "value": "/dge/debug.pixel_residuals[0].upper_v",
+          "label": "编号0 上端点",
+          "color": "#22d3ee",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.pixel_residuals[0].lower_v",
+          "label": "编号0 下端点",
+          "color": "#22d3ee",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.pixel_residuals[1].upper_v",
+          "label": "编号1 上端点",
+          "color": "#fb923c",
+          "enabled": false,
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.pixel_residuals[1].lower_v",
+          "label": "编号1 下端点",
+          "color": "#fb923c",
+          "enabled": false,
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.pixel_residuals[2].upper_v",
+          "label": "编号2 上端点",
+          "color": "#a78bfa",
+          "enabled": false,
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.pixel_residuals[2].lower_v",
+          "label": "编号2 下端点",
+          "color": "#a78bfa",
+          "enabled": false,
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.pixel_residuals[3].upper_v",
+          "label": "编号3 上端点",
+          "color": "#34d399",
+          "enabled": false,
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.pixel_residuals[3].lower_v",
+          "label": "编号3 下端点",
+          "color": "#34d399",
+          "enabled": false,
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.pixel_residuals[4].upper_v",
+          "label": "编号4 上端点",
+          "color": "#f472b6",
+          "enabled": false,
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.pixel_residuals[4].lower_v",
+          "label": "编号4 下端点",
+          "color": "#f472b6",
+          "enabled": false,
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.pixel_residuals[5].upper_v",
+          "label": "编号5 上端点",
+          "color": "#facc15",
+          "enabled": false,
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.pixel_residuals[5].lower_v",
+          "label": "编号5 下端点",
+          "color": "#facc15",
+          "enabled": false,
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.pixel_residuals[6].upper_v",
+          "label": "编号6 上端点",
+          "color": "#60a5fa",
+          "enabled": false,
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.pixel_residuals[6].lower_v",
+          "label": "编号6 下端点",
+          "color": "#60a5fa",
+          "enabled": false,
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.pixel_residuals[7].upper_v",
+          "label": "编号7 上端点",
+          "color": "#f87171",
+          "enabled": false,
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.pixel_residuals[7].lower_v",
+          "label": "编号7 下端点",
+          "color": "#f87171",
+          "enabled": false,
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        }
+      ],
+      "showXAxisLabels": true,
+      "showYAxisLabels": true,
+      "showLegend": true,
+      "legendDisplay": "top",
+      "showPlotValuesInLegend": true,
+      "isSynced": true,
+      "xAxisVal": "timestamp",
+      "followingViewWidth": 10,
+      "yAxisLabel": "px"
+    },
+    "Plot!ekf_debug_3": {
+      "foxglovePanelTitle": "更新前 NIS",
+      "paths": [
+        {
+          "value": "/dge/debug.pixel_nis_max",
+          "label": "本帧有效编号最大 NIS",
+          "color": "#22d3ee",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.nis_threshold",
+          "label": "单条四维统计参考阈值",
+          "color": "#fb923c",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        }
+      ],
+      "showXAxisLabels": true,
+      "showYAxisLabels": true,
+      "showLegend": true,
+      "legendDisplay": "top",
+      "showPlotValuesInLegend": true,
+      "isSynced": true,
+      "xAxisVal": "timestamp",
+      "followingViewWidth": 10,
+      "yAxisLabel": "无量纲"
+    },
+    "Plot!ekf_debug_4": {
+      "foxglovePanelTitle": "车体几何参数",
+      "paths": [
+        {
+          "value": "/dge/debug.state[8]",
+          "label": "半径 1",
+          "enabled": true,
+          "color": "#22d3ee",
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.state[9]",
+          "label": "半径 2",
+          "enabled": true,
+          "color": "#fb923c",
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.state[10]",
+          "label": "高度差",
+          "enabled": true,
+          "color": "#a78bfa",
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        }
+      ],
+      "showXAxisLabels": true,
+      "showYAxisLabels": true,
+      "showLegend": true,
+      "legendDisplay": "top",
+      "showPlotValuesInLegend": true,
+      "isSynced": true,
+      "xAxisVal": "timestamp",
+      "followingViewWidth": 10,
+      "yAxisLabel": "m"
+    },
+    "Plot!ekf_debug_5": {
+      "foxglovePanelTitle": "位置不确定性（1σ）",
+      "paths": [
+        {
+          "value": "/dge/debug.sigma_x",
+          "label": "X 位置标准差",
+          "color": "#22d3ee",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.sigma_y",
+          "label": "Y 位置标准差",
+          "color": "#fb923c",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.sigma_z",
+          "label": "Z 位置标准差",
+          "color": "#a78bfa",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        }
+      ],
+      "showXAxisLabels": true,
+      "showYAxisLabels": true,
+      "showLegend": true,
+      "legendDisplay": "top",
+      "showPlotValuesInLegend": true,
+      "isSynced": true,
+      "xAxisVal": "timestamp",
+      "followingViewWidth": 10,
+      "yAxisLabel": "m"
+    },
+    "Table!ekf_status": {
+      "foxglovePanelTitle": "EKF 关键状态与说明",
+      "topicPath": "/dge/debug.ekf_status"
+    }
+  },
+  "globalVariables": {},
+  "userNodes": {},
+  "playbackConfig": {
+    "speed": 1
+  },
+  "layout": {
+    "direction": "row",
+    "first": {
+      "direction": "column",
+      "first": {
+        "direction": "column",
+        "first": "ImageViewPanel!dge_img",
+        "second": "3D!dge_3d",
+        "splitPercentage": 45
+      },
+      "second": "Table!ekf_status",
+      "splitPercentage": 70
+    },
+    "second": {
+      "direction": "column",
+      "first": {
+        "direction": "row",
+        "first": "Plot!ekf_debug_1",
+        "second": "Plot!ekf_debug_2",
+        "splitPercentage": 50
+      },
+      "second": {
+        "direction": "column",
+        "first": {
+          "direction": "row",
+          "first": "Plot!ekf_debug_3",
+          "second": "Plot!ekf_debug_4",
+          "splitPercentage": 50
+        },
+        "second": "Plot!ekf_debug_5",
+        "splitPercentage": 50
+      },
+      "splitPercentage": 33.3333
+    },
+    "splitPercentage": 38
+  }
+}

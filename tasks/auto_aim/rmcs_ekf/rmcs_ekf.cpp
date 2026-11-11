@@ -1,4 +1,7 @@
 #include "rmcs_ekf.hpp"
+#include "projection.hpp"
+#include "association.hpp"
+#include <stdexcept>
 
 #include <algorithm>
 #include <cmath>
@@ -26,13 +29,6 @@ auto read_or(const YAML::Node & node, const char * key, T fallback) -> T
   return fallback;
 }
 
-auto squared_distance(const Eigen::Vector2d & a, const Eigen::Vector2d & b) -> double
-{
-  const auto dx = a.x() - b.x();
-  const auto dy = a.y() - b.y();
-  return dx * dx + dy * dy;
-}
-
 auto armor_shape_points(bool large) -> std::array<cv::Point3f, 4>
 {
   const auto width = large ? kLargeArmorWidth : kSmallArmorWidth;
@@ -44,21 +40,6 @@ auto armor_shape_points(bool large) -> std::array<cv::Point3f, 4>
     cv::Point3f{ +half_w, +half_h, 0.0F }, // br
     cv::Point3f{ +half_w, -half_h, 0.0F }, // tr
   } };
-}
-
-auto project_camera_point(const Eigen::Vector3d & point_camera_opencv,
-  const cv::Mat & intrinsic, const cv::Mat & distortion) -> std::optional<Eigen::Vector2d>
-{
-  const std::vector<cv::Point3f> object_points{
-    cv::Point3f{ static_cast<float>(point_camera_opencv.x()),
-      static_cast<float>(point_camera_opencv.y()),
-      static_cast<float>(point_camera_opencv.z()) },
-  };
-  std::vector<cv::Point2f> image_points;
-  cv::projectPoints(object_points, cv::Vec3d{ 0, 0, 0 }, cv::Vec3d{ 0, 0, 0 }, intrinsic,
-    distortion, image_points);
-  if (image_points.empty()) return std::nullopt;
-  return Eigen::Vector2d{ image_points[0].x, image_points[0].y };
 }
 
 struct ArmorPose
@@ -162,147 +143,105 @@ auto RobotSolution::solve_lightbars() const -> std::array<Lightbar3d, 8>
 // RobustPnP
 // ---------------------------------------------------------------------------
 
-auto RobustPnp::solve(Armor3d & output) const -> bool
+auto RobustPnp::solve(Armor3d & output, std::string * reason, double * rms) const -> bool
 {
-  const auto intrinsic = camera.intrinsic();
-  const auto distortion = camera.distortion();
-
-  const auto shape = armor_shape_points(armor.large);
-  const std::vector<cv::Point3f> object_points{ shape.begin(), shape.end() };
-  const std::vector<cv::Point2f> image_points{ armor.tl, armor.bl, armor.br, armor.tr };
-
-  std::vector<cv::Vec3d> rotation_vectors;
-  std::vector<cv::Vec3d> translation_vectors;
-  std::vector<double> errors;
-
-  const auto success = cv::solvePnPGeneric(object_points, image_points, intrinsic, distortion,
-    rotation_vectors, translation_vectors, false, cv::SOLVEPNP_IPPE, cv::noArray(),
-    cv::noArray(), errors);
-
-  if (!success || rotation_vectors.empty() || rotation_vectors.size() != translation_vectors.size())
+  const auto fail = [&](const char * why) {
+    if (reason) *reason = why;
+    if (rms) *rms = std::numeric_limits<double>::quiet_NaN();
     return false;
-
-  const auto q_odom_camera = camera.orientation;
-  const auto t_odom_camera = camera.translation;
-
-  std::optional<Armor3d> best_armor;
-  auto best_error = std::numeric_limits<double>::max();
-
-  for (std::size_t index = 0; index < rotation_vectors.size(); ++index) {
-    if (translation_vectors[index][2] <= 0.0) continue;
-
-    cv::Mat rotation_cv;
-    cv::Rodrigues(rotation_vectors[index], rotation_cv);
-
-    Eigen::Matrix3d rotation_opencv{};
-    cv::cv2eigen(rotation_cv, rotation_opencv);
-
-    Eigen::Vector3d translation_opencv{};
-    cv::cv2eigen(translation_vectors[index], translation_opencv);
-
-    const auto q_camera_armor =
-      Eigen::Quaterniond{ opencv2ros_rotation(rotation_opencv) }.normalized();
-    const auto t_camera_armor = opencv2ros_position(translation_opencv);
-
-    const auto q_odom_armor = Eigen::Quaterniond{ q_odom_camera * q_camera_armor }.normalized();
-    const auto t_odom_armor = Eigen::Vector3d{ q_odom_camera * t_camera_armor + t_odom_camera };
-
-    // Reject armor plates facing away from camera.
-    const auto back_direction = q_camera_armor * Eigen::Vector3d::UnitX();
-    const auto camera_to_armor = t_camera_armor.normalized();
-    if (back_direction.dot(camera_to_armor) <= 0.0) continue;
-
-    // Reject implausible pitch.
-    const auto expected_pitch = kPredictedOtherArmorPitch;
-    const auto pitch = eulers(q_odom_armor, 2, 1, 0)[1];
-    if (std::abs(pitch - expected_pitch) > 40.0 * kPi / 180.0) continue;
-
-    const auto error = index < errors.size() ? errors[index] : 0.0;
-    if (error >= best_error) continue;
-
-    best_error = error;
-    best_armor = Armor3d{ 0, t_odom_armor, q_odom_armor };
-  }
-
-  if (!best_armor) return false;
-
-  // Reprojection yaw search, matching rmcs RobustPnpSolution.
-  constexpr auto kYawOptimizeRangeDeg = 60.0;
-  constexpr auto kYawOptimizeStepDeg = 1.0;
-
-  const auto ypr = eulers(best_armor->orientation, 2, 1, 0);
-  const auto origin_yaw = ypr[0];
-  auto origin_pitch = ypr[1];
-
-  if (fixed_normal_pitch) origin_pitch = kPredictedOtherArmorPitch;
-  if (fixed_outpost_pitch) origin_pitch = kPredictedOutpostArmorPitch;
-
-  const auto t_odom_armor = best_armor->translation;
-  const auto q_camera_odom = q_odom_camera.conjugate();
-
-  const auto evaluate = [&](double yaw, double & error) -> bool {
-    const auto q_odom_armor = euler_to_quaternion(yaw, origin_pitch, 0.0).normalized();
-    const auto q_camera_armor = Eigen::Quaterniond{ q_camera_odom * q_odom_armor }.normalized();
-    const auto t_camera_armor = Eigen::Vector3d{ q_camera_odom * (t_odom_armor - t_odom_camera) };
-
-    const Eigen::Matrix3d rotation_opencv = ros2opencv_rotation(q_camera_armor.toRotationMatrix());
-    const auto translation_opencv = ros2opencv_position(t_camera_armor);
-
-    error = 0.0;
-    for (int point_index = 0; point_index < 4; ++point_index) {
-      const auto object = shape[point_index];
-      // v0.32: 必须求值成具体向量。`const auto` 会得到 Eigen 表达式模板，
-      // 引用已析构的临时 Vector3d（未定义行为）。实测 -O2 下每个候选 yaw 的误差都
-      // 相同，搜索总停在窗口左边界：初始化 yaw 恒偏 -30°、中心偏 10.35 cm。
-      const Eigen::Vector3d object_point{ object.x, object.y, object.z };
-      const Eigen::Vector3d point = rotation_opencv * object_point + translation_opencv;
-
-      const auto projected = project_camera_point(point, intrinsic, distortion);
-      if (!projected) return false;
-
-      const auto detected = Eigen::Vector2d{ image_points[point_index].x,
-        image_points[point_index].y };
-      error += (projected->head<2>() - detected).norm();
-    }
-    return true;
   };
-
-  const auto half_range = kYawOptimizeRangeDeg * 0.5 * kPi / 180.0;
-  const auto step = kYawOptimizeStepDeg * kPi / 180.0;
-  const auto step_count = static_cast<int>(std::round((half_range * 2.0) / step));
-
-  auto optimized_yaw = origin_yaw;
-  auto optimized_error = std::numeric_limits<double>::max();
-
-  for (int index = 0; index <= step_count; ++index) {
-    const auto yaw = origin_yaw - half_range + index * step;
-    double error = 0.0;
-    if (!evaluate(yaw, error)) continue;
-    if (error < optimized_error) {
-      optimized_error = error;
-      optimized_yaw = yaw;
-    }
+  if (!valid_camera(camera) || !std::isfinite(noise_observation) || noise_observation <= 0 ||
+      !std::isfinite(max_rms_px) || max_rms_px <= 0) return fail("invalid_camera_or_noise");
+  const std::array<cv::Point2f,4> corners{armor.tl,armor.tr,armor.br,armor.bl};
+  double sign=0;
+  for(int i=0;i<4;++i) {
+    const auto d=corners[(i+1)%4]-corners[i], e=corners[(i+2)%4]-corners[(i+1)%4];
+    const double cross=double(d.x)*e.y-double(d.y)*e.x;
+    if(!std::isfinite(corners[i].x)||!std::isfinite(corners[i].y)||
+       cv::norm(d)<1 || !std::isfinite(cross)||std::abs(cross)<1e-3) return fail("invalid_corners");
+    if(i==0) sign=cross; else if(sign*cross<=0) return fail("invalid_corners");
   }
+  if(sign<=0 || armor.tl.y>=armor.bl.y || armor.tr.y>=armor.br.y) return fail("invalid_corner_order");
 
-  double error_lower = 0.0;
-  double error_upper = 0.0;
-  if (evaluate(optimized_yaw - step, error_lower)
-    && evaluate(optimized_yaw + step, error_upper)) {
-    const auto denominator =
-      error_lower - 2.0 * optimized_error + error_upper + kEpsilon;
-    const auto interpolated_yaw =
-      optimized_yaw + step * 0.5 * (error_lower - error_upper) / denominator;
-
-    double interpolated_error = 0.0;
-    if (evaluate(interpolated_yaw, interpolated_error)
-      && interpolated_error < optimized_error) {
-      optimized_yaw = interpolated_yaw;
-      optimized_error = interpolated_error;
+  using X=RobotModel::StateVector;
+  using Residual=Eigen::Matrix<double,8,1>;
+  using Jacobian=Eigen::Matrix<double,8,4>;
+  const Residual z=armor_measurement(armor,false);
+  const auto evaluate=[&](const X & x,Residual & r,Jacobian & H) {
+    for(int b=0;b<2;++b) {
+      const auto p=project_lightbar(x,armor.large,camera,b);
+      if(!p) return false;
+      r.segment<4>(4*b)=p->value-z.segment<4>(4*b);
+      H.block<4,3>(4*b,0)=p->jacobian.leftCols<3>();
+      H.block<4,1>(4*b,3)=p->jacobian.col(6);
     }
+    return r.allFinite() && H.allFinite();
+  };
+  struct Candidate { Armor3d pose; double cost; };
+  std::vector<Candidate> candidates;
+  try {
+    const auto shape=armor_shape_points(armor.large);
+    std::vector<cv::Point3f> object(shape.begin(),shape.end());
+    std::vector<cv::Point2f> image{armor.tl,armor.bl,armor.br,armor.tr};
+    std::vector<cv::Vec3d> rotations,translations;
+    if(!cv::solvePnPGeneric(object,image,camera.intrinsic(),camera.distortion(),
+       rotations,translations,false,cv::SOLVEPNP_IPPE) || rotations.size()!=translations.size())
+      return fail("pnp_failed");
+    for(std::size_t i=0;i<rotations.size();++i) {
+      cv::Mat cv_rotation; cv::Rodrigues(rotations[i],cv_rotation);
+      Eigen::Matrix3d rotation; cv::cv2eigen(cv_rotation,rotation);
+      const Eigen::Vector3d t(translations[i][0],translations[i][1],translations[i][2]);
+      if(!t.allFinite() || !rotation.allFinite() || t.z()<=0.1) continue;
+      const Eigen::Quaterniond q= camera.orientation * Eigen::Quaterniond(opencv2ros_rotation(rotation));
+      const Eigen::Vector3d p=camera.orientation*opencv2ros_position(t)+camera.translation;
+      Eigen::Vector3d inward=q*Eigen::Vector3d::UnitX(); inward.z()=0;
+      if(!inward.allFinite() || inward.norm()<1e-9) continue;
+      inward.normalize();
+      X x=X::Zero(); x.head<3>()=p+0.2*inward;
+      x[6]=normalize_angle(std::atan2(-inward.y(),-inward.x())); x[8]=x[9]=0.2;
+      Residual r; Jacobian H;
+      if(!evaluate(x,r,H)) continue;
+      double cost=r.squaredNorm();
+      // Fit only center and phase; radii/velocities remain initialization priors.
+      for(int iteration=0;iteration<20;++iteration) {
+        const Eigen::Matrix4d normal=H.transpose()*H;
+        const Eigen::Vector4d scale=normal.diagonal().cwiseMax(1e-9).cwiseSqrt().cwiseInverse();
+        Eigen::Matrix4d system=scale.asDiagonal()*normal*scale.asDiagonal();
+        system.diagonal().array()+=1e-6;
+        const Eigen::Vector4d step=-(scale.asDiagonal()*system.ldlt().solve(scale.asDiagonal()*H.transpose()*r));
+        if(!step.allFinite() || step.norm()<1e-9) break;
+        bool accepted=false;
+        for(int line=0;line<8;++line) {
+          const Eigen::Vector4d delta=std::ldexp(1.0,-line)*step;
+          X next=x; next.head<3>()+=delta.head<3>(); next[6]=normalize_angle(next[6]+delta[3]);
+          Residual nr; Jacobian nh;
+          if(evaluate(next,nr,nh) && nr.squaredNorm()<cost) {
+            x=next;r=nr;H=nh;cost=r.squaredNorm();accepted=true;break;
+          }
+        }
+        if(!accepted) break;
+      }
+      const Eigen::Vector3d radial(std::cos(x[6]),std::sin(x[6]),0);
+      const Eigen::Vector3d plate=x.head<3>()+0.2*radial;
+      const Eigen::Quaterniond orientation=euler_to_quaternion(normalize_angle(x[6]+kPi),kPredictedOtherArmorPitch,0);
+      if(!plate.allFinite() || -(orientation*Eigen::Vector3d::UnitX()).dot(camera.translation-plate)<=0 ||
+         std::sqrt(cost/4)>max_rms_px) continue;
+      candidates.push_back({Armor3d{0,plate,orientation},cost});
+    }
+  } catch(const cv::Exception &) { return fail("pnp_exception"); }
+  if(candidates.empty()) return fail("no_valid_pose");
+  std::sort(candidates.begin(),candidates.end(),[](const auto & a,const auto & b){return a.cost<b.cost;});
+  const auto & best=candidates.front();
+  for(std::size_t i=1;i<candidates.size();++i) {
+    const auto & other=candidates[i];
+    const bool same=(best.pose.translation-other.pose.translation).norm()<0.02 &&
+      best.pose.orientation.angularDistance(other.pose.orientation)<2*kPi/180;
+    // Compare distinct physical modes using the same pixel likelihood.
+    if(!same && (other.cost-best.cost)/noise_observation<2.0) return fail("ambiguous_pose");
   }
-
-  output = *best_armor;
-  output.orientation = euler_to_quaternion(optimized_yaw, origin_pitch, 0.0).normalized();
+  output=best.pose;
+  if(reason) *reason="valid";
+  if(rms) *rms=std::sqrt(best.cost/4);
   return true;
 }
 
@@ -314,40 +253,16 @@ auto load_config(const YAML::Node & node) -> Config
 {
   Config config;
 
-  config.noise_x = read_or(node, "noise_x", config.noise_x);
-  config.noise_y = read_or(node, "noise_y", config.noise_y);
-  config.noise_z = read_or(node, "noise_z", config.noise_z);
-
-  config.noise_vx = read_or(node, "noise_vx", config.noise_vx);
-  config.noise_vy = read_or(node, "noise_vy", config.noise_vy);
-  config.noise_vz = read_or(node, "noise_vz", config.noise_vz);
-
-  config.noise_rotation_angle = read_or(node, "noise_rotation_angle", config.noise_rotation_angle);
-  config.noise_rotation_speed = read_or(node, "noise_rotation_speed", config.noise_rotation_speed);
-
   config.noise_radius_forward = read_or(node, "noise_radius_forward", config.noise_radius_forward);
   config.noise_radius_lateral = read_or(node, "noise_radius_lateral", config.noise_radius_lateral);
   config.noise_height_lateral = read_or(node, "noise_height_lateral", config.noise_height_lateral);
 
+  config.init_max_rms_px = read_or(node, "init_max_rms_px", config.init_max_rms_px);
   config.noise_observation = read_or(node, "noise_observation", config.noise_observation);
 
   config.q_accel_xy = read_or(node, "q_accel_xy", config.q_accel_xy);
   config.q_accel_z = read_or(node, "q_accel_z", config.q_accel_z);
   config.q_alpha = read_or(node, "q_alpha", config.q_alpha);
-  if (node && node["process_model"]) {
-    const auto model = node["process_model"].as<std::string>();
-    if (model == "cwna") {
-      config.process_model = ProcessModel::CWNA;
-    } else if (model == "dwna") {
-      config.process_model = ProcessModel::DWNA;
-    } else if (model == "diag_rate") {
-      config.process_model = ProcessModel::DIAG_RATE;
-    } else {
-      tools::logger()->warn(
-        "[rmcs_ekf] unknown process_model '{}', falling back to cwna", model);
-      config.process_model = ProcessModel::CWNA;
-    }
-  }
 
   config.radius_forward_min = read_or(node, "radius_forward_min", config.radius_forward_min);
   config.radius_forward_max = read_or(node, "radius_forward_max", config.radius_forward_max);
@@ -364,8 +279,6 @@ auto load_config(const YAML::Node & node) -> Config
   config.yaw_full_max = read_or(node, "yaw_full_max_deg", 70.0) * kPi / 180.0;
   config.yaw_part_max = read_or(node, "yaw_part_max_deg", 90.0) * kPi / 180.0;
 
-  config.fixed_outpost_pitch = read_or(node, "fixed_outpost_pitch", config.fixed_outpost_pitch);
-  config.fixed_normal_pitch = read_or(node, "fixed_normal_pitch", config.fixed_normal_pitch);
 
   config.converge_min_update = read_or(node, "converge_min_update", config.converge_min_update);
   config.converge_max_cov_xy = read_or(node, "converge_max_cov_xy", config.converge_max_cov_xy);
@@ -396,10 +309,6 @@ auto load_config(const YAML::Node & node) -> Config
     read_or(node, "anchor_max_corner_error", config.anchor_max_corner_error);
   config.anchor_max_relative_error =
     read_or(node, "anchor_max_relative_error", config.anchor_max_relative_error);
-  config.auto_reinit_after_no_update =
-    read_or(node, "auto_reinit_after_no_update", config.auto_reinit_after_no_update);
-  config.max_no_update_frames =
-    read_or(node, "max_no_update_frames", config.max_no_update_frames);
 
   config.nis_threshold = read_or(node, "nis_threshold", config.nis_threshold);
   config.nis_window = read_or(node, "nis_window", config.nis_window);
@@ -408,15 +317,13 @@ auto load_config(const YAML::Node & node) -> Config
   config.nis_gate_threshold = read_or(node, "nis_gate_threshold", config.nis_gate_threshold);
   config.nis_gate_warmup_updates =
     read_or(node, "nis_gate_warmup_updates", config.nis_gate_warmup_updates);
-  config.nis_max_consecutive_rejects =
-    read_or(node, "nis_max_consecutive_rejects", config.nis_max_consecutive_rejects);
-  config.nis_reject_cov_inflation =
-    read_or(node, "nis_reject_cov_inflation", config.nis_reject_cov_inflation);
 
-  config.init_prefer_solver_pose =
-    read_or(node, "init_prefer_solver_pose", config.init_prefer_solver_pose);
   config.skip_tracking_pnp = read_or(node, "skip_tracking_pnp", config.skip_tracking_pnp);
 
+  config.association_miss_penalty=read_or(node,"association_miss_penalty",config.association_miss_penalty);
+  config.association_clutter_penalty=read_or(node,"association_clutter_penalty",config.association_clutter_penalty);
+  config.association_ambiguity_gap=read_or(node,"association_ambiguity_gap",config.association_ambiguity_gap);
+  config.nis_gate_warmup_s=read_or(node,"nis_gate_warmup_s",config.nis_gate_warmup_s);
   return config;
 }
 
@@ -432,20 +339,36 @@ RobotModel::RobotModel(const Config & config)
 
 auto RobotModel::configure(const Config & config) -> void
 {
+  for(double q:{config.q_accel_xy,config.q_accel_z,config.q_alpha,
+    config.noise_radius_forward,config.noise_radius_lateral,config.noise_height_lateral})
+    if(!std::isfinite(q) || q<0) throw std::invalid_argument("invalid process noise intensity");
+  if(!std::isfinite(config.noise_observation) || config.noise_observation<=0)
+    throw std::invalid_argument("pixel variance must be positive");
+  for(double v:{config.radius_forward_min,config.radius_forward_max,
+    config.radius_lateral_min,config.radius_lateral_max,config.height_lateral_min,
+    config.height_lateral_max,config.velocity_min,config.velocity_max,config.rotation_speed_limit})
+    if(!std::isfinite(v)) throw std::invalid_argument("state bounds must be finite");
+  for(double v:{config.association_miss_penalty,config.association_clutter_penalty,
+    config.association_ambiguity_gap,config.nis_gate_warmup_s,config.converge_delay_s})
+    if(!std::isfinite(v) || v<0) throw std::invalid_argument("invalid association or time threshold");
+  if(!std::isfinite(config.yaw_full_max) || !std::isfinite(config.yaw_part_max)
+    || config.yaw_full_max<=0 || config.yaw_full_max>config.yaw_part_max
+    || config.yaw_part_max>kPi/2)
+    throw std::invalid_argument("invalid visibility angles");
+  if(config.radius_forward_min<=0 || config.radius_forward_min>=config.radius_forward_max
+    || config.radius_lateral_min<=0 || config.radius_lateral_min>=config.radius_lateral_max
+    || config.height_lateral_min>=config.height_lateral_max || config.velocity_min>=config.velocity_max)
+    throw std::invalid_argument("invalid state bounds");
+  if (!std::isfinite(config.init_max_rms_px) || config.init_max_rms_px<=0)
+    throw std::invalid_argument("init_max_rms_px must be positive finite");
   config_ = config;
   observable_.yaw_full_max = config_.yaw_full_max;
   observable_.yaw_part_max = config_.yaw_part_max;
-  set_noise();
+  set_observation_noise();
 }
 
-auto RobotModel::set_noise() -> void
+auto RobotModel::set_observation_noise() -> void
 {
-  process_noise_.setZero();
-  process_noise_.diagonal() << config_.noise_x, config_.noise_y, config_.noise_z,
-    config_.noise_vx, config_.noise_vy, config_.noise_vz,
-    config_.noise_rotation_angle, config_.noise_rotation_speed,
-    config_.noise_radius_forward, config_.noise_radius_lateral, config_.noise_height_lateral;
-
   observation_noise_.setZero();
   observation_noise_.diagonal() << config_.noise_observation, config_.noise_observation,
     config_.noise_observation, config_.noise_observation;
@@ -460,7 +383,8 @@ auto RobotModel::reset_covariance() -> void
     config_.initial_cov_radius, config_.initial_cov_radius, config_.initial_cov_height;
   // Never allow a zero variance: it would make the covariance singular.
   for (Eigen::Index index = 0; index < diagonal.size(); ++index) {
-    diagonal[index] = std::max(diagonal[index], 1e-12);
+    if(!std::isfinite(diagonal[index]) || diagonal[index]<=0)
+      throw std::invalid_argument("initial covariance must be positive finite");
   }
   covariance_ = diagonal.asDiagonal();
 }
@@ -468,11 +392,12 @@ auto RobotModel::reset_covariance() -> void
 auto RobotModel::initialize(const CameraFeature & camera, const std::vector<Armor2d> & armors)
   -> bool
 {
-  if (armors.empty()) return false;
+  if (armors.empty() || !valid_camera(camera)) return false;
 
   const Armor2d * best_armor = nullptr;
   auto best_width = 0.0;
   for (const auto & armor : armors) {
+    if (!armor_measurement(armor,false).allFinite()) continue;
     const auto width = std::abs(armor.tr.x - armor.tl.x);
     if (width <= best_width) continue;
     best_width = width;
@@ -480,37 +405,46 @@ auto RobotModel::initialize(const CameraFeature & camera, const std::vector<Armo
   }
   if (!best_armor) return false;
 
-  large_ = best_armor->large;
 
   RobustPnp pnp;
   pnp.camera = camera;
   pnp.armor = *best_armor;
-  pnp.fixed_outpost_pitch = config_.fixed_outpost_pitch;
-  pnp.fixed_normal_pitch = config_.fixed_normal_pitch;
+  pnp.noise_observation = config_.noise_observation;
+  pnp.max_rms_px = config_.init_max_rms_px;
 
   Armor3d armor3d;
   if (!pnp.solve(armor3d)) return false;
 
-  return initialize_from_pose(camera, armor3d.translation, armor3d.orientation, large_);
+  return initialize_from_pose(camera, armor3d.translation, armor3d.orientation, best_armor->large, best_armor);
 }
 
 auto RobotModel::initialize_from_pose(const CameraFeature & camera,
-  const Eigen::Vector3d & translation, const Eigen::Quaterniond & orientation, bool large) -> bool
+  const Eigen::Vector3d & translation, const Eigen::Quaterniond & orientation, bool large,
+  const Armor2d * observation) -> bool
 {
-  if (!translation.allFinite() || !orientation.coeffs().allFinite()
+  if (!valid_camera(camera) || !translation.allFinite() || !orientation.coeffs().allFinite()
       || orientation.norm() < kEpsilon) return false;
-  // RobotSolution places each plate at a horizontal radius from the center.
-  // Solver optimizes yaw with a fixed pitch but retains raw IPPE pitch/roll.
-  // Removing a fixed 15 degrees from that noisy pose tilts the initial radius
-  // out of the plane, moving the modeled plate away from its measured center.
+  // The constrained pose and RobotSolution share the same horizontal radius model.
   Eigen::Vector3d armor_to_center = orientation.normalized() * Eigen::Vector3d::UnitX();
   armor_to_center.z() = 0.0;
   if (armor_to_center.norm() < kEpsilon) return false;
   armor_to_center.normalize();
-  large_ = large;
   const auto yaw = normalize_angle(std::atan2(-armor_to_center.y(), -armor_to_center.x()));
   const auto center = Eigen::Vector3d{ translation + 0.2 * armor_to_center };
 
+
+  StateVector candidate=StateVector::Zero();
+  candidate.head<3>()=center;candidate[6]=yaw;candidate[8]=candidate[9]=0.2;
+  const auto left=project_lightbar(candidate,large,camera,0);
+  const auto right=project_lightbar(candidate,large,camera,1);
+  if(!valid_state(candidate) || !left || !right) return false;
+  const Eigen::Vector3d normal=euler_to_quaternion(yaw+kPi,kPredictedOtherArmorPitch,0)*Eigen::Vector3d::UnitX();
+  if(normal.dot(camera.translation-translation)>=0) return false;
+  if(observation) {
+    Eigen::Matrix<double,8,1> pixels; pixels << left->value,right->value;
+    const double rms=(pixels-armor_measurement(*observation,false)).norm()/2;
+    if(!std::isfinite(rms) || rms>config_.init_max_rms_px) return false;
+  }
   return finish_initialize(camera, center, yaw, large);
 }
 
@@ -530,13 +464,14 @@ auto RobotModel::initialize_synthetic(const State & state) -> void
   state_[kStateHL] = state.height_lateral;
 
   large_ = false;
-  set_noise();
   reset_covariance();
   observable_dirty_ = true;
 
-  init_timestamp_ = std::chrono::steady_clock::now();
+  elapsed_s_ = 0.0;
+  report_ = {};
   jumped_ = false;
   last_observed_id_ = -1;
+  pixel_innovations_ = {};
   update_count_ = 0;
   no_update_frames_ = 0;
 }
@@ -544,6 +479,7 @@ auto RobotModel::initialize_synthetic(const State & state) -> void
 auto RobotModel::finish_initialize(
     const CameraFeature & camera, const Eigen::Vector3d & center, double yaw, bool large) -> bool
 {
+  large_ = large;
   state_.setZero();
   state_[kStateX] = center.x();
   state_[kStateY] = center.y();
@@ -555,28 +491,17 @@ auto RobotModel::finish_initialize(
   observable_.camera = camera;
   observable_.large = large;
 
-  // Verify the PnP yaw by counting visible armor plates.
-  state_[kStateA] = yaw;
-  observable_.update(state_);
-  const auto original_count = observable_.visible_armors();
-
-  const auto alternate_yaw = normalize_angle(yaw + kPi);
-  state_[kStateA] = alternate_yaw;
-  observable_.update(state_);
-  const auto alternate_count = observable_.visible_armors();
-
-  if (alternate_count > original_count) yaw = alternate_yaw;
-
   state_[kStateA] = yaw;
   observable_.update(state_);
 
-  set_noise();
   reset_covariance();
   observable_dirty_ = false;
 
-  init_timestamp_ = std::chrono::steady_clock::now();
+  elapsed_s_ = 0.0;
+  report_ = {};
   jumped_ = false;
   last_observed_id_ = -1;
+  pixel_innovations_ = {};
   update_count_ = 0;
   last_frame_update_count_ = 0;
   last_frame_rejected_count_ = 0;
@@ -604,72 +529,50 @@ auto RobotModel::extrapolate_state(const StateVector & state, double dt) const -
   next[kStateY] += next[kStateVy] * dt;
   next[kStateZ] += next[kStateVz] * dt;
   next[kStateA] = normalize_angle(next[kStateA] + next[kStateW] * dt);
-  if (config_.rotation_speed_limit > 0.0) {
-    next[kStateW] = std::clamp(
-      next[kStateW], -config_.rotation_speed_limit, config_.rotation_speed_limit);
-  }
   return next;
 }
 
-auto RobotModel::propagate_covariance(double dt) -> void
-{
-  Covariance jacobian = Covariance::Identity();
-  jacobian(kStateX, kStateVx) = dt;
-  jacobian(kStateY, kStateVy) = dt;
-  jacobian(kStateZ, kStateVz) = dt;
-  jacobian(kStateA, kStateW) = dt;
+auto RobotModel::transition(double dt) -> Covariance {
+  Covariance F=Covariance::Identity();
+  F(0,3)=F(1,4)=F(2,5)=F(6,7)=dt;
+  return F;
+}
+auto RobotModel::process_covariance(double dt) const -> ProcessNoise {
+  if(!std::isfinite(dt) || dt<0) throw std::invalid_argument("CWNA requires nonnegative finite dt");
+  ProcessNoise Q=ProcessNoise::Zero();
+  const auto axis=[&](int p,int v,double q) {
+    Q(p,p)=q*dt*dt*dt/3; Q(p,v)=Q(v,p)=q*dt*dt/2; Q(v,v)=q*dt;
+  };
+  axis(0,3,config_.q_accel_xy);axis(1,4,config_.q_accel_xy);
+  axis(2,5,config_.q_accel_z);axis(6,7,config_.q_alpha);
+  Q(8,8)=config_.noise_radius_forward*dt;
+  Q(9,9)=config_.noise_radius_lateral*dt;
+  Q(10,10)=config_.noise_height_lateral*dt;
+  return Q;
+}
+auto RobotModel::future_covariance(double dt) const -> Covariance {
+  const auto F=transition(dt);
+  Covariance P=F*covariance_*F.transpose()+process_covariance(dt);
+  return (0.5*(P+P.transpose())).eval();
+}
+auto RobotModel::propagate_covariance(double dt) -> void { covariance_=future_covariance(dt); }
 
-  ProcessNoise q = ProcessNoise::Zero();
-  switch (config_.process_model) {
-    case ProcessModel::CWNA: {
-      // Continuous white-noise acceleration, exactly discretized:
-      //   Q_pp = q*dt^3/3, Q_pv = q*dt^2/2, Q_vv = q*dt
-      const auto a = dt * dt * dt / 3.0;
-      const auto b = dt * dt / 2.0;
-      const auto c = dt;
-      const auto add_axis = [&](int p, int v, double q_axis) {
-        q(p, p) = q_axis * a;
-        q(p, v) = q_axis * b;
-        q(v, p) = q_axis * b;
-        q(v, v) = q_axis * c;
-      };
-      add_axis(kStateX, kStateVx, config_.q_accel_xy);
-      add_axis(kStateY, kStateVy, config_.q_accel_xy);
-      add_axis(kStateZ, kStateVz, config_.q_accel_z);
-      add_axis(kStateA, kStateW, config_.q_alpha);
-      break;
-    }
-    case ProcessModel::DWNA: {
-      // sp25's original piecewise white-noise acceleration:
-      //   Q_pp = q*dt^4/4, Q_pv = q*dt^3/2, Q_vv = q*dt^2
-      const auto a = dt * dt * dt * dt / 4.0;
-      const auto b = dt * dt * dt / 2.0;
-      const auto c = dt * dt;
-      const auto add_axis = [&](int p, int v, double q_axis) {
-        q(p, p) = q_axis * a;
-        q(p, v) = q_axis * b;
-        q(v, p) = q_axis * b;
-        q(v, v) = q_axis * c;
-      };
-      add_axis(kStateX, kStateVx, config_.q_accel_xy);
-      add_axis(kStateY, kStateVy, config_.q_accel_xy);
-      add_axis(kStateZ, kStateVz, config_.q_accel_z);
-      add_axis(kStateA, kStateW, config_.q_alpha);
-      break;
-    }
-    case ProcessModel::DIAG_RATE: {
-      q = process_noise_;
-      q *= dt;
-      break;
-    }
-  }
-
-  // Radius/height have no velocity state: diagonal random walk in all models.
-  q(kStateRF, kStateRF) = process_noise_(kStateRF, kStateRF) * dt;
-  q(kStateRL, kStateRL) = process_noise_(kStateRL, kStateRL) * dt;
-  q(kStateHL, kStateHL) = process_noise_(kStateHL, kStateHL) * dt;
-
-  covariance_ = jacobian * covariance_ * jacobian.transpose() + q;
+bool RobotModel::valid_state(const StateVector & x) const {
+  if(!x.allFinite()) return false;
+  if(x[8]<config_.radius_forward_min || x[8]>config_.radius_forward_max
+    || x[9]<config_.radius_lateral_min || x[9]>config_.radius_lateral_max
+    || x[10]<config_.height_lateral_min || x[10]>config_.height_lateral_max) return false;
+  for(int i=3;i<6;++i) if(x[i]<config_.velocity_min || x[i]>config_.velocity_max) return false;
+  return config_.rotation_speed_limit<=0 || std::abs(x[7])<=config_.rotation_speed_limit;
+}
+bool RobotModel::import_snapshot(const StateVector & x,const Covariance & P,bool large,double elapsed) {
+  if(!valid_state(x) || !P.allFinite() || !std::isfinite(elapsed) || elapsed<0
+    || !P.isApprox(P.transpose(),1e-10)) return false;
+  Eigen::LDLT<Covariance> factor(P);
+  if(factor.info()!=Eigen::Success || (factor.vectorD().array()<=0).any()) return false;
+  state_=x;state_[6]=normalize_angle(state_[6]);covariance_=P;large_=large;
+  elapsed_s_=elapsed;observable_.large=large;observable_dirty_=true;
+  return true;
 }
 
 auto RobotModel::refresh_observable() const -> void
@@ -688,6 +591,7 @@ auto RobotModel::predict(double dt) -> void
   }
 
   last_dt_ = dt;
+  elapsed_s_ += dt;
   state_ = extrapolate_state(state_, dt);
   propagate_covariance(dt);
 
@@ -714,238 +618,70 @@ auto RobotModel::extrapolated(double dt) const -> RobotModel
 
 
 auto RobotModel::correct(const std::vector<Armor2d> & armors,
-  const std::vector<Lightbar2d> & lightbars, const CameraFeature & camera) -> void
+  const std::vector<Lightbar2d> & lightbars, const CameraFeature & camera) -> UpdateReport
 {
-  observable_.camera = camera;
-  observable_.large = large_;
-  observable_dirty_ = true;
-  refresh_observable();
-
-  frame_nis_sum_ = 0.0;
-  frame_nis_max_ = 0.0;
-  frame_residual_sum_ = 0.0;
-  frame_nis_count_ = 0;
-  frame_update_count_ = 0;
-  frame_rejected_count_ = 0;
-  last_frame_update_count_ = 0;
-  last_frame_rejected_count_ = 0;
-  last_anchor_error_ = 0.0;
-  last_update_accepted_ = false;
-
-  if (armors.empty() && lightbars.empty()) {
-    last_frame_nis_ = 0.0;
-    last_frame_nis_mean_ = 0.0;
-    last_frame_residual_norm_ = 0.0;
-    return;
-  }
-
-  const auto mark_no_update = [this]() {
-    ++frame_rejected_count_;
-    last_frame_update_count_ = 0;
-    last_frame_rejected_count_ = frame_rejected_count_;
-    last_frame_nis_ = 0.0;
-    last_frame_nis_mean_ = 0.0;
-    last_frame_residual_norm_ = 0.0;
-    ++no_update_frames_;
-  };
-
-  struct SortedEntry
-  {
-    int assigned_id = -1;
-    Eigen::Vector2d upper{ Eigen::Vector2d::Zero() };
-    Eigen::Vector2d lower{ Eigen::Vector2d::Zero() };
-  };
-
-  // Step 1: find the full armor with the smallest corner error as anchor.
-  // sp_vision's detector orders corners by image-left/right; rmcs' model
-  // indexes lightbars by robot-left/right. Try both orientations so a
-  // back/side view does not shift the lightbar ids by one.
-  const Armor2d * anchor_armor = nullptr;
-  auto anchor_armor_id = -1;
-  auto anchor_swap = false;
-  auto best_error_sum = std::numeric_limits<double>::max();
-
-  for (const auto & armor : armors) {
-    for (int armor_id = 0; armor_id < 4; ++armor_id) {
-      const auto left_id = armor_id * 2;
-      const auto right_id = armor_id * 2 + 1;
-      if (!observable_.visible[left_id] || !observable_.visible[right_id]) continue;
-
-      for (const auto swap : { false, true }) {
-        const auto & left_upper = swap ? armor.tr : armor.tl;
-        const auto & left_lower = swap ? armor.br : armor.bl;
-        const auto & right_upper = swap ? armor.tl : armor.tr;
-        const auto & right_lower = swap ? armor.bl : armor.br;
-
-        const auto error_0 = squared_distance(
-          Eigen::Vector2d{ left_upper.x, left_upper.y }, observable_.upper2d[left_id]);
-        const auto error_1 = squared_distance(
-          Eigen::Vector2d{ left_lower.x, left_lower.y }, observable_.lower2d[left_id]);
-        const auto error_2 = squared_distance(
-          Eigen::Vector2d{ right_upper.x, right_upper.y }, observable_.upper2d[right_id]);
-        const auto error_3 = squared_distance(
-          Eigen::Vector2d{ right_lower.x, right_lower.y }, observable_.lower2d[right_id]);
-        const auto sum = error_0 + error_1 + error_2 + error_3;
-
-        if (sum >= best_error_sum) continue;
-        best_error_sum = sum;
-        anchor_armor_id = armor_id;
-        anchor_armor = &armor;
-        anchor_swap = swap;
-      }
+  report_={}; report_.detection_count=armors.size();
+  observable_.camera=camera;observable_.large=large_;observable_dirty_=true;
+  pixel_innovations_={};frame_nis_sum_=frame_nis_max_=frame_residual_sum_=0;
+  frame_nis_count_=frame_update_count_=frame_rejected_count_=0;
+  last_update_accepted_=false;last_anchor_error_=0;
+  if(!lightbars.empty()) report_.reject_reasons.push_back(RejectReason::UnsupportedLightbar);
+  if(!valid_camera(camera)) report_.reject_reasons.push_back(RejectReason::UnsupportedCamera);
+  else {
+    const auto association_start=std::chrono::steady_clock::now();
+    const auto association=associate_armors(state_,covariance_,large_,camera,armors,config_);
+    report_.association_ms=std::chrono::duration<double,std::milli>(
+      std::chrono::steady_clock::now()-association_start).count();
+    report_.legal_armor_count=association.legal_observations.size();
+    report_.associated_armor_count=association.matches.size();
+    report_.ambiguous=association.ambiguous;report_.association_cost=association.cost;
+    report_.association_second_cost=association.second_cost;report_.prediction_rms=association.rms;
+    report_.trimmed_count=association.trimmed_count;report_.duplicate_count=association.duplicate_count;
+    if(association.invalid_count) report_.reject_reasons.push_back(RejectReason::InvalidObservation);
+    if(association.duplicate_count) report_.reject_reasons.push_back(RejectReason::DuplicateObservation);
+    if(association.trimmed_count) report_.reject_reasons.push_back(RejectReason::CandidateLimit);
+    if(association.matches.empty() && !armors.empty()) report_.reject_reasons.push_back(RejectReason::NoAssociation);
+    if(association.ambiguous) report_.reject_reasons.push_back(RejectReason::AmbiguousAssociation);
+    refresh_observable();
+    const auto update_start=std::chrono::steady_clock::now();
+    // Fixed one-to-one association, deterministic model plate/bar order.
+    for(const auto & match:association.matches) {
+      report_.matched_observation_by_plate[match.armor_id]=static_cast<int>(match.observation_index);
+      report_.matched_swapped_by_plate[match.armor_id]=match.swapped;
+      const auto accepted_before=frame_update_count_;
+      const auto z=armor_measurement(armors[match.observation_index],match.swapped);
+      update_one(z.segment<2>(0),z.segment<2>(2),2*match.armor_id);
+      update_one(z.segment<2>(4),z.segment<2>(6),2*match.armor_id+1);
+      if(frame_update_count_>accepted_before) last_observed_id_=match.armor_id;
     }
+    report_.update_ms=std::chrono::duration<double,std::milli>(
+      std::chrono::steady_clock::now()-update_start).count();
   }
-
-  if (!anchor_armor) {
-    // No geometrically plausible plate at all (e.g. the state drifted behind
-    // the camera). Treat the frame as rejected and let the recovery logic run.
-    mark_no_update();
-    maybe_reinitialize(camera, armors);
-    return;
-  }
-
-  last_anchor_error_ = std::sqrt(best_error_sum / 4.0);
-  {
-    // Gross-error gate: a wrong plate / wrong id must not pull the state.
-    // The threshold is scale-aware so a close, fast-spinning plate is not
-    // rejected only because its pixel prediction lags by a few dozen pixels.
-    const auto left_id = anchor_armor_id * 2;
-    const auto right_id = left_id + 1;
-    const auto plate_width = (observable_.upper2d[left_id] - observable_.upper2d[right_id]).norm();
-    const auto max_error = std::max(
-      config_.anchor_max_corner_error, config_.anchor_max_relative_error * plate_width);
-    if (max_error > 0.0 && last_anchor_error_ > max_error) {
-      mark_no_update();
-      maybe_reinitialize(camera, armors);
-      return;
-    }
-  }
-
-  // Step 2: collect all observed lightbars (2 per full armor + extras).
-  std::vector<SortedEntry> sorted;
-  sorted.reserve(armors.size() * 2 + lightbars.size());
-
-  for (const auto & armor : armors) {
-    const auto & left_upper = anchor_swap ? armor.tr : armor.tl;
-    const auto & left_lower = anchor_swap ? armor.br : armor.bl;
-    const auto & right_upper = anchor_swap ? armor.tl : armor.tr;
-    const auto & right_lower = anchor_swap ? armor.bl : armor.br;
-
-    sorted.push_back(SortedEntry{
-      -1,
-      Eigen::Vector2d{ left_upper.x, left_upper.y },
-      Eigen::Vector2d{ left_lower.x, left_lower.y },
-    });
-    sorted.push_back(SortedEntry{
-      -1,
-      Eigen::Vector2d{ right_upper.x, right_upper.y },
-      Eigen::Vector2d{ right_lower.x, right_lower.y },
-    });
-  }
-  for (const auto & lightbar : lightbars) {
-    sorted.push_back(SortedEntry{ -1, lightbar.upper, lightbar.lower });
-  }
-
-  std::sort(sorted.begin(), sorted.end(), [](const SortedEntry & a, const SortedEntry & b) {
-    return a.upper.x() < b.upper.x();
-  });
-
-  // Step 3: anchor the anchor armor, then propagate ids left/right.
-  {
-    std::size_t anchor_left = 0;
-    std::size_t anchor_right = 0;
-    auto min_distance_left = std::numeric_limits<double>::max();
-    auto min_distance_right = std::numeric_limits<double>::max();
-
-    const auto anchor_left_x = anchor_swap ? anchor_armor->tr.x : anchor_armor->tl.x;
-    const auto anchor_right_x = anchor_swap ? anchor_armor->tl.x : anchor_armor->tr.x;
-
-    for (std::size_t index = 0; index < sorted.size(); ++index) {
-      const auto distance_left = std::abs(sorted[index].upper.x() - anchor_left_x);
-      const auto distance_right = std::abs(sorted[index].upper.x() - anchor_right_x);
-      if (distance_left < min_distance_left) {
-        min_distance_left = distance_left;
-        anchor_left = index;
-      }
-      if (distance_right < min_distance_right) {
-        min_distance_right = distance_right;
-        anchor_right = index;
-      }
-    }
-
-    sorted[anchor_left].assigned_id = anchor_armor_id * 2;
-    sorted[anchor_right].assigned_id = anchor_armor_id * 2 + 1;
-
-    for (std::size_t index = anchor_left + 1; index < sorted.size(); ++index) {
-      sorted[index].assigned_id = (sorted[index - 1].assigned_id + 1) % 8;
-    }
-    for (std::size_t index = anchor_left; index > 0; --index) {
-      sorted[index - 1].assigned_id = (sorted[index].assigned_id - 1 + 8) % 8;
-    }
-  }
-
-  // Step 4: sequential EKF updates.
-  for (const auto & entry : sorted) {
-    update_one(entry.upper, entry.lower, entry.assigned_id);
-  }
-
-  last_observed_id_ = anchor_armor_id;
-  if (anchor_armor_id != 0) jumped_ = true;
-  ++update_count_;
-
-  last_frame_update_count_ = frame_update_count_;
-  last_frame_rejected_count_ = frame_rejected_count_;
-  if (frame_nis_count_ > 0) {
-    // nis 取单条最大值，和 chi-square(4) 阈值同口径；均值另发字段。
-    last_frame_nis_ = frame_nis_max_;
-    last_frame_nis_mean_ = frame_nis_sum_ / static_cast<double>(frame_nis_count_);
-    last_frame_residual_norm_ = frame_residual_sum_ / static_cast<double>(frame_nis_count_);
-  } else {
-    last_frame_nis_ = 0.0;
-    last_frame_nis_mean_ = 0.0;
-    last_frame_residual_norm_ = 0.0;
-  }
-
-  if (frame_update_count_ == 0) {
-    // Detections arrived but every lightbar was gated/projection-invalid.
-    ++no_update_frames_;
-    maybe_reinitialize(camera, armors);
-  } else {
-    no_update_frames_ = 0;
-  }
-}
-
-auto RobotModel::maybe_reinitialize(
-    const CameraFeature & camera, const std::vector<Armor2d> & armors) -> bool
-{
-  const auto threshold = config_.auto_reinit_after_no_update;
-  if (threshold <= 0 || armors.empty()) return false;
-  if (no_update_frames_ < threshold) return false;
-
-  // Retry every `threshold` frames while the state stays unusable, instead of
-  // running another robust PnP on every single frame.
-  if (no_update_frames_ % threshold != 0) return false;
-
-  const auto frames = no_update_frames_;
-  if (!initialize(camera, armors)) {
-    tools::logger()->warn(
-      "[rmcs_ekf] auto re-init failed after {} frames without accepted update", frames);
-    return false;
-  }
-
-  ++reinit_count_;
-  tools::logger()->warn(
-    "[rmcs_ekf] auto re-init after {} frames without accepted update (total={})", frames,
-    reinit_count_);
-  return true;
+  if(frame_update_count_) {++update_count_;no_update_frames_=0;}
+  else ++no_update_frames_;
+  last_frame_update_count_=frame_update_count_;last_frame_rejected_count_=frame_rejected_count_;
+  const double missing=std::numeric_limits<double>::quiet_NaN();
+  last_frame_nis_=frame_nis_count_?frame_nis_max_:missing;
+  last_frame_nis_mean_=frame_nis_count_?frame_nis_sum_/frame_nis_count_:missing;
+  last_frame_residual_norm_=frame_nis_count_?frame_residual_sum_/frame_nis_count_:missing;
+  report_.nis_valid=frame_nis_count_>0;report_.nis_count=frame_nis_count_;
+  report_.accepted_lightbar_count=frame_update_count_;report_.rejected_lightbar_count=frame_rejected_count_;
+  report_.accepted_frame_count=update_count_;
+  last_update_accepted_=frame_update_count_>0;
+  report_.estimated_quality=frame_update_count_>=2 && !report_.ambiguous && !diverged()
+    && std::isfinite(report_.prediction_rms) && report_.prediction_rms<=std::sqrt(config_.noise_observation)*2;
+  return report_;
 }
 
 auto RobotModel::update_one(const Eigen::Vector2d & upper, const Eigen::Vector2d & lower,
   int lightbar_id) -> void
 {
   if (lightbar_id < 0 || lightbar_id >= 8) return;
+  pixel_innovations_[lightbar_id] = {};
   if (!observable_.visible[lightbar_id]) {
     last_update_accepted_ = false;
+    ++frame_rejected_count_;
+    report_.reject_reasons.push_back(RejectReason::Projection);
     return;
   }
 
@@ -954,6 +690,7 @@ auto RobotModel::update_one(const Eigen::Vector2d & upper, const Eigen::Vector2d
   if (!observable_.upper_valid[lightbar_id] || !observable_.lower_valid[lightbar_id]) {
     last_update_accepted_ = false;
     ++frame_rejected_count_;
+    report_.reject_reasons.push_back(RejectReason::Projection);
     return;
   }
 
@@ -968,24 +705,32 @@ auto RobotModel::update_one(const Eigen::Vector2d & upper, const Eigen::Vector2d
   if (jacobian.hasNaN() || !jacobian.allFinite()) {
     last_update_accepted_ = false;
     ++frame_rejected_count_;
+    report_.reject_reasons.push_back(RejectReason::Projection);
     return;
   }
 
   // v0.32: 显式类型，避免 Eigen 惰性表达式在每次使用时重复求值（含求逆）。
   const Eigen::Matrix4d innovation_covariance =
     jacobian * covariance_ * jacobian.transpose() + observation_noise_;
-  const Eigen::Matrix4d innovation_covariance_inv = innovation_covariance.inverse();
-  if (innovation_covariance_inv.hasNaN() || !innovation_covariance_inv.allFinite()) {
-    last_update_accepted_ = false;
-    ++frame_rejected_count_;
-    return;
+  Eigen::LDLT<Eigen::Matrix4d> factor(innovation_covariance);
+  if(!innovation_covariance.allFinite() || factor.info()!=Eigen::Success
+    || (factor.vectorD().array()<=0).any()) {
+    last_update_accepted_=false;++frame_rejected_count_;
+    report_.reject_reasons.push_back(RejectReason::InnovationSystem);return;
   }
-
-  // NIS: r^T S^-1 r，自由度 = 观测维数 4。
-  // 注意：这里用的是更新前的 covariance_ 和 innovation，符合标准 NIS 定义。
-  const double nis = (innovation.transpose() * innovation_covariance_inv * innovation)(0, 0);
+  const Eigen::Vector4d solved=factor.solve(innovation);
+  const double nis=innovation.dot(solved);
+  if(!solved.allFinite() || !std::isfinite(nis) || nis<0) {
+    ++frame_rejected_count_;report_.reject_reasons.push_back(RejectReason::InnovationSystem);return;
+  }
   last_nis_ = nis;
   last_residual_norm_ = innovation.norm();
+  // Telemetry only: preserve signed innovation before gating or state correction.
+  // If association assigns an ID twice, its slot represents the last attempt.
+  auto & pixel = pixel_innovations_[lightbar_id];
+  pixel.valid = innovation.allFinite() && std::isfinite(nis);
+  pixel.residual = {innovation[0], innovation[1], innovation[2], innovation[3]};
+  pixel.nis = nis;
 
   // Diagnostics count every valid measurement attempt, including rejected ones.
   frame_nis_sum_ += nis;
@@ -995,27 +740,19 @@ auto RobotModel::update_one(const Eigen::Vector2d & upper, const Eigen::Vector2d
 
   const auto gate_active =
     config_.nis_gate_enabled
-    && update_count_ >= static_cast<std::size_t>(std::max(0, config_.nis_gate_warmup_updates));
+    && update_count_ >= static_cast<std::size_t>(std::max(0, config_.nis_gate_warmup_updates))
+    && elapsed_s_ >= config_.nis_gate_warmup_s;
   const auto gate_threshold =
     config_.nis_gate_threshold > 0.0 ? config_.nis_gate_threshold : config_.nis_threshold;
 
   if (gate_active && nis > gate_threshold) {
-    // Reject the outlier: a wrong association or a sudden occlusion must not
-    // pull the state. Grow the position/velocity/angle uncertainty after a run
-    // of rejections so the filter can re-open its gate instead of staying stuck.
+    // Reject without changing the prior; recovery handles persistent mismatch.
     last_update_accepted_ = false;
     ++frame_rejected_count_;
     ++nis_rejected_count_;
     ++consecutive_nis_rejects_;
 
-    if (consecutive_nis_rejects_ >= std::max(1, config_.nis_max_consecutive_rejects)) {
-      if (config_.nis_reject_cov_inflation > 0.0) {
-        for (int index = kStateX; index <= kStateW; ++index) {
-          covariance_(index, index) += config_.nis_reject_cov_inflation;
-        }
-      }
-      consecutive_nis_rejects_ = 0;
-    }
+    report_.reject_reasons.push_back(RejectReason::NisGate);
 
     recent_nis_failures_.push_back(1);
     const auto window = static_cast<std::size_t>(std::max(1, config_.nis_window));
@@ -1025,34 +762,21 @@ auto RobotModel::update_one(const Eigen::Vector2d & upper, const Eigen::Vector2d
 
   consecutive_nis_rejects_ = 0;
 
-  const KalmanGain kalman_gain =
-    covariance_ * jacobian.transpose() * innovation_covariance_inv;
+  const KalmanGain kalman_gain = factor.solve((jacobian * covariance_).eval()).transpose();
 
   auto posterior_state = StateVector{ state_ + kalman_gain * innovation };
   if (posterior_state.hasNaN() || !posterior_state.allFinite()) {
     last_update_accepted_ = false;
     ++frame_rejected_count_;
+    report_.reject_reasons.push_back(RejectReason::StateBounds);
     return;
   }
 
   posterior_state[kStateA] = normalize_angle(posterior_state[kStateA]);
 
-  posterior_state[kStateRF] = std::clamp(
-    posterior_state[kStateRF], config_.radius_forward_min, config_.radius_forward_max);
-  posterior_state[kStateRL] = std::clamp(
-    posterior_state[kStateRL], config_.radius_lateral_min, config_.radius_lateral_max);
-  posterior_state[kStateHL] = std::clamp(
-    posterior_state[kStateHL], config_.height_lateral_min, config_.height_lateral_max);
-
-  posterior_state[kStateVx] =
-    std::clamp(posterior_state[kStateVx], config_.velocity_min, config_.velocity_max);
-  posterior_state[kStateVy] =
-    std::clamp(posterior_state[kStateVy], config_.velocity_min, config_.velocity_max);
-  posterior_state[kStateVz] =
-    std::clamp(posterior_state[kStateVz], config_.velocity_min, config_.velocity_max);
-  if (config_.rotation_speed_limit > 0.0) {
-    posterior_state[kStateW] = std::clamp(
-      posterior_state[kStateW], -config_.rotation_speed_limit, config_.rotation_speed_limit);
+  if(!valid_state(posterior_state)) {
+    last_update_accepted_=false;++frame_rejected_count_;
+    report_.reject_reasons.push_back(RejectReason::StateBounds);return;
   }
 
   const Covariance complement = Covariance::Identity() - kalman_gain * jacobian;
@@ -1060,7 +784,13 @@ auto RobotModel::update_one(const Eigen::Vector2d & upper, const Eigen::Vector2d
     complement * covariance_ * complement.transpose();
   posterior_covariance += kalman_gain * observation_noise_ * kalman_gain.transpose();
   posterior_covariance =
-    0.5 * (posterior_covariance + posterior_covariance.transpose());
+    (0.5 * (posterior_covariance + posterior_covariance.transpose())).eval();
+  Eigen::LDLT<Covariance> posterior_factor(posterior_covariance);
+  if(!posterior_covariance.allFinite() || posterior_factor.info()!=Eigen::Success
+    || (posterior_factor.vectorD().array()<=0).any()) {
+    last_update_accepted_=false;++frame_rejected_count_;
+    report_.reject_reasons.push_back(RejectReason::Covariance);return;
+  }
 
   state_ = posterior_state;
   covariance_ = posterior_covariance;
@@ -1081,6 +811,8 @@ auto RobotModel::diagnostics() const -> Diagnostics
   refresh_observable();
 
   Diagnostics result;
+  result.pixel_innovations = pixel_innovations_;
+  result.report = report_; result.nis_valid=report_.nis_valid; result.nis_count=report_.nis_count;
   result.state = state();
   result.variance = covariance_.diagonal();
   result.covariance_xy = covariance_.topLeftCorner<2, 2>();
@@ -1116,102 +848,10 @@ auto RobotModel::diagnostics() const -> Diagnostics
   return result;
 }
 
-auto RobotModel::make_observation_jacobian(int lightbar_id) const
-  -> Eigen::Matrix<double, 4, 11>
-{
-  constexpr auto kFiniteDifferenceStep = 1e-4;
-
-  Eigen::Matrix<double, 4, 11> jacobian;
-  jacobian.setZero();
-
-  if (state_.hasNaN() || !state_.allFinite()) return jacobian;
-
-  const auto theta = state_[kStateA];
-  const auto fx = observable_.camera.camera_matrix[0][0];
-  const auto fy = observable_.camera.camera_matrix[1][1];
-
-  const auto r_cam2odom =
-    observable_.camera.orientation.conjugate().toRotationMatrix();
-
-  const auto projection_jacobian =
-    [=](const Eigen::Vector3d & point) -> std::optional<Eigen::Matrix<double, 2, 3>> {
-    constexpr auto kMinDepth = 0.1;
-
-    const auto point_camera = ros2opencv_position(point);
-    const auto depth = point_camera.z();
-    if (depth < kMinDepth) return std::nullopt;
-
-    Eigen::Matrix<double, 2, 3> jacobian_pixel_camera;
-    jacobian_pixel_camera << fx / depth, 0.0, -fx * point_camera.x() / (depth * depth), 0.0,
-      fy / depth, -fy * point_camera.y() / (depth * depth);
-
-    Eigen::Matrix3d jacobian_camera_ros;
-    jacobian_camera_ros << 0.0, -1.0, 0.0, 0.0, 0.0, -1.0, 1.0, 0.0, 0.0;
-
-    return jacobian_pixel_camera * jacobian_camera_ros;
-  };
-
-  const auto theta_jacobian = [&](int id, bool is_upper) -> Eigen::Vector3d {
-    const auto compute = [&](double angle) -> Eigen::Vector3d {
-      RobotSolution solution;
-      solution.input.center =
-        Eigen::Vector3d{ state_[kStateX], state_[kStateY], state_[kStateZ] };
-      solution.input.toward =
-        Eigen::Quaterniond{ Eigen::AngleAxisd{ angle, Eigen::Vector3d::UnitZ() } };
-      solution.input.radius_forward = state_[kStateRF];
-      solution.input.radius_lateral = state_[kStateRL];
-      solution.input.height_lateral = state_[kStateHL];
-      solution.input.large = large_;
-
-      const auto lightbars = solution.solve_lightbars();
-      return is_upper ? lightbars[id].upper : lightbars[id].lower;
-    };
-
-    const auto position_plus = compute(theta + kFiniteDifferenceStep);
-    const auto position_minus = compute(theta - kFiniteDifferenceStep);
-    if (position_plus.hasNaN() || position_minus.hasNaN()) return Eigen::Vector3d::Zero();
-    return (position_plus - position_minus) / (2.0 * kFiniteDifferenceStep);
-  };
-
-  for (int endpoint = 0; endpoint < 2; ++endpoint) {
-    const auto row = endpoint * 2;
-    const auto is_upper = (endpoint == 0);
-    const auto & point_ros =
-      is_upper ? observable_.upper3d[lightbar_id] : observable_.lower3d[lightbar_id];
-
-    const auto jacobian_projection = projection_jacobian(point_ros);
-    if (!jacobian_projection) continue;
-
-    Eigen::Matrix<double, 3, 11> jacobian_position;
-    jacobian_position.setZero();
-
-    jacobian_position(0, kStateX) = 1.0;
-    jacobian_position(1, kStateY) = 1.0;
-    jacobian_position(2, kStateZ) = 1.0;
-    jacobian_position.block<3, 1>(0, kStateA) = theta_jacobian(lightbar_id, is_upper);
-
-    const auto armor_id = lightbar_id / 2;
-    const auto direction_forward =
-      Eigen::Vector3d{ std::cos(theta), std::sin(theta), 0.0 };
-    const auto direction_right =
-      Eigen::Vector3d{ -std::sin(theta), std::cos(theta), 0.0 };
-
-    auto jacobian_forward = jacobian_position.block<3, 1>(0, kStateRF);
-    auto jacobian_lateral = jacobian_position.block<3, 1>(0, kStateRL);
-
-    if (armor_id == 0) jacobian_forward = direction_forward;
-    if (armor_id == 2) jacobian_forward = -direction_forward;
-
-    if (armor_id == 1) jacobian_lateral = direction_right;
-    if (armor_id == 3) jacobian_lateral = -direction_right;
-
-    if (armor_id == 1 || armor_id == 3) jacobian_position(2, kStateHL) = 1.0;
-
-    jacobian.block<2, 11>(row, 0).noalias() =
-      *jacobian_projection * r_cam2odom * jacobian_position;
-  }
-
-  return jacobian;
+auto RobotModel::make_observation_jacobian(int lightbar_id) const -> Eigen::Matrix<double,4,11> {
+  const auto projected=project_lightbar(state_,large_,observable_.camera,lightbar_id);
+  if(projected) return projected->jacobian;
+  return Eigen::Matrix<double,4,11>::Constant(std::numeric_limits<double>::quiet_NaN());
 }
 
 auto RobotModel::state_from_vector(const StateVector & state) const -> State
@@ -1249,6 +889,7 @@ auto RobotModel::full() const -> std::array<Armor3d, 4>
 
 auto RobotModel::converge() const -> bool
 {
+  if (diverged()) return false;
   if (update_count_ < static_cast<std::size_t>(std::max(0, config_.converge_min_update)))
     return false;
 
@@ -1262,9 +903,7 @@ auto RobotModel::converge() const -> bool
   if (covariance_(kStateVy, kStateVy) > config_.converge_max_cov_v) return false;
   if (covariance_(kStateW, kStateW) > config_.converge_max_cov_w) return false;
 
-  const auto elapsed = std::chrono::duration<double>(
-    std::chrono::steady_clock::now() - init_timestamp_);
-  if (elapsed.count() < config_.converge_delay_s) return false;
+  if (elapsed_s_ < config_.converge_delay_s || report_.ambiguous) return false;
 
   return true;
 }
@@ -1277,12 +916,11 @@ auto RobotModel::diverged() const -> bool
 
   // A deadlock where detections keep arriving but nothing is accepted is just
   // as bad as a state blow-up; let the tracker drop and re-acquire the target.
-  if (config_.max_no_update_frames > 0 && no_update_frames_ > config_.max_no_update_frames)
-    return true;
+
 
   // Let the filter settle for a few frames after initialization; the first
   // sequential updates can legitimately produce large velocity corrections.
-  if (update_count_ < 5) return false;
+  if (!valid_state(state_)) return true;
 
   return covariance_(kStateX, kStateX) > config_.diverge_cov
     || covariance_(kStateY, kStateY) > config_.diverge_cov
@@ -1335,28 +973,9 @@ auto RobotModel::Observable::update(const StateVector & state) -> void
     upper3d[index] = upper_camera;
     lower3d[index] = lower_camera;
 
-    const auto upper_opencv = ros2opencv_position(upper_camera);
-    const auto lower_opencv = ros2opencv_position(lower_camera);
-
-    // A point behind the camera can still be "projected" by cv::projectPoints,
-    // producing a plausible-looking but physically invalid pixel.
-    constexpr auto kMinDepth = 0.1;
-    const auto upper_in_front = upper_opencv.z() > kMinDepth;
-    const auto lower_in_front = lower_opencv.z() > kMinDepth;
-
-    if (upper_in_front) {
-      if (const auto upper_projected =
-            project_camera_point(upper_opencv, intrinsic, distortion)) {
-        upper2d[index] = *upper_projected;
-        upper_valid[index] = true;
-      }
-    }
-    if (lower_in_front) {
-      if (const auto lower_projected =
-            project_camera_point(lower_opencv, intrinsic, distortion)) {
-        lower2d[index] = *lower_projected;
-        lower_valid[index] = true;
-      }
+    if(const auto projected=project_lightbar(state,large,camera,index)) {
+      upper2d[index]=projected->value.head<2>();lower2d[index]=projected->value.tail<2>();
+      upper_valid[index]=lower_valid[index]=true;
     }
   }
 

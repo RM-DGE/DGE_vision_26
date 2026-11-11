@@ -1,0 +1,327 @@
+{
+  "configById": {
+    "ImageViewPanel!dge_img": {
+      "cameraTopic": "/detector/result_img/compressed",
+      "enabledMarkerTopics": [],
+      "mode": "fit",
+      "pan": {
+        "x": 0,
+        "y": 0
+      },
+      "rotation": 0,
+      "synchronize": false,
+      "transformMarkers": false,
+      "zoom": 1,
+      "foxglovePanelTitle": "窗口"
+    },
+    "3D!dge_3d": {
+      "cameraState": {
+        "distance": 1.6,
+        "perspective": true,
+        "phi": 90,
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOffset": [
+          0,
+          0,
+          0
+        ],
+        "targetOrientation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "thetaOffset": 0,
+        "fovy": 55,
+        "near": 0.1,
+        "far": 5000
+      },
+      "followMode": "follow-pose",
+      "followTf": "camera_optical_frame",
+      "fixedFrame": "odom",
+      "scene": {
+        "backgroundColor": "#101118",
+        "transforms": {
+          "showLabel": false
+        },
+        "enableStats": false
+      },
+      "transforms": {
+        "frame:odom": {
+          "visible": true
+        },
+        "frame:gimbal_link": {
+          "visible": true
+        },
+        "frame:camera_optical_frame": {
+          "visible": true
+        }
+      },
+      "topics": {
+        "/dge/scene": {
+          "visible": true
+        },
+        "/dge/prediction": {
+          "visible": true
+        },
+        "/detector/marker": {
+          "visible": true,
+          "namespaces": {
+            "classification": {
+              "visible": false
+            },
+            "armors": {
+              "visible": true
+            }
+          },
+          "showOutlines": false
+        },
+        "/tracker/marker": {
+          "visible": true,
+          "showOutlines": false
+        },
+        "/camera_info": {
+          "visible": false
+        },
+        "/aiming_point": {
+          "visible": true
+        }
+      },
+      "layers": {
+        "dge-grid-0000-0000": {
+          "visible": true,
+          "frameLocked": true,
+          "label": "Grid",
+          "instanceId": "dge-grid-0000-0000",
+          "layerId": "foxglove.Grid",
+          "frameId": "odom",
+          "size": 10,
+          "divisions": 10,
+          "lineWidth": 1,
+          "color": "#248eff",
+          "position": [
+            0,
+            0,
+            -0.4
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "order": 1
+        }
+      },
+      "publish": {
+        "type": "point",
+        "poseTopic": "/move_base_simple/goal",
+        "pointTopic": "/clicked_point",
+        "poseEstimateTopic": "/initialpose",
+        "poseEstimateXDeviation": 0.5,
+        "poseEstimateYDeviation": 0.5,
+        "poseEstimateThetaDeviation": 0.26179939
+      },
+      "imageMode": {},
+      "title": "3D 场景（检测 / 跟踪 / 预测 / 瞄准）",
+      "foxglovePanelTitle": "3D 跟踪与预测"
+    },
+    "Plot!gimbal_tracking_1": {
+      "foxglovePanelTitle": "Yaw 跟踪：指令 / IMU",
+      "paths": [
+        {
+          "value": "/dge/debug.command_yaw_deg",
+          "label": "Yaw 指令",
+          "enabled": true,
+          "color": "#22d3ee",
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.gimbal_yaw_deg",
+          "label": "Yaw 反馈",
+          "enabled": true,
+          "color": "#fb923c",
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        }
+      ],
+      "showXAxisLabels": true,
+      "showYAxisLabels": true,
+      "showLegend": true,
+      "legendDisplay": "top",
+      "showPlotValuesInLegend": true,
+      "isSynced": true,
+      "xAxisVal": "timestamp",
+      "followingViewWidth": 10,
+      "yAxisLabel": "°"
+    },
+    "Plot!gimbal_tracking_2": {
+      "foxglovePanelTitle": "Pitch 跟踪：指令 / IMU",
+      "paths": [
+        {
+          "value": "/dge/debug.command_pitch_deg",
+          "label": "Pitch 指令",
+          "enabled": true,
+          "color": "#22d3ee",
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.gimbal_pitch_deg",
+          "label": "Pitch 反馈",
+          "enabled": true,
+          "color": "#fb923c",
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        }
+      ],
+      "showXAxisLabels": true,
+      "showYAxisLabels": true,
+      "showLegend": true,
+      "legendDisplay": "top",
+      "showPlotValuesInLegend": true,
+      "isSynced": true,
+      "xAxisVal": "timestamp",
+      "followingViewWidth": 10,
+      "yAxisLabel": "°"
+    },
+    "Plot!gimbal_tracking_3": {
+      "foxglovePanelTitle": "跟随误差：指令 − IMU",
+      "paths": [
+        {
+          "value": "/dge/debug.tracking_yaw_error_deg",
+          "label": "Yaw 误差",
+          "enabled": true,
+          "color": "#22d3ee",
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.tracking_pitch_error_deg",
+          "label": "Pitch 误差",
+          "enabled": true,
+          "color": "#fb923c",
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        }
+      ],
+      "showXAxisLabels": true,
+      "showYAxisLabels": true,
+      "showLegend": true,
+      "legendDisplay": "top",
+      "showPlotValuesInLegend": true,
+      "isSynced": true,
+      "xAxisVal": "timestamp",
+      "followingViewWidth": 10,
+      "yAxisLabel": "°"
+    },
+    "Plot!gimbal_tracking_4": {
+      "foxglovePanelTitle": "目标旋转角速度",
+      "paths": [
+        {
+          "value": "/dge/debug.state[7].@mul(57.29577951308232)",
+          "label": "EKF 估计转速",
+          "enabled": true,
+          "color": "#22d3ee",
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        }
+      ],
+      "showXAxisLabels": true,
+      "showYAxisLabels": true,
+      "showLegend": true,
+      "legendDisplay": "top",
+      "showPlotValuesInLegend": true,
+      "isSynced": true,
+      "xAxisVal": "timestamp",
+      "followingViewWidth": 10,
+      "yAxisLabel": "°/s"
+    },
+    "Plot!gimbal_tracking_5": {
+      "foxglovePanelTitle": "有效状态与开火指令",
+      "paths": [
+        {
+          "value": "/dge/debug.target_valid",
+          "label": "目标存在",
+          "enabled": true,
+          "color": "#22d3ee",
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.aim_valid",
+          "label": "瞄准有效",
+          "enabled": true,
+          "color": "#fb923c",
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.control",
+          "label": "控制有效",
+          "enabled": true,
+          "color": "#a78bfa",
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        },
+        {
+          "value": "/dge/debug.shoot",
+          "label": "开火指令",
+          "enabled": true,
+          "color": "#34d399",
+          "timestampMethod": "receiveTime",
+          "showLine": true
+        }
+      ],
+      "showXAxisLabels": true,
+      "showYAxisLabels": true,
+      "showLegend": true,
+      "legendDisplay": "top",
+      "showPlotValuesInLegend": true,
+      "isSynced": true,
+      "xAxisVal": "timestamp",
+      "followingViewWidth": 10,
+      "yAxisLabel": "0 / 1"
+    }
+  },
+  "globalVariables": {},
+  "userNodes": {},
+  "playbackConfig": {
+    "speed": 1
+  },
+  "layout": {
+    "direction": "row",
+    "first": {
+      "direction": "column",
+      "first": "ImageViewPanel!dge_img",
+      "second": "3D!dge_3d",
+      "splitPercentage": 45
+    },
+    "second": {
+      "direction": "column",
+      "first": {
+        "direction": "row",
+        "first": "Plot!gimbal_tracking_1",
+        "second": "Plot!gimbal_tracking_2",
+        "splitPercentage": 50
+      },
+      "second": {
+        "direction": "column",
+        "first": {
+          "direction": "row",
+          "first": "Plot!gimbal_tracking_3",
+          "second": "Plot!gimbal_tracking_4",
+          "splitPercentage": 50
+        },
+        "second": "Plot!gimbal_tracking_5",
+        "splitPercentage": 50
+      },
+      "splitPercentage": 33.3333
+    },
+    "splitPercentage": 38
+  }
+}

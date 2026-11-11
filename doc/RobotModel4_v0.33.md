@@ -1,5 +1,8 @@
 # RobotModel4 v0.33 修改记录（预测流程与 CWNA）
 
+> **历史文档**：v0.60 起过程噪声只保留 CWNA，`process_model` 开关与
+> DWNA / DIAG_RATE 分支已删除；本文 5.3、5.4 仅保留作推导记录。
+>
 > 基于 v0.32。范围：4 板 rmcs 像素 EKF 的**时间更新 / 状态外推拆分**、
 > **observable 懒刷新**、**过程噪声模型**，以及 Aimer / Planner / Foxglove
 > 的预测接口迁移。初始化、像素观测、anchor 关联和 NIS 门控的数学逻辑未改。

@@ -2,9 +2,7 @@
   "configById": {
     "ImageViewPanel!dge_img": {
       "cameraTopic": "/detector/result_img/compressed",
-      "enabledMarkerTopics": [
-        "/camera/annotations"
-      ],
+      "enabledMarkerTopics": [],
       "mode": "fit",
       "pan": {
         "x": 0,
@@ -14,7 +12,7 @@
       "synchronize": false,
       "transformMarkers": false,
       "zoom": 1,
-      "title": "识别结果图像"
+      "foxglovePanelTitle": "窗口"
     },
     "3D!dge_3d": {
       "cameraState": {

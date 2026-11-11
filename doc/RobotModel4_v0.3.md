@@ -1,7 +1,9 @@
 # RobotModel4 v0.3 改动说明（4 板像素 EKF）
 
-> **历史文档**：本文的 `q_rate_aware` 已被 `process_model: cwna | dwna | diag_rate`
-> 取代，当前配置见 `configs/*.yaml` 的 `q_accel_*` / `q_alpha`。
+> **历史文档**：本文的 `q_rate_aware` 已被 `q_accel_*` / `q_alpha` 取代；
+> v0.60 起过程噪声只保留 CWNA，`process_model` 开关已删除。文中提到的
+> `auto_reinit_after_no_update`、`max_no_update_frames`、`nis_reject_cov_inflation`
+> 等键也已删除，恢复改由 `RecoveryManager` 按图像时间处理。当前配置见 `configs/*.yaml`。
 >
 > 范围：只改 `tasks/auto_aim/rmcs_ekf/`（11 维、4 板、像素观测），
 > legacy 2/3 板 EKF 和 Target/Tracker 的接口不变。

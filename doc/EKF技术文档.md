@@ -334,7 +334,7 @@ $$
 
 候选板ID按正对相机程度取前三个；代价为中心像素距离、四边方向差及周长相对差的加权和。一对一贪心匹配，未成熟和成熟目标用不同门限。散灯另检查灯长比例、方向和端点位置门；要求已经匹配到完整板，不能仅靠散灯独立重获。
 
-这与hhh的anchor后横向递推不同，但它的几何cost也没有使用P。依据：[整板关联](<D:/1RM_vision/武科/awakening-main/src/tasks/auto_aim/armor_track/armor_target.cpp:508>)、[散灯关联](<D:/1RM_vision/武科/awakening-main/src/tasks/auto_aim/armor_track/armor_target.cpp:642>)。
+这与hhh的枚举一一匹配不同，但它的几何cost同样没有使用P。依据：[整板关联](<D:/1RM_vision/武科/awakening-main/src/tasks/auto_aim/armor_track/armor_target.cpp:508>)、[散灯关联](<D:/1RM_vision/武科/awakening-main/src/tasks/auto_aim/armor_track/armor_target.cpp:642>)。
 
 ### 3.5、NIS与拒绝观测
 
@@ -414,6 +414,8 @@ P采用简化 $(I-KH)P^-$ 更新。另有重要实现限制：predict更新 `P_p
 
 ## 5、本工程hhh
 
+本节按v0.60代码描述。相对早期版本的主要变化（单一CWNA、关联枚举、恢复管理器、旧配置键清理）已在5.3~5.6标注；版本改动清单、编译与验收见[RobotModel4_v0.60](C:/Users/hhh/Desktop/hhh/doc/RobotModel4_v0.60.md)。
+
 ### 5.1、设计状态变量、h/H/Z
 
 本工程继承SP25工程框架和Solver，普通目标滤波核心改为南理式11维像素模型：
@@ -424,21 +426,20 @@ $$
 
 ```text
 检测四角点
-→ 首次优先用原Solver世界系板位姿初始化，失败回退Robust PnP
+→ 首次使用统一 IPPE 候选与约束像素优化解算板位姿，通过质量验收后初始化整车（详见 RobotModel4_v0.60.md 2.0）
 → 按图像时间预测整车状态与P
 → 四板/八灯条投影
-→ anchor关联及左右交换检查
-→ 整帧粗像素门
-→ 灯条ID排序传播
+→ 枚举四板×观测×交换的一一关联
+→ 每条候选边的角点RMS门
 → 每灯条标准NIS门及EKF顺序更新
-→ 连续无接受更新达到阈值时PnP重初始化
+→ 连续拒绝时由恢复管理器窗口拟合候选接管，或判LOST
 ```
 
 实际 $z_j=[u_t,v_t,u_b,v_b]^T$。虽然跟踪默认仍运行Solver PnP，但correct只消费像素角点，不消费板三维位姿；实际调用的独立散灯列表为空。
 
 H的结构与南理相同：部分解析、角度三维几何中心差分、针孔投影导数。h含畸变而H未含畸变导数；零畸变仿真不受该差异影响，真机非零畸变需核验。
 
-依据：[初始化与实际输入](C:/Users/hhh/Desktop/hhh/tasks/auto_aim/target.cpp:29)、[Tracker](C:/Users/hhh/Desktop/hhh/tasks/auto_aim/tracker.cpp:259)、[H](C:/Users/hhh/Desktop/hhh/tasks/auto_aim/rmcs_ekf/rmcs_ekf.cpp:1119)。
+依据：[初始化与实际输入](C:/Users/hhh/Desktop/hhh/tasks/auto_aim/target.cpp:29)、[Tracker](C:/Users/hhh/Desktop/hhh/tasks/auto_aim/tracker.cpp:259)、[H与投影](C:/Users/hhh/Desktop/hhh/tasks/auto_aim/rmcs_ekf/projection.cpp:19)。
 
 ### 5.2、设计过程模型F
 
@@ -456,48 +457,56 @@ $$
 R=40I_4
 $$
 
-默认CWNA：x/y块用 $B_C(1,dt)$，z块用 $B_C(10^{-4},dt)$，角度块用 $B_C(10,dt)$；半径、高差采用 $qdt$ 随机游走。还支持DWNA和DIAG_RATE作对照，但后者是对角噪声乘dt，与南理原始“每预测固定加Q”不同。
+Q只有CWNA：x/y块用 $B_C(1,dt)$，z块用 $B_C(10^{-4},dt)$，角度块用 $B_C(10,dt)$；半径、高差采用 $qdt$ 随机游走。v0.60起删除DWNA与DIAG_RATE对照分支（原用于与sp25/旧rmcs的Q消融），实测阶段只维护单一Q模型，避免不可达代码和配置歧义；历史模型推导见[RobotModel4_v0.33](<C:/Users/hhh/Desktop/hhh/doc/RobotModel4_v0.33.md>)。
+
+同一轮清理删除了不再生效的配置键：`process_model`、`noise_x/y/z`、`noise_vx/vy/vz`、`noise_rotation_angle/speed`、`auto_reinit_after_no_update`、`max_no_update_frames`、`nis_max_consecutive_rejects`、`nis_reject_cov_inflation`。旧YAML里残留这些键会被忽略，不会报错。
 
 初始中心来自水平板法线偏移0.2m，速度/角速度为0，两半径为0.2m，高差为0。P比南理更紧。更新使用Joseph形式加对称化，保持已有数值稳定性结构。
 
-依据：[配置](C:/Users/hhh/Desktop/hhh/configs/standard3.yaml:39)、[P/Q构造](C:/Users/hhh/Desktop/hhh/tasks/auto_aim/rmcs_ekf/rmcs_ekf.cpp:454)、[Q传播](C:/Users/hhh/Desktop/hhh/tasks/auto_aim/rmcs_ekf/rmcs_ekf.cpp:614)。
+依据：[配置](C:/Users/hhh/Desktop/hhh/configs/standard3.yaml:39)、[P/Q构造](C:/Users/hhh/Desktop/hhh/tasks/auto_aim/rmcs_ekf/rmcs_ekf.cpp:407)、[Q传播](C:/Users/hhh/Desktop/hhh/tasks/auto_aim/rmcs_ekf/rmcs_ekf.cpp:607)。
 
 ### 5.4、门控与数据关联
 
-相对南理增加左右灯条交换尝试，以适应图像左右与机器人灯条ID方向差异。选最小四角误差anchor，再检查：
+相对南理增加左右灯条交换尝试，以适应图像左右与机器人灯条ID方向差异。v0.60起不再逐板选anchor再排序传播，而是一次性枚举"4块板 × 合法观测 × 是否交换"的一一匹配，取全局最优：
 
 $$
 e=\sqrt{\tfrac14\sum_{k=1}^4\|p_k^{obs}-p_k^{pred}\|^2},\qquad
 T=\max(40\mathrm{px},0.5\,w_{pred})
 $$
 
-若 $e>T$ 则整帧提前返回。e是四角欧氏误差的RMS，不是简单误差均值。通过后按上端点x排序，递推灯条ID并逐条更新。
+每条候选边先过 $e<T$ 的角点RMS门；$e$ 是四角欧氏误差的RMS，不是误差均值。组合代价（默认 miss/clutter 权重均为 30）为
 
-该粗门不依赖P，且在NIS之前执行。只要有同name/type检测，外层Tracker仍可视为found，即使EKF全拒绝；因此tracking状态不能证明EKF本帧有有效更新。
+$$
+C=30\,n_{\text{miss}}+30\,n_{\text{clutter}}+\tfrac12\left(\mathrm{NIS}+\log\det S+m\log 2\pi\right)
+$$
 
-依据：[correct与粗门](C:/Users/hhh/Desktop/hhh/tasks/auto_aim/rmcs_ekf/rmcs_ekf.cpp:716)。
+其中 $m=8n$ 是已选边的观测维数。若次优代价与最优之差小于 `association_ambiguity_gap`（2.0），标记为 ambiguous，本帧可靠度下降但匹配仍保留。
+
+合法观测要求 large 一致、四角有限且凸、上下端 y 序正确、与已有观测端点距离≥0.5px，且最多保留6条。该匹配只做关联，不依赖本帧EKF更新；NIS门在之后的逐灯条更新里。只要有同name/type检测，外层Tracker仍可视为found，即使EKF全拒绝；因此tracking状态不能证明EKF本帧有有效更新。
+
+依据：[关联枚举](C:/Users/hhh/Desktop/hhh/tasks/auto_aim/rmcs_ekf/association.cpp:25)、[correct](C:/Users/hhh/Desktop/hhh/tasks/auto_aim/rmcs_ekf/rmcs_ekf.cpp:687)。
 
 ### 5.5、NIS与拒绝观测
 
-每根灯条用更新前 $\nu,S$ 计算标准四维NIS。配置预热10次correct后启用门控：监控阈值9.488，拒绝阈值13.277；连续5次NIS拒绝，在位置、速度、角度和角速的P对角各加0.01。
+每根灯条用更新前 $\nu,S$ 计算标准四维NIS。配置在预热10次correct且滤波时间≥0.1s后启用门控：监控阈值9.488，拒绝阈值13.277。NIS拒绝只拒观测、不改先验，也不再放大P；持续失配交给恢复管理器处理。
 
 三个语义细节：
 
-1. 粗门提前返回时NIS记0，表示未执行检验，不能解释为残差良好。
-2. `update_count_`在通过anchor阶段后增加，即使所有灯条均拒绝；它不是成功融合帧数。
+1. 没有有效尝试（无匹配、关联为空）时，帧NIS发布 NaN 且 `nis_valid=false`，表示未执行检验，不能解释为残差良好。
+2. `update_count_` 只在本帧至少接受一根灯条时增加（v0.60 起），等价于有效融合帧数；无匹配、边门拒绝或全部NIS拒绝只增加 `no_update_frames_`。
 3. 帧NIS输出是本帧有效尝试的最大单灯条NIS；另有均值字段。最大值超过阈值的频率不能直接按单次四维卡方失败率解释。
 
-依据：[NIS与更新](C:/Users/hhh/Desktop/hhh/tasks/auto_aim/rmcs_ekf/rmcs_ekf.cpp:943)。
+依据：[NIS与更新](C:/Users/hhh/Desktop/hhh/tasks/auto_aim/rmcs_ekf/rmcs_ekf.cpp:743)。
 
-### 5.6、时间、收敛与重建
+### 5.6、时间、收敛与恢复
 
-有检测但无anchor、粗门拒绝或所有灯条拒绝时，增加 `no_update_frames`；无检测时不增加该计数，由Tracker的temp_lost处理。连续10帧无接受更新，重新调用当前单帧Robust PnP，重设全部运动状态、P及NIS预热；速度和角速度再次为0。
+有检测但无匹配、边门拒绝或所有灯条NIS拒绝时，增加 `no_update_frames`；无检测时不增加该计数，由Tracker的temp_lost处理。v0.60起不再按帧数自动重初始化，改由RecoveryManager按图像时间管理健康状态（INIT/HEALTHY/COASTING/DEGRADED/LOST）。
 
-收敛还检查最小correct数、连续无更新数、位置/速度/角速协方差和初始化时长。数值非法、状态范围越界或长期无更新可触发发散。计数与参数均应按实际加载配置解释。
+连续拒绝≥3帧且距上次接受≥0.04s时，用最近0.12s窗口（3~8帧先验）拟合候选。候选要连续2帧、跨度≥0.02s通过关联RMS、相对主模型改善比例、身份距离和未来位置方差检查才接管，接管时整体替换状态与P；0.15s内未接管则过期。超过0.5s无接受更新或状态越界判LOST。
 
-源码可形成以下失配循环：运动突变→旧速度外推→粗门拒绝→无法接受修正→单帧重建清速度→运动目标再次失配。是否为某段数据的实际原因，需要同输入回放确认。
+收敛还检查最小correct数、连续无更新数、位置/速度/角速协方差和初始化时长。数值非法、状态越界或协方差超阈值触发发散；长期无接受更新由恢复管理器判LOST，不再走 `max_no_update_frames`。
 
-实验worktree另有两帧拟合、第三帧确认的窗口恢复，其状态与验证结果独立于本文主工程。依据：[重初始化](C:/Users/hhh/Desktop/hhh/tasks/auto_aim/rmcs_ekf/rmcs_ekf.cpp:918)。
+旧版“单帧PnP重建清速度”的路径已随 `auto_reinit_after_no_update` 删除；接管后的速度、角速度来自窗口拟合，不是清零。依据：[RecoveryManager](C:/Users/hhh/Desktop/hhh/tasks/auto_aim/rmcs_ekf/recovery.cpp:212)、[Tracker的LOST判断](C:/Users/hhh/Desktop/hhh/tasks/auto_aim/tracker.cpp:220)。
 
 ## 6、横向对比与算法含义
 
@@ -512,8 +521,8 @@ $$
 | 标准更新前NIS | 否，后验统计 | 无 | 无 | 无 | 有 |
 | 多观测更新 | 逐板 | 逐灯条 | 堆叠迭代 | 单板 | 逐灯条 |
 | P数值更新 | Joseph | Joseph+对称 | Joseph+对称 | 简化形式 | Joseph+对称 |
-| 关联 | 最近三板角差 | anchor+灯条排序 | 一对一几何代价 | 最近板+位置/yaw门 | anchor+粗门+灯条NIS |
-| 恢复特点 | lost后重建 | 删除后重建 | 暂丢保留+备用假设 | 换板改状态 | 10帧拒绝后重建 |
+| 关联 | 最近三板角差 | anchor+灯条排序 | 一对一几何代价 | 最近板+位置/yaw门 | 枚举一一匹配（含交换）+NIS门 |
+| 恢复特点 | lost后重建 | 删除后重建 | 暂丢保留+备用假设 | 换板改状态 | 窗口候选接管，0.5s判LOST |
 
 像素域方案避免将每帧PnP点估计直接当测量，但仍受标定、角点噪声、可观测性和关联影响。PnP域方案结构较直观，但PnP深度/姿态噪声及相关性必须体现在R中。两者不能只凭状态维数或滤波器名称判断精度高低。
 

@@ -456,3 +456,22 @@ DPS = 单位时间射击窗口占比 \times 射频 \times 单发子弹伤害
 
 
 # DGE_vision_26
+日常两条命令
+本机改完 → 推到小电脑：
+powershell
+
+cd C:\Users\hhh\Desktop\hhh
+git add -A
+git commit -m "说明"
+git push robot test
+ssh hhh@10.0.0.136 "cd ~/桌面/hhh && git merge --ff-only hub/test"
+小电脑改完 → 拉回本机：
+
+powershell
+
+# 先在小电脑上
+cd ~/桌面/hhh && git add -u && git commit -m "说明" && git push hub test
+
+# 再回本机
+cd C:\Users\hhh\Desktop\hhh
+git pull robot test

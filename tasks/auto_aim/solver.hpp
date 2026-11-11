@@ -23,7 +23,7 @@ public:
   // rmcs pixel-domain EKF.
   auto camera_feature() const -> rmcs_ekf::CameraFeature;
 
-  void solve(Armor & armor) const;
+  [[nodiscard]] bool solve(Armor & armor) const;
 
   std::vector<cv::Point2f> reproject_armor(
     const Eigen::Vector3d & xyz_in_world, double yaw, ArmorType type, ArmorName name) const;
@@ -33,6 +33,7 @@ public:
   std::vector<cv::Point2f> world2pixel(const std::vector<cv::Point3f> & worldPoints);
 
 private:
+  rmcs_ekf::Config ekf_config_;
   cv::Mat camera_matrix_;
   cv::Mat distort_coeffs_;
   Eigen::Matrix3d R_gimbal2imubody_;
@@ -40,12 +41,10 @@ private:
   Eigen::Vector3d t_camera2gimbal_;
   Eigen::Matrix3d R_gimbal2world_;
 
-  void optimize_yaw(Armor & armor) const;
 
-  double armor_reprojection_error(const Armor & armor, double yaw, const double & inclined) const;
-  double SJTU_cost(
-    const std::vector<cv::Point2f> & cv_refs, const std::vector<cv::Point2f> & cv_pts,
-    const double & inclined) const;
+
+
+
 };
 
 }  // namespace auto_aim

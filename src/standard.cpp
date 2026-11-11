@@ -235,6 +235,7 @@
 #include "tools/exiter.hpp"
 #include "tools/logger.hpp"
 #include "tools/plotter.hpp"
+#include "tools/Foxglove/foxglove.hpp"
 #include <nlohmann/json.hpp>
 #include "tools/math_tools.hpp"
 
@@ -243,12 +244,14 @@ using namespace std::chrono_literals;
 //ros2 run plotjuggler plotjuggler
 const std::string keys =
   "{help h usage ? |      | 输出命令行参数说明}"
-  "{@config-path   | configs/standard3.yaml | 配置文件路径 }";
+  "{@config-path   | configs/standard3.yaml | 配置文件路径 }"
+  "{d display      |      | 显示本地可视化窗口 }";
 
 int main(int argc, char * argv[])
 {
   cv::CommandLineParser cli(argc, argv, keys);
   auto config_path = cli.get<std::string>(0);
+  const bool display = cli.has("display");
   if (cli.has("help") || config_path.empty()) {
     cli.printMessage();
     return 0;
@@ -265,6 +268,9 @@ int main(int argc, char * argv[])
   auto_aim::Tracker tracker(config_path, solver);
   auto_aim::Aimer aimer(config_path);
   auto_aim::Shooter shooter(config_path);
+
+  tools::FoxgloveServer foxglove(8765);
+  foxglove.configure_camera(config_path);
 
   cv::Mat img;
   std::chrono::steady_clock::time_point t;
@@ -303,11 +309,33 @@ int main(int argc, char * argv[])
     // 4. 发送数据
     cboard.send(command);
 
-    
+    const auto current_time = std::chrono::steady_clock::now();
+    const std::chrono::duration<double> diff = current_time - last_time;
+    fps = 1.0 / diff.count();
+    last_time = current_time;
+
+    const bool aim_valid = aimer.debug_aim_point.valid;
+    const Eigen::Vector4d aim_xyza =
+      aim_valid ? aimer.debug_aim_point.xyza : Eigen::Vector4d::Zero();
+    foxglove.publish_annotations(armors);
+    foxglove.publish_number_image(armors);
+    foxglove.publish_rmvision(armors, targets, aim_xyza);
+    foxglove.publish_detector_markers(armors);
+    foxglove.publish_tracker_markers(targets);
+    const Eigen::Quaterniond gimbal_world_q(solver.R_gimbal2world());
+    foxglove.publish_tf(gimbal_world_q);
+    foxglove.publish_scene(armors, targets, aim_valid, aim_xyza, gimbal_world_q);
+    foxglove.publish_prediction(targets);
+    foxglove.publish_debug(fps, command, targets, armors, aim_valid, aim_xyza, current_ypr);
+
+    // 本地窗口与 Foxglove 使用同一份画面，原始图像供相机话题使用。
+    if (!display && !foxglove.has_clients()) continue;
+    cv::Mat window = img.clone();
+
     //可视化
     for(const auto& armor : armors) {
         for(int i=0; i<4; i++) 
-            cv::line(img, armor.points[i], armor.points[(i+1)%4], {0,255,0}, 2);
+            cv::line(window, armor.points[i], armor.points[(i+1)%4], {0,255,0}, 2);
     }
 
     // //红框
@@ -329,29 +357,28 @@ int main(int argc, char * argv[])
     //     }
     // }
 
-    cv::resize(img, img, {}, 0.5, 0.5);
+    cv::resize(window, window, {}, 0.5, 0.5);
     // --- 绘制文字 ---
     int font = cv::FONT_HERSHEY_SIMPLEX;
     double scale = 0.7; // 字体大小
     int thickness = 1;  // 字体粗细
     
     // 1. 第一行：FPS (青色)
-    auto current_time = std::chrono::steady_clock::now();
-    std::chrono::duration<double> diff = current_time - last_time;
-    fps = 1.0 / diff.count();
-    last_time = current_time;
     std::string text_fps = fmt::format("FPS: {:.1f}", fps);
-    cv::putText(img, text_fps, cv::Point(10, 20), font, scale, cv::Scalar(255, 255, 255), thickness);
+    cv::putText(window, text_fps, cv::Point(10, 20), font, scale, cv::Scalar(255, 255, 255), thickness);
     // 2. 第二行：Yaw 和 Pitch (绿色)
     std::string text_angles = fmt::format("Yaw: {:.2f}  Pitch: {:.2f}", command.yaw, command.pitch);
-    cv::putText(img, text_angles, cv::Point(10, 40), font, scale, cv::Scalar(0, 255, 0), thickness);
+    cv::putText(window, text_angles, cv::Point(10, 40), font, scale, cv::Scalar(0, 255, 0), thickness);
     // 3. 第三行：Shoot 0/1 (红色)
     // Shoot 状态通过三目运算符转换为 1 或 0
     std::string text_shoot = fmt::format("Shoot: {}", command.shoot ? 1 : 0);
-    cv::putText(img, text_shoot, cv::Point(10, 60), font, scale, cv::Scalar(0, 0, 255), thickness);
+    cv::putText(window, text_shoot, cv::Point(10, 60), font, scale, cv::Scalar(0, 0, 255), thickness);
 
-    cv::imshow("Standard Test", img);
-    if (cv::waitKey(1) == 'q') break;
+    foxglove.publish_image(img, 70, window);
+    if (display) {
+      cv::imshow("Standard Test", window);
+      if (cv::waitKey(1) == 'q') break;
+    }
 
     
     // //曲线可视化

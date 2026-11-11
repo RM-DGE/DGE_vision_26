@@ -8,6 +8,7 @@
 
 #include "tools/logger.hpp"
 #include "tools/math_tools.hpp"
+#include "tools/ekf_record.hpp"
 
 namespace auto_aim
 {
@@ -19,12 +20,30 @@ namespace
 /// 2/3-armor targets (balance / outpost / base) are no longer supported.
 auto is_supported_target(const Armor & armor) -> bool
 {
+  if (armor.name < ArmorName::one || armor.name >= ArmorName::not_armor ||
+      (armor.type != ArmorType::small && armor.type != ArmorType::big) ||
+      armor.color < Color::red || armor.color > Color::purple) return false;
   if (armor.name == ArmorName::outpost || armor.name == ArmorName::base) return false;
 
   const auto is_balance = armor.type == ArmorType::big &&
                           (armor.name == ArmorName::three || armor.name == ArmorName::four ||
                            armor.name == ArmorName::five);
   return !is_balance;
+}
+
+bool valid_corners(const Armor & armor)
+{
+  if (armor.points.size()!=4) return false;
+  for (const auto & p:armor.points) if(!std::isfinite(p.x) || !std::isfinite(p.y)) return false;
+  double sign=0;
+  for(int i=0;i<4;++i) {
+    const auto d=armor.points[(i+1)%4]-armor.points[i];
+    const auto e=armor.points[(i+2)%4]-armor.points[(i+1)%4];
+    const double cross=double(d.x)*e.y-double(d.y)*e.x;
+    if(cv::norm(d)<1 || std::abs(cross)<1e-3) return false;
+    if(i==0) sign=cross; else if(cross*sign<=0) return false;
+  }
+  return sign>0 && armor.points[0].y<armor.points[3].y && armor.points[1].y<armor.points[2].y;
 }
 
 }  // namespace
@@ -46,6 +65,21 @@ Tracker::Tracker(const std::string & config_path, Solver & solver)
   if (!std::isfinite(max_frame_gap_s_) || max_frame_gap_s_ <= 0)
     throw std::invalid_argument("max_frame_gap_s must be finite and positive");
   ekf_config_ = rmcs_ekf::load_config(yaml["ekf"]);
+  recovery_settings_=rmcs_ekf::load_recovery_settings(yaml["recovery"]);
+  recorder_=std::make_shared<tools::EkfRecorder>(config_path);
+}
+
+bool Tracker::accept_timestamp(std::chrono::steady_clock::time_point t)
+{
+  if(timestamp_initialized_) {
+    const double dt=tools::delta_time(t,last_timestamp_);
+    if(!std::isfinite(dt) || dt<=0) return false;
+    if(dt>max_frame_gap_s_) {
+      target_.interrupt();state_="lost";pre_state_="lost";
+      detect_count_=temp_lost_count_=0;
+    }
+  }
+  timestamp_initialized_=true;last_timestamp_=t;return true;
 }
 
 std::string Tracker::state() const { return state_; }
@@ -53,17 +87,12 @@ std::string Tracker::state() const { return state_; }
 std::list<Target> Tracker::track(
   std::list<Armor> & armors, std::chrono::steady_clock::time_point t, bool use_enemy_color)
 {
-  auto dt = tools::delta_time(t, last_timestamp_);
-  last_timestamp_ = t;
-
-  // 时间间隔过长，说明可能发生了相机离线
-  if (state_ != "lost" && dt > max_frame_gap_s_) {
-    tools::logger()->warn("[Tracker] reset reason=frame_gap dt={:.3f}s limit={:.3f}s", dt, max_frame_gap_s_);
-    state_ = "lost";
-  }
+  tools::EkfFrameLog log(*recorder_,armors,t,solver_.camera_feature(),
+    [this]()->const Target* {return state_=="lost"?nullptr:&target_;},[this]{return state_;},use_enemy_color);
+  if(!accept_timestamp(t)) return state_=="lost" ? std::list<Target>{} : std::list<Target>{target_};
   // 只保留己方颜色且受支持的 4 板目标
   armors.remove_if(
-    [&](const auto_aim::Armor & a) { return a.color != enemy_color_ || !is_supported_target(a); });
+    [&](const auto_aim::Armor & a) { return (use_enemy_color && a.color != enemy_color_) || !is_supported_target(a) || !valid_corners(a); });
 
   // 优先选择靠近图像中心的装甲板
   armors.sort([](const Armor & a, const Armor & b) {
@@ -113,19 +142,17 @@ std::tuple<omniperception::DetectionResult, std::list<Target>> Tracker::track(
     temp_target = detection_queue.front();
   }
 
-  auto dt = tools::delta_time(t, last_timestamp_);
-  last_timestamp_ = t;
-
-  // 时间间隔过长，说明可能发生了相机离线
-  if (state_ != "lost" && dt > max_frame_gap_s_) {
-    tools::logger()->warn("[Tracker] reset reason=frame_gap dt={:.3f}s limit={:.3f}s", dt, max_frame_gap_s_);
-    state_ = "lost";
-  }
+  tools::EkfFrameLog log(*recorder_,armors,t,solver_.camera_feature(),
+    [this]()->const Target* {return state_=="lost"?nullptr:&target_;},[this]{return state_;},use_enemy_color);
+  log.omni(detection_queue);
+  if(!accept_timestamp(t)) return {switch_target,state_=="lost" ? std::list<Target>{} : std::list<Target>{target_}};
 
   // 全向感知结果同样只保留 4 板目标，避免切到不支持的前哨站/平衡/基地
-  armors.remove_if([](const auto_aim::Armor & a) { return !is_supported_target(a); });
+  armors.remove_if([&](const auto_aim::Armor & a) {
+    return !is_supported_target(a) || !valid_corners(a) || (use_enemy_color && a.color!=enemy_color_);
+  });
   temp_target.armors.remove_if(
-    [](const auto_aim::Armor & a) { return !is_supported_target(a); });
+    [&](const auto_aim::Armor & a) { return !is_supported_target(a) || !valid_corners(a) || (use_enemy_color && a.color!=enemy_color_); });
 
   // 优先选择靠近图像中心的装甲板
   armors.sort([](const Armor & a, const Armor & b) {
@@ -162,11 +189,7 @@ std::tuple<omniperception::DetectionResult, std::list<Target>> Tracker::track(
   }
 
   else if (state_ == "switching") {
-    found = !armors.empty() && armors.front().priority == omni_target_priority_;
-  }
-
-  else if (state_ == "detecting" && pre_state_ == "switching") {
-    found = set_target(armors, t);
+    found = !armors.empty() && armors.front().priority == omni_target_priority_ && set_target(armors,t);
   }
 
   else {
@@ -194,6 +217,15 @@ std::tuple<omniperception::DetectionResult, std::list<Target>> Tracker::track(
 
 void Tracker::state_machine(bool found)
 {
+  // RecoveryManager owns estimator retention and loss; business switching remains separate.
+  if(state_!="lost" && state_!="switching") {
+    if(target_.recovery_status().health==rmcs_ekf::Health::LOST) {state_="lost";return;}
+    if(found) {
+      ++detect_count_;
+      state_=(target_.reliable() && detect_count_>=min_detect_count_) ? "tracking" : "detecting";
+    } else state_="temp_lost";
+    return;
+  }
   if (state_ == "lost") {
     if (!found) return;
 
@@ -242,16 +274,21 @@ bool Tracker::set_target(std::list<Armor> & armors, std::chrono::steady_clock::t
   if (armors.empty()) return false;
 
   auto & armor = armors.front();
-  if (!is_supported_target(armor)) return false;
+  if (!is_supported_target(armor) || !valid_corners(armor)) return false;
 
-  solver_.solve(armor);
+  if (!solver_.solve(armor)) return false;
 
-  target_ = Target(armor, t, ekf_config_, solver_.camera_feature());
-  if (!target_.checkinit()) {
+  Target next(armor, t, ekf_config_, solver_.camera_feature(), recovery_settings_);
+  if (!next.checkinit()) {
     tools::logger()->warn(
       "[Tracker] failed to initialize 4-armor EKF for {}", ARMOR_NAMES[armor.name]);
     return false;
   }
+  recovery_count_+=target_.recovery_status().recovery_count;
+  candidate_failed_count_+=target_.recovery_status().candidate_failed_count;
+  if(target_.checkinit()) ++reinit_count_;
+  target_=std::move(next); ++track_id_;
+  detect_count_=temp_lost_count_=0;
 
   return true;
 }
@@ -262,7 +299,7 @@ bool Tracker::update_target(std::list<Armor> & armors, std::chrono::steady_clock
 
   int found_count = 0;
   for (const auto & armor : armors) {
-    if (armor.name != target_.name || armor.type != target_.armor_type) continue;
+    if (armor.name != target_.name || armor.type != target_.armor_type || armor.color!=target_.color()) continue;
     found_count++;
   }
 
@@ -275,17 +312,18 @@ bool Tracker::update_target(std::list<Armor> & armors, std::chrono::steady_clock
 
   std::list<Armor> matched_armors;
   for (auto & armor : armors) {
-    if (armor.name != target_.name || armor.type != target_.armor_type) continue;
+    if (armor.name != target_.name || armor.type != target_.armor_type || armor.color!=target_.color()) continue;
 
     // v0.32: 4 板像素 EKF 只用角点，不用 PnP 结果。skip_tracking_pnp=true 时跳过
     // 逐板解算（省掉每块板 140 次 yaw 重投影搜索），但 Foxglove 的 detections
     // 方块会丢失世界系位姿，默认关闭。
-    if (!ekf_config_.skip_tracking_pnp) solver_.solve(armor);
+    if (!ekf_config_.skip_tracking_pnp) (void)solver_.solve(armor);
+    else armor.pose_valid=false;
     matched_armors.push_back(armor);
   }
 
   target_.update(matched_armors, solver_.camera_feature());
-  return true;
+  return target_.diagnostics().frame_update_count>0;
 }
 
 }  // namespace auto_aim
