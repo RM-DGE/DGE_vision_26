@@ -1432,6 +1432,10 @@ void FoxgloveServer::publish_debug(
     status_row("接受 / 拒绝", std::to_string(diag.frame_update_count) + " / " +
       std::to_string(diag.frame_rejected_count), "本帧更新计数；拒绝含门控与投影无效");
     status_row("关联板编号", std::to_string(diag.last_observed_id), "模型板编号 0–3；非实体身份");
+    status_row("几何学习 0/2", diag.report.geometry_ready[0] ? "已确认" : "学习中",
+      "需有效更新、时间跨度、另一板组观测及半径不确定度共同满足");
+    status_row("几何学习 1/3", diag.report.geometry_ready[1] ? "已确认" : "学习中",
+      "另需高差不确定度通过；未确认的板组不用于任意预测选板");
     status_row("连续未更新", std::to_string(diag.no_update_frames), "有检测但没有接受更新的连续帧数");
     status_row("重建次数", std::to_string(diag.reinit_count), "当前目标内自动重建计数");
     status_row("NIS 门控配置", diag.nis_gate_enabled ? "启用" : "关闭",

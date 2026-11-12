@@ -24,7 +24,8 @@ static bool legal(const Armor2d & a) {
 }
 AssociationResult associate_armors(const RobotModel::StateVector & x,
   const RobotModel::Covariance & P,bool large,const CameraFeature & camera,
-  const std::vector<Armor2d> & observations,const Config & config) {
+  const std::vector<Armor2d> & observations,const Config & config,
+  const std::array<bool,2> * geometry_ready) {
   AssociationResult result;
   if(!x.allFinite() || !P.allFinite() || !P.isApprox(P.transpose(),1e-10)
     || !valid_camera(camera) || !std::isfinite(config.noise_observation)
@@ -58,12 +59,22 @@ AssociationResult associate_armors(const RobotModel::StateVector & x,
     const Eigen::Vector3d ray=(camera.translation-plates[a].translation).normalized();
     if(!p || !q || !ray.allFinite() || face.dot(ray)<=std::cos(config.yaw_full_max)) continue;
     ++visible;
+    Eigen::Matrix<double,8,11> H;
+    H.topRows<4>()=p->jacobian;H.bottomRows<4>()=q->jacobian;
+    const double width=(p->value.head<2>()-q->value.head<2>()).norm();
+    double gate=std::max(config.anchor_max_corner_error,config.anchor_max_relative_error*width);
+    if(geometry_ready && !(*geometry_ready)[a%2] && config.association_early_updates>0) {
+      // E[sum of four 2D squared errors]/4, in the SAME RMS units as the gate.
+      // This only limits candidate enumeration; joint likelihood and NIS still apply.
+      const double rms_variance=(H*P*H.transpose()).trace()/4+2*config.noise_observation;
+      const double uncertainty=3*std::sqrt(std::max(0.0,rms_variance));
+      gate=std::max(gate,std::min(config.association_early_max_corner_error,uncertainty));
+    }
+    result.gate_px[a]=gate;
     for(auto i:result.legal_observations) for(bool swap:{false,true}) {
       Edge e; e.match={i,a,swap}; e.r.head<4>()=armor_measurement(observations[i],swap).head<4>()-p->value;
       e.r.tail<4>()=armor_measurement(observations[i],swap).tail<4>()-q->value;
-      e.H.topRows<4>()=p->jacobian; e.H.bottomRows<4>()=q->jacobian;
-      const double width=(p->value.head<2>()-q->value.head<2>()).norm();
-      const double gate=std::max(config.anchor_max_corner_error,config.anchor_max_relative_error*width);
+      e.H=H;
       if(gate>0 && std::sqrt(e.r.squaredNorm()/4)>gate) continue;
       edges[a].push_back(e);
     }

@@ -6,6 +6,7 @@ struct ArmorMatch { std::size_t observation_index=0; int armor_id=-1; bool swapp
 struct AssociationResult {
   std::vector<ArmorMatch> matches;
   std::vector<std::size_t> legal_observations;
+  std::array<double,4> gate_px{};
   double cost=std::numeric_limits<double>::infinity();
   double second_cost=std::numeric_limits<double>::infinity();
   double rms=std::numeric_limits<double>::quiet_NaN();
@@ -16,5 +17,6 @@ struct AssociationResult {
 Eigen::Matrix<double,8,1> armor_measurement(const Armor2d & armor,bool swapped);
 AssociationResult associate_armors(const RobotModel::StateVector & state,
   const RobotModel::Covariance & covariance,bool large,const CameraFeature & camera,
-  const std::vector<Armor2d> & armors,const Config & config);
+  const std::vector<Armor2d> & armors,const Config & config,
+  const std::array<bool,2> * geometry_ready=nullptr);
 }

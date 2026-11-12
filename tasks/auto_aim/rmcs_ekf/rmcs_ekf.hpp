@@ -331,6 +331,14 @@ struct Config
   double anchor_max_corner_error = 40.0;
   double anchor_max_relative_error = 0.5;
 
+  // During geometry learning use the same P for association and pixel NIS.
+  // The update count is a minimum, not a declaration of convergence.
+  int association_early_updates = 5;  // 0 disables the startup gate/prior expansion
+  double association_early_max_corner_error = 120.0;
+  double geometry_confirm_s = 0.04;
+  double geometry_radius_std = 0.02;  // m
+  double geometry_height_std = 0.01;  // m
+
   // Consistency monitoring (NIS, 4-D pixel innovation)
   // chi-square(4) 95% quantile = 9.488; 99% = 13.277.
   double nis_threshold = 9.488;
@@ -372,6 +380,10 @@ enum class RejectReason { InvalidObservation, DuplicateObservation, CandidateLim
 struct UpdateReport {
   std::array<int,4> matched_observation_by_plate{{-1,-1,-1,-1}};
   std::array<bool,4> matched_swapped_by_plate{};
+  std::array<double,4> association_gate_px{};
+  std::array<bool,2> geometry_ready{};  // 0/2, 1/3 model plate groups
+  std::array<int,2> geometry_good_updates{};
+  bool geometry_learning_progress=false;
   double association_ms=0, update_ms=0; // Performance telemetry only, never filter time.
   std::size_t detection_count=0, legal_armor_count=0, associated_armor_count=0;
   std::size_t nis_count=0, accepted_lightbar_count=0, rejected_lightbar_count=0;
@@ -482,6 +494,7 @@ public:
   auto jumped() const -> bool { return jumped_; }
   auto last_observed_id() const -> int { return last_observed_id_; }
   auto update_count() const -> std::size_t { return update_count_; }
+  const std::array<bool,2> & geometry_ready() const { return geometry_ready_; }
 
   /// 后验协方差（外部只读；用于可视化和一致性分析）。
   auto covariance() const -> const Covariance & { return covariance_; }
@@ -514,6 +527,7 @@ private:
   };
 
   auto reset_covariance() -> void;
+  void update_geometry_learning(const std::array<bool,2> & complete_updates);
   auto set_observation_noise() -> void;
   auto extrapolate_state(const StateVector & state, double dt) const -> StateVector;
   auto propagate_covariance(double dt) -> void;
@@ -539,6 +553,10 @@ private:
   bool large_ = false;
   bool jumped_ = false;
   int last_observed_id_ = -1;
+  std::array<bool,2> geometry_ready_{};
+  std::array<int,2> geometry_good_updates_{};
+  std::array<double,2> geometry_first_good_{{-1,-1}};
+  std::array<double,2> geometry_last_good_{{-1,-1}};
   std::size_t update_count_ = 0;
   double elapsed_s_ = 0.0;
   UpdateReport report_;

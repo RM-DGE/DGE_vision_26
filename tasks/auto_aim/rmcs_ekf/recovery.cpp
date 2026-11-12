@@ -119,7 +119,7 @@ bool RecoveryManager::fit(const RobotModel & model,double time) {
         if(!add(r,j,model.process_covariance(dt).topLeftCorner<8,8>())) return std::numeric_limits<double>::infinity();
       }
       const auto & frame=window_[k];
-      const auto a=associate_armors(x,frame.prior.covariance(),model.is_large(),frame.camera,frame.observations,config);
+      const auto a=associate_armors(x,frame.prior.covariance(),model.is_large(),frame.camera,frame.observations,config,&frame.prior.geometry_ready());
       // Unexplained detections can be another same-class vehicle. Do not inherit identity in that case.
       if(a.ambiguous || a.matches.empty() || a.matches.size()!=a.legal_observations.size())
         return std::numeric_limits<double>::infinity();
@@ -213,7 +213,7 @@ void RecoveryManager::process(RobotModel & model,const RobotModel & prediction,
  const std::vector<Armor2d> & observations,const CameraFeature & camera,double time,bool identity_consistent) {
   if(!std::isfinite(time) || time<=last_time_) return;
   status_.event.clear(); last_time_=time;
-  const auto main_score=associate_armors(prediction.state_vector(),prediction.covariance(),prediction.is_large(),camera,observations,prediction.config());
+  const auto main_score=associate_armors(prediction.state_vector(),prediction.covariance(),prediction.is_large(),camera,observations,prediction.config(),&prediction.geometry_ready());
   const bool detected=!main_score.legal_observations.empty();
   const bool accepted=model.last_report().estimated_quality;
   const bool clear=identity_consistent && !main_score.ambiguous && !main_score.matches.empty() &&
@@ -221,7 +221,9 @@ void RecoveryManager::process(RobotModel & model,const RobotModel & prediction,
   status_.identity_ambiguous=!clear;
   if(detected) last_detection_=time;
   if(accepted && clear) { last_accepted_=time; ++accepted_frames_;rejected_frames_=0; }
-  else if(detected) ++rejected_frames_;
+  else if(clear && model.last_report().geometry_learning_progress) {
+    rejected_frames_=0;status_.event="geometry_learning";
+  } else if(detected) ++rejected_frames_;
   status_.last_detection_age=time-last_detection_;status_.last_accepted_age=time-last_accepted_;
   status_.health=accepted_frames_<2 ? Health::INIT : Health::HEALTHY;
   if(!detected) status_.health=Health::COASTING;
@@ -233,7 +235,7 @@ void RecoveryManager::process(RobotModel & model,const RobotModel & prediction,
       candidate_.reset();++status_.candidate_failed_count;status_.event="candidate_expired_or_identity";
     } else {
       c.model.predict(time-c.time);c.time=time;
-      const auto score=associate_armors(c.model.state_vector(),c.model.covariance(),c.model.is_large(),camera,observations,c.model.config());
+      const auto score=associate_armors(c.model.state_vector(),c.model.covariance(),c.model.is_large(),camera,observations,c.model.config(),&c.model.geometry_ready());
       const double main_error=main_score.matches.size()==main_score.legal_observations.size() &&
         std::isfinite(main_score.rms) ? main_score.rms : std::numeric_limits<double>::infinity();
       const bool good=detected && !score.ambiguous && !score.matches.empty() && score.trimmed_count==0 &&

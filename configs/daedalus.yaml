@@ -95,6 +95,12 @@ ekf:
   # 关联/恢复
   anchor_max_corner_error: 40.0
   anchor_max_relative_error: 0.5
+  # v0.61：同一份初始几何 P 用于关联和 NIS；计数仅是确认条件之一。
+  association_early_updates: 5
+  association_early_max_corner_error: 120.0
+  geometry_confirm_s: 0.04
+  geometry_radius_std: 0.02
+  geometry_height_std: 0.01
 
   # rmcs 收敛/发散判据
   converge_min_update: 10

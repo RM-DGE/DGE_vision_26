@@ -16,6 +16,7 @@
 
 namespace tools {
 using EkfJson = nlohmann::json;
+inline constexpr char kEkfAlgorithm[] = "RobotModel4_v0.61";
 inline EkfJson ekf_camera_json(const rmcs_ekf::CameraFeature & c) {
   return {{"matrix",c.camera_matrix},{"distortion",c.distort_coeff},
     {"q_wxyz",{c.orientation.w(),c.orientation.x(),c.orientation.y(),c.orientation.z()}},
@@ -52,6 +53,9 @@ inline EkfJson ekf_target_json(const auto_aim::Target * target) {
       {"prediction_rms",report.prediction_rms},{"reject_reasons",reasons},
       {"trimmed",report.trimmed_count},{"duplicates",report.duplicate_count},
       {"matches",report.matched_observation_by_plate},{"swapped",report.matched_swapped_by_plate},
+      {"association_gate_px",report.association_gate_px},
+      {"geometry_ready",report.geometry_ready},{"geometry_good_updates",report.geometry_good_updates},
+      {"geometry_learning_progress",report.geometry_learning_progress},
       {"association_ms",report.association_ms},{"update_ms",report.update_ms}}},{"accepted",d.frame_update_count},{"rejected",d.frame_rejected_count},
     {"accepted_frames",d.update_count},{"residuals",residuals},{"health",int(r.health)},
     {"reliable",r.reliable},{"candidate_active",r.candidate_active},{"candidate_id",r.candidate_id},
@@ -76,7 +80,7 @@ public:
       while(config_stream.get(byte)){hash^=static_cast<unsigned char>(byte);hash*=1099511628211ULL;}
       std::ostringstream hash_text;hash_text<<std::hex<<hash;
       std::ofstream manifest(directory/"manifest.json");
-      manifest << EkfJson{{"schema",1},{"algorithm","RobotModel4_v0.60"},{"clock","image_steady_ns"},
+      manifest << EkfJson{{"schema",1},{"algorithm",kEkfAlgorithm},{"clock","image_steady_ns"},
         {"units","m,s,rad,px"},{"compiler",__VERSION__},{"source_sha256",HHH_EKF_SOURCE_HASH},{"config_fnv1a64",hash_text.str()},{"opencv",CV_VERSION},
         {"input_scope","raw main-camera and optional omni detections before tracker filtering"}}.dump(2);
       logger()->info("[EKF] recording {}",directory.string());

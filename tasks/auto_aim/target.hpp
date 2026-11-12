@@ -56,6 +56,8 @@ public:
   auto diverged() const -> bool;
   auto jumped() const -> bool;
   auto last_id() const -> int;
+  bool geometry_ready(int plate_id) const
+  { return plate_id>=0 && plate_id<4 && rmcs_model_.geometry_ready()[plate_id%2]; }
   auto armor_count() const -> std::size_t;
   // v0.32: 4 板 EKF 的初始化来源。0 = 未初始化，1 = Solver 位姿，2 = RobustPnp
   auto init_source() const -> int { return init_source_; }

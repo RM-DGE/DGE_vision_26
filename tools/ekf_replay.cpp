@@ -1,5 +1,6 @@
 // Fixed-input replay of the real Tracker. No detector, SDK, simulator or truth input.
 #include "tasks/auto_aim/tracker.hpp"
+#include "tasks/auto_aim/aimer.hpp"
 #include "tools/ekf_record.hpp"
 #include <yaml-cpp/yaml.h>
 #include <fstream>
@@ -48,6 +49,7 @@ int main(int argc,char **argv) {
     const auto rgi=matrix(yaml["R_gimbal2imubody"]),rcg=matrix(yaml["R_camera2gimbal"]);
     Eigen::Matrix3d optical_to_ros;optical_to_ros<<0,0,1,-1,0,0,0,-1,0;
     auto_aim::Solver solver(config.string());auto_aim::Tracker tracker(config.string(),solver);
+    auto_aim::Aimer aimer(config.string());
     std::ifstream input(run/"observations.jsonl");if(!input)throw std::runtime_error("Cannot open observations");
     std::ofstream trace(output);trace.exceptions(std::ios::badbit|std::ios::failbit);
     std::string line;std::size_t frames=0,available=0;
@@ -76,11 +78,17 @@ int main(int argc,char **argv) {
           v.at("delta_yaw").get<double>(),v.at("delta_pitch").get<double>()});
         targets=std::get<1>(tracker.track(queue,armors,t,j.value("use_enemy_color",true)));
       } else targets=tracker.track(armors,t,j.value("use_enemy_color",true));
+      // Offline computation only: no device command is sent. Fixed latency/speed
+      // makes plate selection reproducible; this is not a hardware timing test.
+      const auto command=aimer.aim(targets,t,24.5,false);
+      const auto & aim=aimer.debug_aim_point;
       trace<<Json{{"frame_id",j.at("frame_id")},{"timestamp_ns",j.at("timestamp_ns")},
-        {"tracker_state",tracker.state()},{"target",tools::ekf_target_json(targets.empty()?nullptr:&targets.front())}}.dump()<<'\n';
+        {"tracker_state",tracker.state()},{"target",tools::ekf_target_json(targets.empty()?nullptr:&targets.front())},
+        {"aim",{{"valid",aim.valid},{"plate_id",aim.armor_id},{"control",command.control},
+          {"xyz",{aim.xyza[0],aim.xyza[1],aim.xyza[2]}},{"yaw",command.yaw},{"pitch",command.pitch}}}}.dump()<<'\n';
       ++frames;if(!targets.empty())++available;
     }
-    std::cout<<"frames="<<frames<<" available="<<available<<" trace="<<output<<'\n';
+    std::cout<<"algorithm="<<tools::kEkfAlgorithm<<" frames="<<frames<<" available="<<available<<" trace="<<output<<'\n';
     return frames?0:2;
   }catch(const std::exception & e){std::cerr<<"ekf_replay: "<<e.what()<<'\n';return 1;}
 }

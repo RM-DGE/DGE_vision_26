@@ -24,7 +24,7 @@ foreach(EKF_FILE IN LISTS EKF_STAMP_SOURCES)
 endforeach()
 string(SHA256 EKF_SOURCE_HASH "${EKF_STAMP_INPUT}")
 add_compile_definitions(HHH_EKF_SOURCE_HASH="${EKF_SOURCE_HASH}")
-option(EKF_ONLY "Build v0.60 algorithm checks and replay without hardware dependencies" OFF)
+option(EKF_ONLY "Build EKF algorithm checks and replay without hardware dependencies" OFF)
 if(EKF_ONLY)
   include(CTest)
   find_package(fmt REQUIRED)
@@ -40,15 +40,18 @@ if(EKF_ONLY)
     tasks/auto_aim/armor.cpp
     tasks/auto_aim/solver.cpp
     tasks/auto_aim/target.cpp
-    tasks/auto_aim/tracker.cpp)
+    tasks/auto_aim/tracker.cpp
+    tasks/auto_aim/aimer.cpp
+    tools/trajectory.cpp)
   target_include_directories(ekf_core PUBLIC ${PROJECT_SOURCE_DIR} ${OpenCV_INCLUDE_DIRS})
   target_link_libraries(ekf_core PUBLIC Eigen3::Eigen yaml-cpp ${OpenCV_LIBS} fmt::fmt spdlog::spdlog nlohmann_json::nlohmann_json)
   add_executable(ekf_replay tools/ekf_replay.cpp)
   target_link_libraries(ekf_replay PRIVATE ekf_core)
-  if(BUILD_TESTING AND EXISTS "${PROJECT_SOURCE_DIR}/tests/v060_algorithm_test.cpp")
-    add_executable(v060_algorithm_test tests/v060_algorithm_test.cpp)
-    target_link_libraries(v060_algorithm_test PRIVATE ekf_core)
-    add_test(NAME v060_algorithm COMMAND v060_algorithm_test)
+  if(BUILD_TESTING)
+    add_executable(ekf_algorithm_test tests/ekf_algorithm_test.cpp)
+    target_link_libraries(ekf_algorithm_test PRIVATE ekf_core)
+    add_test(NAME ekf_algorithm COMMAND ekf_algorithm_test
+      ${PROJECT_SOURCE_DIR}/configs/daedalus.yaml ${PROJECT_SOURCE_DIR}/configs/sentry.yaml)
   endif()
   return()
 endif()

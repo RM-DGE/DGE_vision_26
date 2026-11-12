@@ -65,6 +65,12 @@ ekf:
   converge_max_cov_w: 1.0
   converge_max_no_update_frames: 5
   rotation_speed_limit: 25.132741228718345
+  # v0.61：按板组确认几何；初始几何 P 按允许范围设置下限。
+  association_early_updates: 5
+  association_early_max_corner_error: 120.0
+  geometry_confirm_s: 0.04
+  geometry_radius_std: 0.02
+  geometry_height_std: 0.01
   nis_threshold: 9.488
   nis_window: 100
   nis_gate_enabled: true

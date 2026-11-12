@@ -309,6 +309,11 @@ auto load_config(const YAML::Node & node) -> Config
     read_or(node, "anchor_max_corner_error", config.anchor_max_corner_error);
   config.anchor_max_relative_error =
     read_or(node, "anchor_max_relative_error", config.anchor_max_relative_error);
+  config.association_early_updates=read_or(node,"association_early_updates",config.association_early_updates);
+  config.association_early_max_corner_error=read_or(node,"association_early_max_corner_error",config.association_early_max_corner_error);
+  config.geometry_confirm_s=read_or(node,"geometry_confirm_s",config.geometry_confirm_s);
+  config.geometry_radius_std=read_or(node,"geometry_radius_std",config.geometry_radius_std);
+  config.geometry_height_std=read_or(node,"geometry_height_std",config.geometry_height_std);
 
   config.nis_threshold = read_or(node, "nis_threshold", config.nis_threshold);
   config.nis_window = read_or(node, "nis_window", config.nis_window);
@@ -361,6 +366,10 @@ auto RobotModel::configure(const Config & config) -> void
     throw std::invalid_argument("invalid state bounds");
   if (!std::isfinite(config.init_max_rms_px) || config.init_max_rms_px<=0)
     throw std::invalid_argument("init_max_rms_px must be positive finite");
+  if(config.association_early_updates<0) throw std::invalid_argument("negative geometry update count");
+  for(double v:{config.association_early_max_corner_error,config.geometry_confirm_s,
+                config.geometry_radius_std,config.geometry_height_std})
+    if(!std::isfinite(v) || v<=0) throw std::invalid_argument("invalid geometry learning threshold");
   config_ = config;
   observable_.yaw_full_max = config_.yaw_full_max;
   observable_.yaw_part_max = config_.yaw_part_max;
@@ -385,6 +394,17 @@ auto RobotModel::reset_covariance() -> void
   for (Eigen::Index index = 0; index < diagonal.size(); ++index) {
     if(!std::isfinite(diagonal[index]) || diagonal[index]<=0)
       throw std::invalid_argument("initial covariance must be positive finite");
+  }
+  if(config_.association_early_updates>0) {
+    // Geometry is unknown at startup. Its bounded prior must also reach NIS/K,
+    // not just the association gate. Apply ONCE, never inflate after a rejection.
+    const auto prior_variance=[](double lo,double hi,double initial) {
+      const double bias=(lo+hi)/2-initial;
+      return (hi-lo)*(hi-lo)/12+bias*bias;
+    };
+    diagonal[8]=std::max(diagonal[8],prior_variance(config_.radius_forward_min,config_.radius_forward_max,state_[8]));
+    diagonal[9]=std::max(diagonal[9],prior_variance(config_.radius_lateral_min,config_.radius_lateral_max,state_[9]));
+    diagonal[10]=std::max(diagonal[10],prior_variance(config_.height_lateral_min,config_.height_lateral_max,state_[10]));
   }
   covariance_ = diagonal.asDiagonal();
 }
@@ -471,6 +491,9 @@ auto RobotModel::initialize_synthetic(const State & state) -> void
   report_ = {};
   jumped_ = false;
   last_observed_id_ = -1;
+  // A synthetic state supplies both radii and height explicitly.
+  geometry_ready_={true,true};geometry_good_updates_={};
+  geometry_first_good_={-1,-1};geometry_last_good_={-1,-1};
   pixel_innovations_ = {};
   update_count_ = 0;
   no_update_frames_ = 0;
@@ -500,7 +523,9 @@ auto RobotModel::finish_initialize(
   elapsed_s_ = 0.0;
   report_ = {};
   jumped_ = false;
-  last_observed_id_ = -1;
+  last_observed_id_ = 0;  // the validated initialization plate
+  geometry_ready_={false,false};geometry_good_updates_={};
+  geometry_first_good_={-1,-1};geometry_last_good_={-1,-1};
   pixel_innovations_ = {};
   update_count_ = 0;
   last_frame_update_count_ = 0;
@@ -572,6 +597,10 @@ bool RobotModel::import_snapshot(const StateVector & x,const Covariance & P,bool
   if(factor.info()!=Eigen::Success || (factor.vectorD().array()<=0).any()) return false;
   state_=x;state_[6]=normalize_angle(state_[6]);covariance_=P;large_=large;
   elapsed_s_=elapsed;observable_.large=large;observable_dirty_=true;
+  // A fitted snapshot may change the phase/plate labeling; reconfirm its geometry.
+  geometry_ready_={false,false};geometry_good_updates_={};
+  geometry_first_good_={-1,-1};geometry_last_good_={-1,-1};
+  last_observed_id_=-1;jumped_=false;
   return true;
 }
 
@@ -625,11 +654,13 @@ auto RobotModel::correct(const std::vector<Armor2d> & armors,
   pixel_innovations_={};frame_nis_sum_=frame_nis_max_=frame_residual_sum_=0;
   frame_nis_count_=frame_update_count_=frame_rejected_count_=0;
   last_update_accepted_=false;last_anchor_error_=0;
+  std::array<bool,2> complete_updates{};
   if(!lightbars.empty()) report_.reject_reasons.push_back(RejectReason::UnsupportedLightbar);
   if(!valid_camera(camera)) report_.reject_reasons.push_back(RejectReason::UnsupportedCamera);
   else {
     const auto association_start=std::chrono::steady_clock::now();
-    const auto association=associate_armors(state_,covariance_,large_,camera,armors,config_);
+    const auto association=associate_armors(state_,covariance_,large_,camera,armors,config_,&geometry_ready_);
+    report_.association_gate_px=association.gate_px;
     report_.association_ms=std::chrono::duration<double,std::milli>(
       std::chrono::steady_clock::now()-association_start).count();
     report_.legal_armor_count=association.legal_observations.size();
@@ -646,13 +677,22 @@ auto RobotModel::correct(const std::vector<Armor2d> & armors,
     const auto update_start=std::chrono::steady_clock::now();
     // Fixed one-to-one association, deterministic model plate/bar order.
     for(const auto & match:association.matches) {
+      // Do not turn an ambiguous startup identity into a confident Gaussian.
+      if(association.ambiguous) continue;
       report_.matched_observation_by_plate[match.armor_id]=static_cast<int>(match.observation_index);
       report_.matched_swapped_by_plate[match.armor_id]=match.swapped;
       const auto accepted_before=frame_update_count_;
       const auto z=armor_measurement(armors[match.observation_index],match.swapped);
       update_one(z.segment<2>(0),z.segment<2>(2),2*match.armor_id);
       update_one(z.segment<2>(4),z.segment<2>(6),2*match.armor_id+1);
-      if(frame_update_count_>accepted_before) last_observed_id_=match.armor_id;
+      if(frame_update_count_>accepted_before) {
+        if(last_observed_id_>=0 && last_observed_id_!=match.armor_id) jumped_=true;
+        last_observed_id_=match.armor_id;
+      }
+      if(frame_update_count_==accepted_before+2) {
+        complete_updates[match.armor_id%2]=true;
+        if(!geometry_ready_[match.armor_id%2]) report_.geometry_learning_progress=true;
+      }
     }
     report_.update_ms=std::chrono::duration<double,std::milli>(
       std::chrono::steady_clock::now()-update_start).count();
@@ -670,7 +710,39 @@ auto RobotModel::correct(const std::vector<Armor2d> & armors,
   last_update_accepted_=frame_update_count_>0;
   report_.estimated_quality=frame_update_count_>=2 && !report_.ambiguous && !diverged()
     && std::isfinite(report_.prediction_rms) && report_.prediction_rms<=std::sqrt(config_.noise_observation)*2;
+  update_geometry_learning(complete_updates);
   return report_;
+}
+
+void RobotModel::update_geometry_learning(const std::array<bool,2> & complete_updates) {
+  for(int g=0;g<2;++g) {
+    if(geometry_ready_[g]) continue;
+    // A long gap cannot count as confirmation time without new observations.
+    if(geometry_last_good_[g]>=0 && elapsed_s_-geometry_last_good_[g]>0.5) {
+      geometry_good_updates_[g]=0;
+      geometry_first_good_[g]=geometry_last_good_[g]=-1;
+    }
+    const bool matched=report_.matched_observation_by_plate[g]>=0 || report_.matched_observation_by_plate[g+2]>=0;
+    const bool good=complete_updates[g] && report_.estimated_quality
+      && report_.associated_armor_count==report_.legal_armor_count && !report_.trimmed_count;
+    if(good) {
+      if(geometry_good_updates_[g]==0) geometry_first_good_[g]=elapsed_s_;
+      ++geometry_good_updates_[g];geometry_last_good_[g]=elapsed_s_;
+    } else if(matched || report_.ambiguous) {
+      geometry_good_updates_[g]=0;geometry_first_good_[g]=-1;
+    }
+  }
+  // Both height levels must constrain the shared center/height gauge.
+  const bool both_seen=geometry_last_good_[0]>=0 && geometry_last_good_[1]>=0;
+  for(int g=0;g<2;++g) {
+    if(both_seen && geometry_good_updates_[g]>=std::max(1,config_.association_early_updates)
+       && geometry_last_good_[g]-geometry_first_good_[g]>=config_.geometry_confirm_s
+       && covariance_(8+g,8+g)<=config_.geometry_radius_std*config_.geometry_radius_std
+       && (g==0 || covariance_(10,10)<=config_.geometry_height_std*config_.geometry_height_std))
+      geometry_ready_[g]=true;
+  }
+  report_.geometry_ready=geometry_ready_;
+  report_.geometry_good_updates=geometry_good_updates_;
 }
 
 auto RobotModel::update_one(const Eigen::Vector2d & upper, const Eigen::Vector2d & lower,

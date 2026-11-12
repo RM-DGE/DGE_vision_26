@@ -92,7 +92,7 @@ struct Armor
 
   ArmorType type;
   ArmorName name;
-  ArmorPriority priority;
+  ArmorPriority priority = ArmorPriority::fifth;
   int class_id;
   cv::Rect box;
   cv::Mat pattern;

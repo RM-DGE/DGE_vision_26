@@ -33,12 +33,14 @@ io::Command Aimer::aim(
   std::list<Target> targets, std::chrono::steady_clock::time_point timestamp, double bullet_speed,
   bool to_now)
 {
-  if (targets.empty()) return {false, false, 0, 0};
+  debug_aim_point={};
+  if (targets.empty()) {lock_id_=-1;return {false, false, 0, 0};}
   const auto base = targets.front();
+  if(!base.checkinit() || base.diagnostics().update_count==0) lock_id_=-1;
 
   const auto state = base.state();
   double delay_time =
-    state.rotation_speed > decision_speed_ ? high_speed_delay_time_ : low_speed_delay_time_;
+    std::abs(state.rotation_speed) > decision_speed_ ? high_speed_delay_time_ : low_speed_delay_time_;
 
   if (bullet_speed < 14) bullet_speed = 23;
 
@@ -109,6 +111,7 @@ io::Command Aimer::aim(
   }
 
   // 计算最终角度
+  if(!converged) {debug_aim_point={};return {false,false,0,0};}
   Eigen::Vector3d final_xyz = debug_aim_point.xyza.head(3);
   double yaw = std::atan2(final_xyz.y(), final_xyz.x()) + yaw_offset_;
   double pitch = -(current_traj.pitch + pitch_offset_);  //世界坐标系下pitch向上为负
@@ -139,8 +142,8 @@ AimPoint Aimer::choose_aim_point(const Target & target)
   const auto state = target.state();
   std::vector<Eigen::Vector4d> armor_xyza_list = target.xyza_list();
   auto armor_num = armor_xyza_list.size();
-  // 如果装甲板未发生过跳变，则只有当前装甲板的位置已知
-  if (!target.jumped()) return { true, armor_xyza_list[0] };
+  // Geometry readiness, not a legacy jump flag, determines usable plate groups.
+  const auto eligible=[&](int id) {return target.geometry_ready(id) || id==target.last_id();};
 
   // 整车旋转中心的球坐标yaw
   auto center_yaw = std::atan2(state.y, state.x);
@@ -153,17 +156,18 @@ AimPoint Aimer::choose_aim_point(const Target & target)
   }
 
   // 不考虑小陀螺
-  if (std::abs(state.radius_forward) <= 2) {
+  if (std::abs(state.rotation_speed) <= 2.0) {
     // 选择在可射击范围内的装甲板
     std::vector<int> id_list;
     for (int i = 0; i < armor_num; i++) {
+      if(!eligible(i)) continue;
       if (std::abs(delta_angle_list[i]) > 60 / 57.3) continue;
       id_list.push_back(i);
     }
     // 绝无可能
     if (id_list.empty()) {
-      tools::logger()->warn("Empty id list!");
-      return {false, armor_xyza_list[0]};
+      lock_id_=-1;
+      return {};
     }
 
     // 锁定模式：防止在两个都呈45度的装甲板之间来回切换
@@ -174,27 +178,29 @@ AimPoint Aimer::choose_aim_point(const Target & target)
       if (lock_id_ != id0 && lock_id_ != id1)
         lock_id_ = (std::abs(delta_angle_list[id0]) < std::abs(delta_angle_list[id1])) ? id0 : id1;
 
-      return {true, armor_xyza_list[lock_id_]};
+      return {true, armor_xyza_list[lock_id_],lock_id_};
     }
 
     // 只有一个装甲板在可射击范围内时，退出锁定模式
     lock_id_ = -1;
-    return {true, armor_xyza_list[id_list[0]]};
+    return {true, armor_xyza_list[id_list[0]],id_list[0]};
   }
 
   double coming_angle = comming_angle_;
   double leaving_angle = leaving_angle_;
+  lock_id_=-1;
 
   // 在小陀螺时，一侧的装甲板不断出现，另一侧的装甲板不断消失，显然前者被打中的概率更高
   for (int i = 0; i < armor_num; i++) {
+    if(!eligible(i)) continue;
     if (std::abs(delta_angle_list[i]) > coming_angle) continue;
     if (state.rotation_speed > 0 && delta_angle_list[i] < leaving_angle)
-      return { true, armor_xyza_list[i] };
+      return { true, armor_xyza_list[i],i };
     if (state.rotation_speed < 0 && delta_angle_list[i] > -leaving_angle)
-      return { true, armor_xyza_list[i] };
+      return { true, armor_xyza_list[i],i };
   }
 
-  return {false, armor_xyza_list[0]};
+  return {};
 }
 
 }  // namespace auto_aim

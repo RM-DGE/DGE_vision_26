@@ -5,7 +5,6 @@
 #include <chrono>
 #include <list>
 
-#include "io/cboard.hpp"
 #include "io/command.hpp"
 #include "target.hpp"
 
@@ -14,8 +13,9 @@ namespace auto_aim
 
 struct AimPoint
 {
-  bool valid;
-  Eigen::Vector4d xyza;
+  bool valid = false;
+  Eigen::Vector4d xyza = Eigen::Vector4d::Zero();
+  int armor_id = -1;
 };
 
 class Aimer
@@ -37,7 +37,7 @@ private:
   double pitch_offset_;
   double comming_angle_;
   double leaving_angle_;
-  double lock_id_ = -1;
+  int lock_id_ = -1;
   double high_speed_delay_time_;
   double low_speed_delay_time_;
   double decision_speed_;
