@@ -1,4 +1,5 @@
-#pragma once
+#ifndef AUTO_AIM__RMCS_EKF__RMCS_EKF_HPP
+#define AUTO_AIM__RMCS_EKF__RMCS_EKF_HPP
 
 // Port of rmcs_auto_aim_v2's 4-armor RobotModel EKF for sp_vision / DGE.
 //
@@ -12,23 +13,21 @@
 // The code is intentionally self-contained and C++17-only so it can live in
 // DGE_vision_26 without pulling rmcs' utility tree.
 
+#include <yaml-cpp/yaml.h>
+
+#include <Eigen/Dense>
+#include <Eigen/Geometry>
 #include <array>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <deque>
-#include <optional>
 #include <limits>
-#include <vector>
-#include <string>
-
-#include <Eigen/Dense>
-#include <Eigen/Geometry>
-
 #include <opencv2/calib3d.hpp>
 #include <opencv2/core.hpp>
-
-#include <yaml-cpp/yaml.h>
+#include <optional>
+#include <string>
+#include <vector>
 
 namespace rmcs_ekf
 {
@@ -54,8 +53,8 @@ struct CameraFeature
   std::array<double, 5> distort_coeff{};
 
   // camera -> odom (ROS convention: x forward, y left, z up)
-  Eigen::Quaterniond orientation{ Eigen::Quaterniond::Identity() };
-  Eigen::Vector3d translation{ Eigen::Vector3d::Zero() };
+  Eigen::Quaterniond orientation{Eigen::Quaterniond::Identity()};
+  Eigen::Vector3d translation{Eigen::Vector3d::Zero()};
 
   auto intrinsic() const -> cv::Mat;
   auto distortion() const -> cv::Mat;
@@ -72,21 +71,21 @@ struct Armor2d
 
 struct Lightbar2d
 {
-  Eigen::Vector2d upper{ Eigen::Vector2d::Zero() };
-  Eigen::Vector2d lower{ Eigen::Vector2d::Zero() };
+  Eigen::Vector2d upper{Eigen::Vector2d::Zero()};
+  Eigen::Vector2d lower{Eigen::Vector2d::Zero()};
 };
 
 struct Lightbar3d
 {
-  Eigen::Vector3d upper{ Eigen::Vector3d::Zero() };
-  Eigen::Vector3d lower{ Eigen::Vector3d::Zero() };
+  Eigen::Vector3d upper{Eigen::Vector3d::Zero()};
+  Eigen::Vector3d lower{Eigen::Vector3d::Zero()};
 };
 
 struct Armor3d
 {
   int id = -1;
-  Eigen::Vector3d translation{ Eigen::Vector3d::Zero() };
-  Eigen::Quaterniond orientation{ Eigen::Quaterniond::Identity() };
+  Eigen::Vector3d translation{Eigen::Vector3d::Zero()};
+  Eigen::Quaterniond orientation{Eigen::Quaterniond::Identity()};
 };
 
 struct State
@@ -99,7 +98,7 @@ struct State
   double vy = 0.0;
   double vz = 0.0;
 
-  double rotation_angle = 0.0; // center -> front armor (rmcs convention)
+  double rotation_angle = 0.0;  // center -> front armor (rmcs convention)
   double rotation_speed = 0.0;
 
   double radius_forward = 0.2;
@@ -121,30 +120,30 @@ inline auto normalize_angle(double angle) -> double
 
 inline auto opencv2ros_position(const Eigen::Vector3d & p) -> Eigen::Vector3d
 {
-  return Eigen::Vector3d{ p.z(), -p.x(), -p.y() };
+  return Eigen::Vector3d{p.z(), -p.x(), -p.y()};
 }
 
 inline auto opencv2ros_rotation(const Eigen::Matrix3d & r) -> Eigen::Matrix3d
 {
   static const Eigen::Matrix3d kCoordTransform{
-    { +0, +0, +1 },
-    { -1, +0, +0 },
-    { +0, -1, +0 },
+    {+0, +0, +1},
+    {-1, +0, +0},
+    {+0, -1, +0},
   };
   return kCoordTransform * r * kCoordTransform.transpose();
 }
 
 inline auto ros2opencv_position(const Eigen::Vector3d & p) -> Eigen::Vector3d
 {
-  return Eigen::Vector3d{ -p.y(), -p.z(), p.x() };
+  return Eigen::Vector3d{-p.y(), -p.z(), p.x()};
 }
 
 inline auto ros2opencv_rotation(const Eigen::Matrix3d & r) -> Eigen::Matrix3d
 {
   static const Eigen::Matrix3d kCoordTransform{
-    { +0, +0, +1 },
-    { -1, +0, +0 },
-    { +0, -1, +0 },
+    {+0, +0, +1},
+    {-1, +0, +0},
+    {+0, -1, +0},
   };
   return kCoordTransform.transpose() * r * kCoordTransform;
 }
@@ -152,12 +151,13 @@ inline auto ros2opencv_rotation(const Eigen::Matrix3d & r) -> Eigen::Matrix3d
 inline auto euler_to_quaternion(double yaw, double pitch, double roll) -> Eigen::Quaterniond
 {
   return Eigen::Quaterniond{
-    Eigen::AngleAxisd{ yaw, Eigen::Vector3d::UnitZ() }
-    * Eigen::AngleAxisd{ pitch, Eigen::Vector3d::UnitY() }
-    * Eigen::AngleAxisd{ roll, Eigen::Vector3d::UnitX() } };
+    Eigen::AngleAxisd{yaw, Eigen::Vector3d::UnitZ()} *
+    Eigen::AngleAxisd{pitch, Eigen::Vector3d::UnitY()} *
+    Eigen::AngleAxisd{roll, Eigen::Vector3d::UnitX()}};
 }
 
-inline auto eulers(const Eigen::Quaterniond & q, int axis0 = 2, int axis1 = 1, int axis2 = 0,
+inline auto eulers(
+  const Eigen::Quaterniond & q, int axis0 = 2, int axis1 = 1, int axis2 = 0,
   bool extrinsic = false) -> Eigen::Vector3d
 {
   if (!extrinsic) std::swap(axis0, axis2);
@@ -226,8 +226,8 @@ struct RobotSolution
 {
   struct Input
   {
-    Eigen::Vector3d center{ Eigen::Vector3d::Zero() };
-    Eigen::Quaterniond toward{ Eigen::Quaterniond::Identity() };
+    Eigen::Vector3d center{Eigen::Vector3d::Zero()};
+    Eigen::Quaterniond toward{Eigen::Quaterniond::Identity()};
     double radius_forward = 0.2;
     double radius_lateral = 0.2;
     double height_lateral = 0.0;
@@ -249,7 +249,8 @@ struct RobustPnp
 
   double noise_observation = 40.0;
   double max_rms_px = 8.0;
-  auto solve(Armor3d & output, std::string * reason=nullptr, double * rms=nullptr) const -> bool;
+  auto solve(Armor3d & output, std::string * reason = nullptr, double * rms = nullptr) const
+    -> bool;
 };
 
 // ---------------------------------------------------------------------------
@@ -294,9 +295,9 @@ struct Config
 
   // Convergence
   int converge_min_update = 10;
-  double converge_max_cov_xy = 0.04;   // x/y variance, m^2
-  double converge_max_cov_v = 1.0;     // vx/vy variance, (m/s)^2
-  double converge_max_cov_w = 1.0;     // w variance, (rad/s)^2
+  double converge_max_cov_xy = 0.04;  // x/y variance, m^2
+  double converge_max_cov_v = 1.0;    // vx/vy variance, (m/s)^2
+  double converge_max_cov_w = 1.0;    // w variance, (rad/s)^2
   int converge_max_no_update_frames = 5;
   double converge_delay_s = 0.1;
 
@@ -374,23 +375,36 @@ struct PixelInnovation
   double nis = 0.0;
 };
 
-enum class RejectReason { InvalidObservation, DuplicateObservation, CandidateLimit,
-  UnsupportedCamera, NoAssociation, AmbiguousAssociation, Projection, InnovationSystem,
-  NisGate, StateBounds, Covariance, UnsupportedLightbar };
-struct UpdateReport {
-  std::array<int,4> matched_observation_by_plate{{-1,-1,-1,-1}};
-  std::array<bool,4> matched_swapped_by_plate{};
-  std::array<double,4> association_gate_px{};
-  std::array<bool,2> geometry_ready{};  // 0/2, 1/3 model plate groups
-  std::array<int,2> geometry_good_updates{};
-  bool geometry_learning_progress=false;
-  double association_ms=0, update_ms=0; // Performance telemetry only, never filter time.
-  std::size_t detection_count=0, legal_armor_count=0, associated_armor_count=0;
-  std::size_t nis_count=0, accepted_lightbar_count=0, rejected_lightbar_count=0;
-  std::size_t accepted_frame_count=0, trimmed_count=0, duplicate_count=0;
-  bool nis_valid=false, ambiguous=false, estimated_quality=false;
-  double association_cost=0, association_second_cost=0;
-  double prediction_rms=std::numeric_limits<double>::quiet_NaN();
+enum class RejectReason
+{
+  InvalidObservation,
+  DuplicateObservation,
+  CandidateLimit,
+  UnsupportedCamera,
+  NoAssociation,
+  AmbiguousAssociation,
+  Projection,
+  InnovationSystem,
+  NisGate,
+  StateBounds,
+  Covariance,
+  UnsupportedLightbar
+};
+struct UpdateReport
+{
+  std::array<int, 4> matched_observation_by_plate{{-1, -1, -1, -1}};
+  std::array<bool, 4> matched_swapped_by_plate{};
+  std::array<double, 4> association_gate_px{};
+  std::array<bool, 2> geometry_ready{};  // 0/2, 1/3 model plate groups
+  std::array<int, 2> geometry_good_updates{};
+  bool geometry_learning_progress = false;
+  double association_ms = 0, update_ms = 0;  // Performance telemetry only, never filter time.
+  std::size_t detection_count = 0, legal_armor_count = 0, associated_armor_count = 0;
+  std::size_t nis_count = 0, accepted_lightbar_count = 0, rejected_lightbar_count = 0;
+  std::size_t accepted_frame_count = 0, trimmed_count = 0, duplicate_count = 0;
+  bool nis_valid = false, ambiguous = false, estimated_quality = false;
+  double association_cost = 0, association_second_cost = 0;
+  double prediction_rms = std::numeric_limits<double>::quiet_NaN();
   std::vector<RejectReason> reject_reasons;
 };
 
@@ -401,21 +415,21 @@ struct Diagnostics
   UpdateReport report;
   bool nis_valid = false;
   std::size_t nis_count = 0;
-  Eigen::Matrix<double, 11, 1> variance{ Eigen::Matrix<double, 11, 1>::Zero() };
-  Eigen::Matrix2d covariance_xy{ Eigen::Matrix2d::Zero() };
+  Eigen::Matrix<double, 11, 1> variance{Eigen::Matrix<double, 11, 1>::Zero()};
+  Eigen::Matrix2d covariance_xy{Eigen::Matrix2d::Zero()};
 
-  double nis = 0.0;                // 当前帧单条最大 NIS；最大值不服从单条卡方分布
-  double nis_threshold = 9.488;    // chi-square(4) 95%
-  bool nis_gate_enabled = true;   // 是否启用 NIS 门控
-  double nis_gate_threshold = 13.277; // 门控阈值；<=0 时使用 nis_threshold
-  double nis_fail_rate = 0.0;      // 最近 nis_window 次更新的失败比例
-  double nis_mean = 0.0;           // 当前帧 NIS 均值（仅参考，阈值判读用 nis）
-  double anchor_error = 0.0;       // 当前帧 anchor 平均角点误差（像素）
-  double residual_norm = 0.0;      // 当前帧新息向量平均范数（像素）
-  double dt = 0.0;                 // 最近一次 predict 的 dt
+  double nis = 0.0;              // 当前帧单条最大 NIS；最大值不服从单条卡方分布
+  double nis_threshold = 9.488;  // chi-square(4) 95%
+  bool nis_gate_enabled = true;  // 是否启用 NIS 门控
+  double nis_gate_threshold = 13.277;  // 门控阈值；<=0 时使用 nis_threshold
+  double nis_fail_rate = 0.0;          // 最近 nis_window 次更新的失败比例
+  double nis_mean = 0.0;               // 当前帧 NIS 均值（仅参考，阈值判读用 nis）
+  double anchor_error = 0.0;           // 当前帧 anchor 平均角点误差（像素）
+  double residual_norm = 0.0;          // 当前帧新息向量平均范数（像素）
+  double dt = 0.0;                     // 最近一次 predict 的 dt
 
-  std::size_t update_count = 0;    // 累计至少接受一根灯条的帧数
-  std::size_t frame_update_count = 0;  // 当前帧被接受的灯条数
+  std::size_t update_count = 0;          // 累计至少接受一根灯条的帧数
+  std::size_t frame_update_count = 0;    // 当前帧被接受的灯条数
   std::size_t frame_rejected_count = 0;  // 当前帧因 NIS/投影无效被拒绝的灯条数
   std::size_t nis_rejected_count = 0;    // 累计 NIS 拒绝次数
   int nis_consecutive_rejects = 0;       // 连续 NIS 拒绝次数
@@ -458,8 +472,10 @@ public:
 
   // Initialize from the validated shared pose; optionally verify its measured corners.
   // Useful when the detector's PnP is too noisy for the robust-PnP branch.
-  auto initialize_from_pose(const CameraFeature & camera, const Eigen::Vector3d & translation,
-    const Eigen::Quaterniond & orientation, bool large, const Armor2d * observation=nullptr) -> bool;
+  auto initialize_from_pose(
+    const CameraFeature & camera, const Eigen::Vector3d & translation,
+    const Eigen::Quaterniond & orientation, bool large,
+    const Armor2d * observation = nullptr) -> bool;
 
   auto predict(double dt) -> void;
 
@@ -470,7 +486,8 @@ public:
   /// 供 aimer / planner / Foxglove 做未来时刻查询。
   auto extrapolated(double dt) const -> RobotModel;
 
-  auto correct(const std::vector<Armor2d> & armors, const std::vector<Lightbar2d> & lightbars,
+  auto correct(
+    const std::vector<Armor2d> & armors, const std::vector<Lightbar2d> & lightbars,
     const CameraFeature & camera) -> UpdateReport;
 
   const Config & config() const { return config_; }
@@ -492,7 +509,7 @@ public:
   auto jumped() const -> bool { return jumped_; }
   auto last_observed_id() const -> int { return last_observed_id_; }
   auto update_count() const -> std::size_t { return update_count_; }
-  const std::array<bool,2> & geometry_ready() const { return geometry_ready_; }
+  const std::array<bool, 2> & geometry_ready() const { return geometry_ready_; }
 
   /// 后验协方差（外部只读；用于可视化和一致性分析）。
   auto covariance() const -> const Covariance & { return covariance_; }
@@ -525,7 +542,7 @@ private:
   };
 
   auto reset_covariance() -> void;
-  void update_geometry_learning(const std::array<bool,2> & complete_updates);
+  void update_geometry_learning(const std::array<bool, 2> & complete_updates);
   auto set_observation_noise() -> void;
   auto extrapolate_state(const StateVector & state, double dt) const -> StateVector;
   auto propagate_covariance(double dt) -> void;
@@ -541,9 +558,9 @@ private:
     -> void;
 
   Config config_;
-  StateVector state_{ StateVector::Zero() };
-  Covariance covariance_{ Covariance::Identity() };
-  ObservationNoise observation_noise_{ ObservationNoise::Zero() };
+  StateVector state_{StateVector::Zero()};
+  Covariance covariance_{Covariance::Identity()};
+  ObservationNoise observation_noise_{ObservationNoise::Zero()};
 
   mutable Observable observable_;
   mutable bool observable_dirty_ = true;
@@ -551,10 +568,10 @@ private:
   bool large_ = false;
   bool jumped_ = false;
   int last_observed_id_ = -1;
-  std::array<bool,2> geometry_ready_{};
-  std::array<int,2> geometry_good_updates_{};
-  std::array<double,2> geometry_first_good_{{-1,-1}};
-  std::array<double,2> geometry_last_good_{{-1,-1}};
+  std::array<bool, 2> geometry_ready_{};
+  std::array<int, 2> geometry_good_updates_{};
+  std::array<double, 2> geometry_first_good_{{-1, -1}};
+  std::array<double, 2> geometry_last_good_{{-1, -1}};
   std::size_t update_count_ = 0;
   double elapsed_s_ = 0.0;
   UpdateReport report_;
@@ -589,4 +606,6 @@ private:
   std::deque<int> recent_nis_failures_;
 };
 
-} // namespace rmcs_ekf
+}  // namespace rmcs_ekf
+
+#endif  // AUTO_AIM__RMCS_EKF__RMCS_EKF_HPP

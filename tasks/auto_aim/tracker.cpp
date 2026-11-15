@@ -2,13 +2,13 @@
 
 #include <yaml-cpp/yaml.h>
 
-#include <tuple>
 #include <cmath>
 #include <stdexcept>
+#include <tuple>
 
+#include "tools/ekf_record.hpp"
 #include "tools/logger.hpp"
 #include "tools/math_tools.hpp"
-#include "tools/ekf_record.hpp"
 
 namespace auto_aim
 {
@@ -20,9 +20,11 @@ namespace
 /// 2/3-armor targets (balance / outpost / base) are no longer supported.
 auto is_supported_target(const Armor & armor) -> bool
 {
-  if (armor.name < ArmorName::one || armor.name >= ArmorName::not_armor ||
-      (armor.type != ArmorType::small && armor.type != ArmorType::big) ||
-      armor.color < Color::red || armor.color > Color::purple) return false;
+  if (
+    armor.name < ArmorName::one || armor.name >= ArmorName::not_armor ||
+    (armor.type != ArmorType::small && armor.type != ArmorType::big) || armor.color < Color::red ||
+    armor.color > Color::purple)
+    return false;
   if (armor.name == ArmorName::outpost || armor.name == ArmorName::base) return false;
 
   const auto is_balance = armor.type == ArmorType::big &&
@@ -33,17 +35,21 @@ auto is_supported_target(const Armor & armor) -> bool
 
 bool valid_corners(const Armor & armor)
 {
-  if (armor.points.size()!=4) return false;
-  for (const auto & p:armor.points) if(!std::isfinite(p.x) || !std::isfinite(p.y)) return false;
-  double sign=0;
-  for(int i=0;i<4;++i) {
-    const auto d=armor.points[(i+1)%4]-armor.points[i];
-    const auto e=armor.points[(i+2)%4]-armor.points[(i+1)%4];
-    const double cross=double(d.x)*e.y-double(d.y)*e.x;
-    if(cv::norm(d)<1 || std::abs(cross)<1e-3) return false;
-    if(i==0) sign=cross; else if(cross*sign<=0) return false;
+  if (armor.points.size() != 4) return false;
+  for (const auto & p : armor.points)
+    if (!std::isfinite(p.x) || !std::isfinite(p.y)) return false;
+  double sign = 0;
+  for (int i = 0; i < 4; ++i) {
+    const auto d = armor.points[(i + 1) % 4] - armor.points[i];
+    const auto e = armor.points[(i + 2) % 4] - armor.points[(i + 1) % 4];
+    const double cross = double(d.x) * e.y - double(d.y) * e.x;
+    if (cv::norm(d) < 1 || std::abs(cross) < 1e-3) return false;
+    if (i == 0)
+      sign = cross;
+    else if (cross * sign <= 0)
+      return false;
   }
-  return sign>0 && armor.points[0].y<armor.points[3].y && armor.points[1].y<armor.points[2].y;
+  return sign > 0 && armor.points[0].y < armor.points[3].y && armor.points[1].y < armor.points[2].y;
 }
 
 }  // namespace
@@ -66,20 +72,22 @@ Tracker::Tracker(const std::string & config_path, Solver & solver)
   if (!std::isfinite(max_frame_gap_s_) || max_frame_gap_s_ <= 0)
     throw std::invalid_argument("max_frame_gap_s must be finite and positive");
   ekf_config_ = rmcs_ekf::load_config(yaml["ekf"]);
-  recorder_=std::make_shared<tools::EkfRecorder>(config_path);
+  recorder_ = std::make_shared<tools::EkfRecorder>(config_path);
 }
 
 bool Tracker::accept_timestamp(std::chrono::steady_clock::time_point t)
 {
-  if(timestamp_initialized_) {
-    const double dt=tools::delta_time(t,last_timestamp_);
-    if(!std::isfinite(dt) || dt<=0) return false;
-    if(dt>max_frame_gap_s_) {
-      state_="lost";
-      detect_count_=temp_lost_count_=0;
+  if (timestamp_initialized_) {
+    const double dt = tools::delta_time(t, last_timestamp_);
+    if (!std::isfinite(dt) || dt <= 0) return false;
+    if (dt > max_frame_gap_s_) {
+      state_ = "lost";
+      detect_count_ = temp_lost_count_ = 0;
     }
   }
-  timestamp_initialized_=true;last_timestamp_=t;return true;
+  timestamp_initialized_ = true;
+  last_timestamp_ = t;
+  return true;
 }
 
 std::string Tracker::state() const { return state_; }
@@ -87,12 +95,17 @@ std::string Tracker::state() const { return state_; }
 std::list<Target> Tracker::track(
   std::list<Armor> & armors, std::chrono::steady_clock::time_point t, bool use_enemy_color)
 {
-  tools::EkfFrameLog log(*recorder_,armors,t,solver_.camera_feature(),
-    [this]()->const Target* {return state_=="lost"?nullptr:&target_;},[this]{return state_;},use_enemy_color);
-  if(!accept_timestamp(t)) return state_=="lost" ? std::list<Target>{} : std::list<Target>{target_};
-  // 只保留己方颜色且受支持的 4 板目标
-  armors.remove_if(
-    [&](const auto_aim::Armor & a) { return (use_enemy_color && a.color != enemy_color_) || !is_supported_target(a) || !valid_corners(a); });
+  tools::EkfFrameLog log(
+    *recorder_, armors, t, solver_.camera_feature(),
+    [this]() -> const Target * { return state_ == "lost" ? nullptr : &target_; },
+    [this] { return state_; }, use_enemy_color);
+  if (!accept_timestamp(t))
+    return state_ == "lost" ? std::list<Target>{} : std::list<Target>{target_};
+  // 按配置筛选敌方颜色，只保留受支持的 4 板目标。
+  armors.remove_if([&](const auto_aim::Armor & a) {
+    return (use_enemy_color && a.color != enemy_color_) || !is_supported_target(a) ||
+           !valid_corners(a);
+  });
 
   // 优先选择靠近图像中心的装甲板
   armors.sort([](const Armor & a, const Armor & b) {
@@ -133,17 +146,23 @@ std::tuple<omniperception::DetectionResult, std::list<Target>> Tracker::track(
     temp_target = detection_queue.front();
   }
 
-  tools::EkfFrameLog log(*recorder_,armors,t,solver_.camera_feature(),
-    [this]()->const Target* {return state_=="lost"?nullptr:&target_;},[this]{return state_;},use_enemy_color);
+  tools::EkfFrameLog log(
+    *recorder_, armors, t, solver_.camera_feature(),
+    [this]() -> const Target * { return state_ == "lost" ? nullptr : &target_; },
+    [this] { return state_; }, use_enemy_color);
   log.omni(detection_queue);
-  if(!accept_timestamp(t)) return {switch_target,state_=="lost" ? std::list<Target>{} : std::list<Target>{target_}};
+  if (!accept_timestamp(t))
+    return {switch_target, state_ == "lost" ? std::list<Target>{} : std::list<Target>{target_}};
 
   // 全向感知结果同样只保留 4 板目标，避免切到不支持的前哨站/平衡/基地
   armors.remove_if([&](const auto_aim::Armor & a) {
-    return !is_supported_target(a) || !valid_corners(a) || (use_enemy_color && a.color!=enemy_color_);
+    return !is_supported_target(a) || !valid_corners(a) ||
+           (use_enemy_color && a.color != enemy_color_);
   });
-  temp_target.armors.remove_if(
-    [&](const auto_aim::Armor & a) { return !is_supported_target(a) || !valid_corners(a) || (use_enemy_color && a.color!=enemy_color_); });
+  temp_target.armors.remove_if([&](const auto_aim::Armor & a) {
+    return !is_supported_target(a) || !valid_corners(a) ||
+           (use_enemy_color && a.color != enemy_color_);
+  });
 
   // 优先选择靠近图像中心的装甲板
   armors.sort([](const Armor & a, const Armor & b) {
@@ -181,7 +200,8 @@ std::tuple<omniperception::DetectionResult, std::list<Target>> Tracker::track(
   }
 
   else if (state_ == "switching") {
-    found = !armors.empty() && armors.front().priority == omni_target_priority_ && set_target(armors,t);
+    found =
+      !armors.empty() && armors.front().priority == omni_target_priority_ && set_target(armors, t);
   }
 
   else {
@@ -199,10 +219,10 @@ std::tuple<omniperception::DetectionResult, std::list<Target>> Tracker::track(
 
 void Tracker::state_machine(bool found)
 {
-  // A numerically invalid model must not survive the temporary-loss allowance.
+  // 模型发散立即退出，不等待暂丢帧数耗尽。
   if ((found || state_ != "lost") && target_.diverged()) {
-    tools::logger()->debug("[Tracker] Target diverged! name={}",
-      ARMOR_NAMES.at(static_cast<size_t>(target_.name)));
+    tools::logger()->debug(
+      "[Tracker] Target diverged! name={}", ARMOR_NAMES.at(static_cast<size_t>(target_.name)));
     state_ = "lost";
     detect_count_ = temp_lost_count_ = 0;
     return;
@@ -210,7 +230,7 @@ void Tracker::state_machine(bool found)
 
   if (state_ == "lost") {
     if (!found) return;
-    // A validated initialization counts as the first confirmation.
+    // 通过验收的初始化计为第 1 个确认帧。
     detect_count_ = 1;
     temp_lost_count_ = 0;
     state_ = detect_count_ >= min_detect_count_ ? "tracking" : "detecting";
@@ -222,7 +242,7 @@ void Tracker::state_machine(bool found)
       ++detect_count_;
       if (detect_count_ >= min_detect_count_) state_ = "tracking";
     } else {
-      // Restart consecutive confirmation, keeping this Target during short losses.
+      // 确认中断后重新计数，在暂丢额度内保留同一 Target。
       detect_count_ = 0;
       if (++temp_lost_count_ > max_temp_lost_count_) state_ = "lost";
     }
@@ -230,12 +250,11 @@ void Tracker::state_machine(bool found)
 
   else if (state_ == "tracking") {
     temp_lost_count_ = found ? 0 : 1;
-    if (!found)
-      state_ = temp_lost_count_ > max_temp_lost_count_ ? "lost" : "temp_lost";
+    if (!found) state_ = temp_lost_count_ > max_temp_lost_count_ ? "lost" : "temp_lost";
   }
 
   else if (state_ == "switching") {
-    // Successful set_target() already restarts confirmation via the lost branch.
+    // set_target() 成功后已转入 lost 分支，重新开始确认。
     if (++temp_lost_count_ > 200) state_ = "lost";
   }
 
@@ -265,11 +284,12 @@ bool Tracker::set_target(std::list<Armor> & armors, std::chrono::steady_clock::t
       "[Tracker] failed to initialize 4-armor EKF for {}", ARMOR_NAMES[armor.name]);
     return false;
   }
-  if(target_.checkinit()) ++reinit_count_;
-  target_=std::move(next); ++track_id_;
-  // Reacquisition and priority switches both start a fresh confirmation sequence.
-  state_="lost";
-  detect_count_=temp_lost_count_=0;
+  if (target_.checkinit()) ++reinit_count_;
+  target_ = std::move(next);
+  ++track_id_;
+  // 重新捕获和优先级切换都从新目标的连续确认开始。
+  state_ = "lost";
+  detect_count_ = temp_lost_count_ = 0;
 
   return true;
 }
@@ -280,31 +300,37 @@ bool Tracker::update_target(std::list<Armor> & armors, std::chrono::steady_clock
 
   int found_count = 0;
   for (const auto & armor : armors) {
-    if (armor.name != target_.name || armor.type != target_.armor_type || armor.color!=target_.color()) continue;
+    if (
+      armor.name != target_.name || armor.type != target_.armor_type ||
+      armor.color != target_.color())
+      continue;
     found_count++;
   }
 
   if (found_count == 0) {
-    // Clear per-frame diagnostics without counting a missed detection as a
-    // rejected measurement. Tracker still counts this as a missing update.
+    // 无检测时清理本帧诊断，不计为拒绝观测；Tracker 仍累计无更新帧数。
     target_.update({}, solver_.camera_feature());
     return false;
   }
 
   std::list<Armor> matched_armors;
   for (auto & armor : armors) {
-    if (armor.name != target_.name || armor.type != target_.armor_type || armor.color!=target_.color()) continue;
+    if (
+      armor.name != target_.name || armor.type != target_.armor_type ||
+      armor.color != target_.color())
+      continue;
 
-    // v0.32: 4 板像素 EKF 只用角点，不用 PnP 结果。skip_tracking_pnp=true 时跳过
-    // 逐板解算（省掉每块板 140 次 yaw 重投影搜索），但 Foxglove 的 detections
-    // 方块会丢失世界系位姿，默认关闭。
-    if (!ekf_config_.skip_tracking_pnp) (void)solver_.solve(armor);
-    else armor.pose_valid=false;
+    // 像素 EKF 只使用角点。跳过逐板解算可减少耗时，
+    // 但 Foxglove 的检测方块将没有世界系位姿；默认仍执行解算。
+    if (!ekf_config_.skip_tracking_pnp)
+      (void)solver_.solve(armor);
+    else
+      armor.pose_valid = false;
     matched_armors.push_back(armor);
   }
 
   target_.update(matched_armors, solver_.camera_feature());
-  return target_.diagnostics().frame_update_count>0;
+  return target_.diagnostics().frame_update_count > 0;
 }
 
 }  // namespace auto_aim

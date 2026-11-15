@@ -27,14 +27,11 @@ auto to_armor2d(const Armor & armor) -> rmcs_ekf::Armor2d
 }  // namespace
 
 Target::Target(
-  const Armor & armor, std::chrono::steady_clock::time_point t,
-  const rmcs_ekf::Config & ekf_config, const rmcs_ekf::CameraFeature & camera)
-: name(armor.name)
-, armor_type(armor.type)
-, priority(armor.priority)
-, t_(t)
+  const Armor & armor, std::chrono::steady_clock::time_point t, const rmcs_ekf::Config & ekf_config,
+  const rmcs_ekf::CameraFeature & camera)
+: name(armor.name), armor_type(armor.type), priority(armor.priority), t_(t)
 {
-  color_=armor.color;
+  color_ = armor.color;
   if (armor.points.size() < 4) {
     tools::logger()->warn(
       "[Target] armor has {} corners, expected at least 4", armor.points.size());
@@ -43,12 +40,14 @@ Target::Target(
 
   rmcs_model_.configure(ekf_config);
 
-  const auto observation=to_armor2d(armor);
-  const bool initialized=armor.pose_valid && rmcs_model_.initialize_from_pose(
-    camera,armor.xyz_in_world,rmcs_ekf::euler_to_quaternion(
-      armor.ypr_in_world[0],armor.ypr_in_world[1],armor.ypr_in_world[2]),
-    armor.type==ArmorType::big,&observation);
-  init_source_=initialized ? 1 : 0; // unified constrained pixel pose
+  const auto observation = to_armor2d(armor);
+  const bool initialized =
+    armor.pose_valid && rmcs_model_.initialize_from_pose(
+                          camera, armor.xyz_in_world,
+                          rmcs_ekf::euler_to_quaternion(
+                            armor.ypr_in_world[0], armor.ypr_in_world[1], armor.ypr_in_world[2]),
+                          armor.type == ArmorType::big, &observation);
+  init_source_ = initialized ? 1 : 0;  // unified constrained pixel pose
 
   if (!initialized) {
     tools::logger()->warn("[Target] rmcs EKF init failed");
@@ -85,14 +84,14 @@ auto Target::synthetic(double x, double vyaw, double radius, double h) -> Target
 
 void Target::predict(std::chrono::steady_clock::time_point t)
 {
-  frame_valid_=false;
+  frame_valid_ = false;
   const auto dt = tools::delta_time(t, t_);
   if (!std::isfinite(dt) || dt <= 0.0) {
     tools::logger()->debug("[Target] ignoring non-positive predict dt: dt={:.4f}s", dt);
     return;
   }
   rmcs_model_.predict(dt);
-  frame_valid_=true;
+  frame_valid_ = true;
   t_ = t;
 }
 
@@ -107,12 +106,15 @@ auto Target::at(double dt) const -> Target
 
 void Target::update(const std::list<Armor> & armors, const rmcs_ekf::CameraFeature & camera)
 {
-  if(!frame_valid_) return;
-  frame_valid_=false;
+  if (!frame_valid_) return;
+  frame_valid_ = false;
   std::vector<rmcs_ekf::Armor2d> armors2d;
   armors2d.reserve(armors.size());
   for (const auto & armor : armors) {
-    if (armor.points.size() < 4 || armor.color!=color_ || armor.name!=name || armor.type!=armor_type) continue;
+    if (
+      armor.points.size() < 4 || armor.color != color_ || armor.name != name ||
+      armor.type != armor_type)
+      continue;
     armors2d.push_back(to_armor2d(armor));
   }
 

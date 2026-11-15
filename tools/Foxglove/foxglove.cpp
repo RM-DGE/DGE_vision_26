@@ -1,5 +1,9 @@
 #include "foxglove.hpp"
 
+#include <fmt/format.h>
+#include <yaml-cpp/yaml.h>
+
+#include <Eigen/Eigenvalues>
 #include <algorithm>
 #include <array>
 #include <cerrno>
@@ -8,20 +12,15 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <map>
-#include <optional>
-#include <utility>
-#include <vector>
-
-#include <Eigen/Eigenvalues>
-#include <fmt/format.h>
-
 #include <foxglove/channel.hpp>
 #include <foxglove/context.hpp>
 #include <foxglove/messages.hpp>
 #include <foxglove/websocket.hpp>
+#include <map>
 #include <nlohmann/json.hpp>
-#include <yaml-cpp/yaml.h>
+#include <optional>
+#include <utility>
+#include <vector>
 
 #include "tools/logger.hpp"
 #include "tools/math_tools.hpp"
@@ -34,10 +33,9 @@ namespace
 {
 uint64_t now_ns()
 {
-  return static_cast<uint64_t>(
-    std::chrono::duration_cast<std::chrono::nanoseconds>(
-      std::chrono::system_clock::now().time_since_epoch())
-      .count());
+  return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                 std::chrono::system_clock::now().time_since_epoch())
+                                 .count());
 }
 
 // 纳秒 -> Foxglove 的 sec/nsec 时间戳
@@ -71,9 +69,8 @@ Pose make_pose_ypr(double x, double y, double z, double yaw, double pitch)
 {
   Pose pose;
   pose.position = make_vector3(x, y, z);
-  const Eigen::Quaterniond q =
-    Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()) *
-    Eigen::AngleAxisd(pitch, Eigen::Vector3d::UnitY());
+  const Eigen::Quaterniond q = Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()) *
+                               Eigen::AngleAxisd(pitch, Eigen::Vector3d::UnitY());
   pose.orientation = make_quaternion(q);
   return pose;
 }
@@ -102,9 +99,12 @@ Vector3 armor_size(auto_aim::ArmorType type)
 Color armor_color(auto_aim::Color color)
 {
   switch (color) {
-  case auto_aim::red: return kDetectedRed;
-  case auto_aim::blue: return kDetectedBlue;
-  default: return kDetectedOther;
+    case auto_aim::red:
+      return kDetectedRed;
+    case auto_aim::blue:
+      return kDetectedBlue;
+    default:
+      return kDetectedOther;
   }
 }
 
@@ -156,7 +156,6 @@ Eigen::Vector3d nearest_armor_xyz(const auto_aim::Target & target)
   return best;
 }
 
-
 // ---------------------------------------------------------------------------
 // ROS2 CDR (XCDR1, little-endian, 无 encapsulation header) 序列化。
 // 与 ros2_foxglove_bridge 的 "cdr" 编码一致，供 Foxglove Studio 3D 面板
@@ -167,15 +166,28 @@ class CdrWriter
 public:
   // CDR 流以 4 字节 RTPS encapsulation 头开始（PLAIN_CDR, little-endian）：
   // 与 @foxglove/cdr / foxglove_bridge 输出一致，否则 Studio 无法解码。
-  CdrWriter()
-  {
-    buf_ = {std::byte{0x00}, std::byte{0x01}, std::byte{0x00}, std::byte{0x00}};
-  }
+  CdrWriter() { buf_ = {std::byte{0x00}, std::byte{0x01}, std::byte{0x00}, std::byte{0x00}}; }
 
-  void u32(uint32_t v) { align(4); append(&v, sizeof v); }
-  void i32(int32_t v) { align(4); append(&v, sizeof v); }
-  void f32(float v) { align(4); append(&v, sizeof v); }
-  void f64(double v) { align(8); append(&v, sizeof v); }
+  void u32(uint32_t v)
+  {
+    align(4);
+    append(&v, sizeof v);
+  }
+  void i32(int32_t v)
+  {
+    align(4);
+    append(&v, sizeof v);
+  }
+  void f32(float v)
+  {
+    align(4);
+    append(&v, sizeof v);
+  }
+  void f64(double v)
+  {
+    align(8);
+    append(&v, sizeof v);
+  }
   void u8(uint8_t v) { buf_.push_back(static_cast<std::byte>(v)); }
 
   void str(const std::string & s)
@@ -301,12 +313,14 @@ const std::string & marker_array_schema()
     const std::string sep = std::string(80, '=') + "\nMSG: ";
     std::string s;
     const auto add = [&](const std::string & name, const std::string & text) {
-      if (s.empty()) { s = text; }
-      else { s += "\n" + sep + name + "\n" + text; }
+      if (s.empty()) {
+        s = text;
+      } else {
+        s += "\n" + sep + name + "\n" + text;
+      }
     };
     add("visualization_msgs/msg/MarkerArray", "Marker[] markers\n");
-    add(
-      "visualization_msgs/Marker", R"(
+    add("visualization_msgs/Marker", R"(
 std_msgs/Header header
 string ns
 int32 id
@@ -327,8 +341,7 @@ string mesh_resource
 MeshFile mesh_file
 bool mesh_use_embedded_materials
 )");
-    add(
-      "std_msgs/Header", R"(
+    add("std_msgs/Header", R"(
 builtin_interfaces/Time stamp
 string frame_id
 )");
@@ -339,8 +352,7 @@ string frame_id
     add("geometry_msgs/Vector3", "float64 x\nfloat64 y\nfloat64 z\n");
     add("builtin_interfaces/Time", "int32 sec\nuint32 nanosec\n");
     add("builtin_interfaces/Duration", "int32 sec\nuint32 nanosec\n");
-    add(
-      "sensor_msgs/CompressedImage", R"(
+    add("sensor_msgs/CompressedImage", R"(
 std_msgs/Header header
 string format
 uint8[] data
@@ -393,8 +405,7 @@ foxglove::ParameterValue yaml_scalar(const std::string & s)
     end = nullptr;
     errno = 0;
     const double d = std::strtod(s.c_str(), &end);
-    if (end && *end == '\0' && end != s.c_str() && errno == 0)
-      return foxglove::ParameterValue(d);
+    if (end && *end == '\0' && end != s.c_str() && errno == 0) return foxglove::ParameterValue(d);
   }
   return foxglove::ParameterValue(s);
 }
@@ -409,8 +420,7 @@ foxglove::ParameterValue yaml_to_param(const YAML::Node & node)
   }
   if (node.IsMap()) {
     std::map<std::string, foxglove::ParameterValue> dict;
-    for (const auto & kv : node)
-      dict.emplace(kv.first.as<std::string>(), yaml_to_param(kv.second));
+    for (const auto & kv : node) dict.emplace(kv.first.as<std::string>(), yaml_to_param(kv.second));
     return foxglove::ParameterValue(std::move(dict));
   }
   return yaml_scalar(node.Scalar());
@@ -422,14 +432,14 @@ struct FoxgloveServer::Impl
   foxglove::Context context;
   std::optional<foxglove::WebSocketServer> server;
   std::optional<CompressedImageChannel> image_ch;
-  std::optional<CompressedImageChannel> result_img_ch;   // /detector/result_img/compressed
-  std::optional<CompressedImageChannel> number_img_ch;   // /detector/number_img
+  std::optional<CompressedImageChannel> result_img_ch;  // /detector/result_img/compressed
+  std::optional<CompressedImageChannel> number_img_ch;  // /detector/number_img
   std::optional<ImageAnnotationsChannel> annotations_ch;
   std::optional<foxglove::RawChannel> debug_ch;
   std::optional<CameraCalibrationChannel> camera_info_ch;
   std::optional<FrameTransformsChannel> tf_ch;
   std::optional<SceneUpdateChannel> scene_ch;
-  std::optional<SceneUpdateChannel> prediction_ch;       // /dge/prediction
+  std::optional<SceneUpdateChannel> prediction_ch;  // /dge/prediction
   std::optional<foxglove::RawChannel> rm_target_ch;
   std::optional<foxglove::RawChannel> rm_info_ch;
   std::optional<foxglove::RawChannel> rm_armors_ch;
@@ -572,31 +582,42 @@ FoxgloveServer::FoxgloveServer(int port, std::string name) : impl_(std::make_uni
       object_schema_text.size()};
   };
   if (auto ch = foxglove::RawChannel::create(
-        "/tracker/target", "json", json_schema("auto_aim_interfaces/msg/Target"),
-        impl_->context); ch) impl_->rm_target_ch = std::move(*ch);
+        "/tracker/target", "json", json_schema("auto_aim_interfaces/msg/Target"), impl_->context);
+      ch)
+    impl_->rm_target_ch = std::move(*ch);
   if (auto ch = foxglove::RawChannel::create(
         "/tracker/info", "json", json_schema("auto_aim_interfaces/msg/TrackerInfo"),
-        impl_->context); ch) impl_->rm_info_ch = std::move(*ch);
+        impl_->context);
+      ch)
+    impl_->rm_info_ch = std::move(*ch);
   if (auto ch = foxglove::RawChannel::create(
-        "/detector/armors", "json", json_schema("auto_aim_interfaces/msg/Armors"),
-        impl_->context); ch) impl_->rm_armors_ch = std::move(*ch);
+        "/detector/armors", "json", json_schema("auto_aim_interfaces/msg/Armors"), impl_->context);
+      ch)
+    impl_->rm_armors_ch = std::move(*ch);
 
   // 3D 面板 Marker 话题：cdr 编码 + ros2msg schema（与 ros2_foxglove_bridge 相同）
   const auto & ma_text = marker_array_schema();
   if (auto ch = foxglove::RawChannel::create(
         "/detector/marker", "cdr", cdr_schema("visualization_msgs/msg/MarkerArray", ma_text),
-        impl_->context); ch) impl_->detector_marker_ch = std::move(*ch);
+        impl_->context);
+      ch)
+    impl_->detector_marker_ch = std::move(*ch);
   if (auto ch = foxglove::RawChannel::create(
         "/tracker/marker", "cdr", cdr_schema("visualization_msgs/msg/MarkerArray", ma_text),
-        impl_->context); ch) impl_->tracker_marker_ch = std::move(*ch);
+        impl_->context);
+      ch)
+    impl_->tracker_marker_ch = std::move(*ch);
 
   const auto & ps_text = point_stamped_schema();
   if (auto ch = foxglove::RawChannel::create(
         "/aiming_point", "cdr", cdr_schema("geometry_msgs/msg/PointStamped", ps_text),
-        impl_->context); ch) impl_->aiming_point_ch = std::move(*ch);
+        impl_->context);
+      ch)
+    impl_->aiming_point_ch = std::move(*ch);
 
   if (auto ch = foxglove::RawChannel::create(
-        "/sim/ground_truth", "json", json_schema("dge.sim.GroundTruth"), impl_->context); ch)
+        "/sim/ground_truth", "json", json_schema("dge.sim.GroundTruth"), impl_->context);
+      ch)
     impl_->gt_ch = std::move(*ch);
 
   logger()->info("foxglove: WebSocket server on ws://0.0.0.0:{}", port);
@@ -622,8 +643,8 @@ void FoxgloveServer::configure_camera(const std::string & config_path)
     for (const auto & kv : yaml) {
       const std::string key = kv.first.as<std::string>();
       auto value = yaml_to_param(kv.second);
-      if (value.is<std::string>() || value.is<double>() || value.is<int64_t>() ||
-          value.is<bool>()) {
+      if (
+        value.is<std::string>() || value.is<double>() || value.is<int64_t>() || value.is<bool>()) {
         if (value.is<std::string>())
           impl_->parameters.emplace_back(key, value.get<std::string>());
         else if (value.is<double>())
@@ -633,8 +654,7 @@ void FoxgloveServer::configure_camera(const std::string & config_path)
         else
           impl_->parameters.emplace_back(key, value.get<bool>());
       } else {
-        impl_->parameters.emplace_back(
-          key, foxglove::ParameterType::None, std::move(value));
+        impl_->parameters.emplace_back(key, foxglove::ParameterType::None, std::move(value));
       }
     }
   }
@@ -652,11 +672,10 @@ void FoxgloveServer::configure_camera(const std::string & config_path)
   const double cy = camera_matrix[5];
 
   // 外参：camera_optical_frame 在 gimbal_link 下的位姿
-  impl_->camera_rotation = Eigen::Quaterniond(
-    Eigen::Matrix3d(
-      Eigen::Map<const Eigen::Matrix<double, 3, 3, Eigen::RowMajor>>(r_camera2gimbal.data())));
-  impl_->camera_translation = Eigen::Vector3d(
-    t_camera2gimbal[0], t_camera2gimbal[1], t_camera2gimbal[2]);
+  impl_->camera_rotation = Eigen::Quaterniond(Eigen::Matrix3d(
+    Eigen::Map<const Eigen::Matrix<double, 3, 3, Eigen::RowMajor>>(r_camera2gimbal.data())));
+  impl_->camera_translation =
+    Eigen::Vector3d(t_camera2gimbal[0], t_camera2gimbal[1], t_camera2gimbal[2]);
 
   const uint64_t ns = now_ns();
   CameraCalibration calib;
@@ -706,8 +725,7 @@ void FoxgloveServer::publish_tf(const Eigen::Quaterniond & gimbal_world_q)
     tf.parent_frame_id = "gimbal_link";
     tf.child_frame_id = "camera_optical_frame";
     tf.translation = make_vector3(
-      impl_->camera_translation.x(), impl_->camera_translation.y(),
-      impl_->camera_translation.z());
+      impl_->camera_translation.x(), impl_->camera_translation.y(), impl_->camera_translation.z());
     tf.rotation = make_quaternion(impl_->camera_rotation);
     msg.transforms.push_back(tf);
   }
@@ -789,8 +807,7 @@ void FoxgloveServer::publish_scene(
         ring.color = color;
         for (int i = 0; i < kSegments; ++i) {
           const double a = i * 2.0 * M_PI / kSegments;
-          ring.points.push_back(
-            Point3{state.x + r * std::cos(a), state.y + r * std::sin(a), z});
+          ring.points.push_back(Point3{state.x + r * std::cos(a), state.y + r * std::sin(a), z});
         }
         entity.lines.push_back(ring);
       };
@@ -852,8 +869,7 @@ void FoxgloveServer::publish_scene(
       if (std::abs(v_yaw) > 0.2) {
         const double len = std::min(1.0, std::abs(v_yaw) * 0.1);
         const Eigen::Vector3d tip = center + Eigen::Vector3d(0.0, 0.0, std::copysign(len, v_yaw));
-        entity.arrows.push_back(
-          make_arrow(center, tip, 0.02, make_color(0.2, 1.0, 1.0, 1.0)));
+        entity.arrows.push_back(make_arrow(center, tip, 0.02, make_color(0.2, 1.0, 1.0, 1.0)));
       }
 
       // 目标标签
@@ -1018,8 +1034,7 @@ void FoxgloveServer::publish_ground_truth(const std::vector<io::SimTargetTruth> 
   impl_->gt_ch->log(reinterpret_cast<const std::byte *>(data.data()), data.size(), ns);
 }
 
-void FoxgloveServer::publish_image(
-  const cv::Mat & bgr, int quality, const cv::Mat & result_image)
+void FoxgloveServer::publish_image(const cv::Mat & bgr, int quality, const cv::Mat & result_image)
 {
   if (bgr.empty() || !impl_->image_ch) return;
   if (!has_clients()) return;
@@ -1064,7 +1079,8 @@ void FoxgloveServer::publish_number_image(const std::list<auto_aim::Armor> & arm
     if (a.pattern.empty() || count >= 8) continue;
     cv::Mat p;
     cv::resize(a.pattern, p, cv::Size(80, 40));
-    if (mosaic.empty()) mosaic = p;
+    if (mosaic.empty())
+      mosaic = p;
     else {
       cv::Mat tmp;
       cv::hconcat(mosaic, p, tmp);
@@ -1103,8 +1119,8 @@ void FoxgloveServer::publish_annotations(const std::list<auto_aim::Armor> & armo
     pa.type = PointsAnnotation::PointsAnnotationType::LINE_LOOP;
     pa.points.reserve(4);
     for (int i = 0; i < 4; ++i)
-      pa.points.push_back(Point2{
-        static_cast<double>(a.points[i].x), static_cast<double>(a.points[i].y)});
+      pa.points.push_back(
+        Point2{static_cast<double>(a.points[i].x), static_cast<double>(a.points[i].y)});
 
     // 按敌方颜色上色：蓝方蓝框、红方红框、其它绿框
     Color color;
@@ -1130,8 +1146,9 @@ void FoxgloveServer::publish_rmvision(
 {
   if (!has_clients()) return;
   const uint64_t ns = now_ns();
-  nlohmann::json header = {{"stamp", {{"sec", ns / 1000000000ULL}, {"nanosec", ns % 1000000000ULL}}},
-                           {"frame_id", "camera_optical_frame"}};
+  nlohmann::json header = {
+    {"stamp", {{"sec", ns / 1000000000ULL}, {"nanosec", ns % 1000000000ULL}}},
+    {"frame_id", "camera_optical_frame"}};
   if (impl_->rm_armors_ch) {
     nlohmann::json msg = {{"header", header}, {"armors", nlohmann::json::array()}};
     for (const auto & a : armors) {
@@ -1139,21 +1156,32 @@ void FoxgloveServer::publish_rmvision(
       nlohmann::json item;
       item["number"] = auto_aim::ARMOR_NAMES.at(static_cast<size_t>(a.name));
       item["type"] = auto_aim::ARMOR_TYPES.at(static_cast<size_t>(a.type));
-      item["distance_to_image_center"] = static_cast<float>(
-        std::hypot(a.center.x - 720.0, a.center.y - 540.0));
-      item["pose"] = {{"position", {{"x", a.xyz_in_gimbal.x()}, {"y", a.xyz_in_gimbal.y()}, {"z", a.xyz_in_gimbal.z()}}},
-                      {"orientation", {{"x", 0.0}, {"y", 0.0}, {"z", 0.0}, {"w", 1.0}}}};
+      item["distance_to_image_center"] =
+        static_cast<float>(std::hypot(a.center.x - 720.0, a.center.y - 540.0));
+      item["pose"] = {
+        {"position",
+         {{"x", a.xyz_in_gimbal.x()}, {"y", a.xyz_in_gimbal.y()}, {"z", a.xyz_in_gimbal.z()}}},
+        {"orientation", {{"x", 0.0}, {"y", 0.0}, {"z", 0.0}, {"w", 1.0}}}};
       msg["armors"].push_back(std::move(item));
     }
     const auto data = msg.dump();
     impl_->rm_armors_ch->log(reinterpret_cast<const std::byte *>(data.data()), data.size(), ns);
   }
-  nlohmann::json info_header = {{"stamp", {{"sec", ns / 1000000000ULL}, {"nanosec", ns % 1000000000ULL}}}};
+  nlohmann::json info_header = {
+    {"stamp", {{"sec", ns / 1000000000ULL}, {"nanosec", ns % 1000000000ULL}}}};
   if (impl_->rm_target_ch) {
-    nlohmann::json msg = {{"header", header}, {"tracking", false}, {"id", ""}, {"armors_num", 0},
+    nlohmann::json msg = {
+      {"header", header},
+      {"tracking", false},
+      {"id", ""},
+      {"armors_num", 0},
       {"position", {{"x", 0.0}, {"y", 0.0}, {"z", 0.0}}},
-      {"velocity", {{"x", 0.0}, {"y", 0.0}, {"z", 0.0}}}, {"yaw", 0.0}, {"v_yaw", 0.0},
-      {"radius_1", 0.0}, {"radius_2", 0.0}, {"dz", 0.0}};
+      {"velocity", {{"x", 0.0}, {"y", 0.0}, {"z", 0.0}}},
+      {"yaw", 0.0},
+      {"v_yaw", 0.0},
+      {"radius_1", 0.0},
+      {"radius_2", 0.0},
+      {"dz", 0.0}};
     if (!targets.empty()) {
       const auto & t = targets.front();
       const auto state = t.state();
@@ -1164,9 +1192,12 @@ void FoxgloveServer::publish_rmvision(
       msg["armors_num"] = armor_num;
       msg["position"] = {{"x", state.x}, {"y", state.y}, {"z", state.z}};
       msg["velocity"] = {{"x", state.vx}, {"y", state.vy}, {"z", state.vz}};
-      msg["yaw"] = state.rotation_angle; msg["v_yaw"] = state.rotation_speed;
+      msg["yaw"] = state.rotation_angle;
+      msg["v_yaw"] = state.rotation_speed;
       msg["id"] = auto_aim::ARMOR_NAMES.at(static_cast<size_t>(t.name));
-      msg["radius_1"] = r1; msg["radius_2"] = r2; msg["dz"] = state.height_lateral;
+      msg["radius_1"] = r1;
+      msg["radius_2"] = r2;
+      msg["dz"] = state.height_lateral;
     }
     const auto data = msg.dump();
     impl_->rm_target_ch->log(reinterpret_cast<const std::byte *>(data.data()), data.size(), ns);
@@ -1187,7 +1218,10 @@ void FoxgloveServer::publish_rmvision(
     } else {
       impl_->has_last_target = false;
     }
-    nlohmann::json msg = {{"header", info_header}, {"position_diff", position_diff}, {"yaw_diff", yaw_diff},
+    nlohmann::json msg = {
+      {"header", info_header},
+      {"position_diff", position_diff},
+      {"yaw_diff", yaw_diff},
       {"position", {{"x", aim_xyza[0]}, {"y", aim_xyza[1]}, {"z", aim_xyza[2]}}},
       {"yaw", aim_xyza[3]}};
     const auto data = msg.dump();
@@ -1323,10 +1357,9 @@ void FoxgloveServer::publish_tracker_markers(const std::list<auto_aim::Target> &
       cube.type = 1;  // CUBE
       cube.action = 0;
       cube.position = xyza_list[i].head<3>();
-      cube.orientation =
-        Eigen::Quaterniond(
-          Eigen::AngleAxisd(xyza_list[i][3], Eigen::Vector3d::UnitZ()) *
-          Eigen::AngleAxisd(armor_pitch(t.name), Eigen::Vector3d::UnitY()));
+      cube.orientation = Eigen::Quaterniond(
+        Eigen::AngleAxisd(xyza_list[i][3], Eigen::Vector3d::UnitZ()) *
+        Eigen::AngleAxisd(armor_pitch(t.name), Eigen::Vector3d::UnitY()));
       cube.scale = {0.03, width, 0.125};
       cube.color = {1.0f, 0.0f, 0.0f, 1.0f};
       markers.push_back(std::move(cube));
@@ -1367,10 +1400,8 @@ void FoxgloveServer::publish_debug(
   if (command.control && aim_valid && !targets.empty()) {
     dbg["command_yaw_deg"] = command.yaw * rad_to_deg;
     dbg["command_pitch_deg"] = command.pitch * rad_to_deg;
-    dbg["tracking_yaw_error_deg"] =
-      tools::limit_rad(command.yaw - gimbal_ypr[0]) * rad_to_deg;
-    dbg["tracking_pitch_error_deg"] =
-      tools::limit_rad(command.pitch - gimbal_ypr[1]) * rad_to_deg;
+    dbg["tracking_yaw_error_deg"] = tools::limit_rad(command.yaw - gimbal_ypr[0]) * rad_to_deg;
+    dbg["tracking_pitch_error_deg"] = tools::limit_rad(command.pitch - gimbal_ypr[1]) * rad_to_deg;
   }
   dbg["shoot"] = command.shoot ? 1 : 0;
   dbg["armors"] = static_cast<int>(armors.size());
@@ -1378,18 +1409,25 @@ void FoxgloveServer::publish_debug(
   dbg["pixel_nis_max"] = nullptr;
   dbg["pixel_residuals"] = nlohmann::json::array();
   for (int id = 0; id < 8; ++id) {
-    dbg["pixel_residuals"].push_back({{"id", id}, {"upper_u", nullptr},
-      {"upper_v", nullptr}, {"lower_u", nullptr}, {"lower_v", nullptr}, {"nis", nullptr}});
+    dbg["pixel_residuals"].push_back(
+      {{"id", id},
+       {"upper_u", nullptr},
+       {"upper_v", nullptr},
+       {"lower_u", nullptr},
+       {"lower_v", nullptr},
+       {"nis", nullptr}});
   }
   dbg["ekf_status"] = nlohmann::json::array();
-  const auto status_row = [&dbg](const std::string & name, const std::string & value,
-                                const std::string & meaning) {
-    dbg["ekf_status"].push_back({{"项目", name}, {"当前", value}, {"含义", meaning}});
-  };
-  std::size_t pose_index=0;
+  const auto status_row =
+    [&dbg](const std::string & name, const std::string & value, const std::string & meaning) {
+      dbg["ekf_status"].push_back({{"项目", name}, {"当前", value}, {"含义", meaning}});
+    };
+  std::size_t pose_index = 0;
   for (const auto & armor : armors) {
-    status_row("板位姿 " + std::to_string(pose_index++), armor.pose_status,
-      armor.pose_valid ? "统一解算 RMS=" + std::to_string(armor.pose_rms_px) + " px" : "无有效三维检测位姿");
+    status_row(
+      "板位姿 " + std::to_string(pose_index++), armor.pose_status,
+      armor.pose_valid ? "统一解算 RMS=" + std::to_string(armor.pose_rms_px) + " px"
+                       : "无有效三维检测位姿");
   }
   status_row("目标", targets.empty() ? "无目标" : "存在", "存在可包含暂丢保留期");
   if (!targets.empty()) {
@@ -1397,9 +1435,17 @@ void FoxgloveServer::publish_debug(
     const auto state = target.state();
 
     dbg["state"] = std::vector<double>{
-      state.x, state.y, state.z, state.vx, state.vy, state.vz,
-      state.rotation_angle, state.rotation_speed, state.radius_forward,
-      state.radius_lateral, state.height_lateral};
+      state.x,
+      state.y,
+      state.z,
+      state.vx,
+      state.vy,
+      state.vz,
+      state.rotation_angle,
+      state.rotation_speed,
+      state.radius_forward,
+      state.radius_lateral,
+      state.height_lateral};
 
     const auto diag = target.diagnostics();
     dbg["nis_valid"] = diag.nis_valid;
@@ -1413,32 +1459,37 @@ void FoxgloveServer::publish_debug(
       entry["lower_u"] = pixel.residual[2];
       entry["lower_v"] = pixel.residual[3];
       entry["nis"] = pixel.nis;
-      if (dbg["pixel_nis_max"].is_null() ||
-          pixel.nis > dbg["pixel_nis_max"].get<double>()) dbg["pixel_nis_max"] = pixel.nis;
+      if (dbg["pixel_nis_max"].is_null() || pixel.nis > dbg["pixel_nis_max"].get<double>())
+        dbg["pixel_nis_max"] = pixel.nis;
     }
-    status_row("接受 / 拒绝", std::to_string(diag.frame_update_count) + " / " +
-      std::to_string(diag.frame_rejected_count), "本帧更新计数；拒绝含门控与投影无效");
+    status_row(
+      "接受 / 拒绝",
+      std::to_string(diag.frame_update_count) + " / " + std::to_string(diag.frame_rejected_count),
+      "本帧更新计数；拒绝含门控与投影无效");
     status_row("关联板编号", std::to_string(diag.last_observed_id), "模型板编号 0–3；非实体身份");
-    status_row("几何学习 0/2", diag.report.geometry_ready[0] ? "已确认" : "学习中",
+    status_row(
+      "几何学习 0/2", diag.report.geometry_ready[0] ? "已确认" : "学习中",
       "需有效更新、时间跨度、另一板组观测及半径不确定度共同满足");
-    status_row("几何学习 1/3", diag.report.geometry_ready[1] ? "已确认" : "学习中",
+    status_row(
+      "几何学习 1/3", diag.report.geometry_ready[1] ? "已确认" : "学习中",
       "另需高差不确定度通过；未确认的板组不用于任意预测选板");
-    status_row("连续未更新", std::to_string(diag.no_update_frames), "连续没有接受更新的帧数，包含无检测与全部拒绝");
-    status_row("NIS 门控配置", diag.nis_gate_enabled ? "启用" : "关闭",
+    status_row(
+      "连续未更新", std::to_string(diag.no_update_frames),
+      "连续没有接受更新的帧数，包含无检测与全部拒绝");
+    status_row(
+      "NIS 门控配置", diag.nis_gate_enabled ? "启用" : "关闭",
       "启用后仍有预热期；曲线参考线不代表门控开启");
     status_row("门控阈值", std::to_string(diag.nis_gate_threshold), "仅门控实际生效时用于拒绝观测");
-    status_row("滤波状态", diag.diverged ? "发散" : (diag.converged ? "收敛" : "未收敛"),
+    status_row(
+      "滤波状态", diag.diverged ? "发散" : (diag.converged ? "收敛" : "未收敛"),
       "内部判据，不代表真实误差大小");
-    const auto sigma = [](double variance) {
-      return std::sqrt(std::max(0.0, variance));
-    };
+    const auto sigma = [](double variance) { return std::sqrt(std::max(0.0, variance)); };
 
     // 协方差对角线（与 state 同序）及 1σ，便于 Foxglove Plot 直接选字段。
-    dbg["cov"] = std::vector<double>{
-      diag.variance[0], diag.variance[1], diag.variance[2],
-      diag.variance[3], diag.variance[4], diag.variance[5],
-      diag.variance[6], diag.variance[7], diag.variance[8],
-      diag.variance[9], diag.variance[10]};
+    dbg["cov"] =
+      std::vector<double>{diag.variance[0], diag.variance[1], diag.variance[2], diag.variance[3],
+                          diag.variance[4], diag.variance[5], diag.variance[6], diag.variance[7],
+                          diag.variance[8], diag.variance[9], diag.variance[10]};
     dbg["sigma_x"] = sigma(diag.variance[0]);
     dbg["sigma_y"] = sigma(diag.variance[1]);
     dbg["sigma_z"] = sigma(diag.variance[2]);
@@ -1470,7 +1521,7 @@ void FoxgloveServer::publish_debug(
     dbg["last_id"] = diag.last_observed_id;
     dbg["anchor_err_px"] = diag.anchor_error;
     dbg["ekf_no_update_frames"] = diag.no_update_frames;
-    dbg["uses_rmcs_ekf"] = 1.0;  // DGE 现在只有 4 板 rmcs 像素 EKF
+    dbg["uses_rmcs_ekf"] = 1.0;                     // DGE 现在只有 4 板 rmcs 像素 EKF
     dbg["ekf_init_source"] = target.init_source();  // 1=统一约束像素位姿，0=未初始化
 
     // rmcs-style validation: compare against simulator ground truth.

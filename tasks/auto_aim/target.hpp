@@ -1,13 +1,12 @@
 #ifndef AUTO_AIM__TARGET_HPP
 #define AUTO_AIM__TARGET_HPP
 
+#include <Eigen/Dense>
 #include <array>
 #include <chrono>
 #include <cstddef>
 #include <list>
 #include <vector>
-
-#include <Eigen/Dense>
 
 #include "armor.hpp"
 #include "rmcs_ekf/rmcs_ekf.hpp"
@@ -37,14 +36,13 @@ public:
 
   void predict(std::chrono::steady_clock::time_point t);
 
-  /// 轻量外推副本：只推状态，不推进协方差/时间，不修改原 Target。
+  /// 轻量外推副本：外推状态和副本时间，不传播协方差，不修改原 Target。
   /// 供 Aimer / Planner / Foxglove 查询未来时刻使用。
   auto at(double dt) const -> Target;
 
   auto time() const -> std::chrono::steady_clock::time_point { return t_; }
 
-  // Bulk update: the rmcs model needs all observations in a frame to do
-  // anchor matching and sequential lightbar updates.
+  // 整帧观测统一关联，再按端点对顺序更新。
   void update(const std::list<Armor> & armors, const rmcs_ekf::CameraFeature & camera);
 
   auto state() const -> rmcs_ekf::State;
@@ -55,17 +53,21 @@ public:
   auto jumped() const -> bool;
   auto last_id() const -> int;
   bool geometry_ready(int plate_id) const
-  { return plate_id>=0 && plate_id<4 && rmcs_model_.geometry_ready()[plate_id%2]; }
+  {
+    return plate_id >= 0 && plate_id < 4 && rmcs_model_.geometry_ready()[plate_id % 2];
+  }
   auto armor_count() const -> std::size_t;
   // 初始化来源：0 = 未初始化，1 = Solver 验收后的位姿。
   auto init_source() const -> int { return init_source_; }
 
-  // 统一 EKF 健康状态，供 Foxglove / PlotJuggler 使用。
+  // EKF 更新、协方差和收敛诊断，供 Foxglove / PlotJuggler 使用。
   auto diagnostics() const -> rmcs_ekf::Diagnostics;
   const rmcs_ekf::UpdateReport & update_report() const { return rmcs_model_.last_report(); }
   Color color() const { return color_; }
   auto future_covariance(double dt) const -> rmcs_ekf::RobotModel::Covariance
-  { return rmcs_model_.future_covariance(dt); }
+  {
+    return rmcs_model_.future_covariance(dt);
+  }
 
   bool checkinit() const { return isinit; }
 
@@ -75,8 +77,8 @@ private:
   // 4-armor pixel-domain EKF (rmcs port)
   int init_source_ = 0;
   rmcs_ekf::RobotModel rmcs_model_;
-  bool frame_valid_=false;
-  Color color_=Color::extinguish;
+  bool frame_valid_ = false;
+  Color color_ = Color::extinguish;
 };
 
 }  // namespace auto_aim

@@ -69,14 +69,14 @@ auto Solver::camera_feature() const -> rmcs_ekf::CameraFeature
   // while R_camera2gimbal_ maps the OpenCV camera frame (x right, y down,
   // z forward) to the gimbal. Convert the optical axes to ROS axes first.
   static const Eigen::Matrix3d kOpencvToRos{
-    { +0, +0, +1 },
-    { -1, +0, +0 },
-    { +0, -1, +0 },
+    {+0, +0, +1},
+    {-1, +0, +0},
+    {+0, -1, +0},
   };
 
   const Eigen::Matrix3d r_world_camera_opencv = R_gimbal2world_ * R_camera2gimbal_;
   feature.orientation =
-    Eigen::Quaterniond{ r_world_camera_opencv * kOpencvToRos.transpose() }.normalized();
+    Eigen::Quaterniond{r_world_camera_opencv * kOpencvToRos.transpose()}.normalized();
   feature.translation = R_gimbal2world_ * t_camera2gimbal_;
   return feature;
 }
@@ -84,29 +84,41 @@ auto Solver::camera_feature() const -> rmcs_ekf::CameraFeature
 //solvePnP（获得姿态）
 bool Solver::solve(Armor & armor) const
 {
-  armor.pose_valid=false; armor.pose_status="invalid_corners";
-  armor.pose_rms_px=std::numeric_limits<double>::quiet_NaN();
-  if(armor.points.size()!=4) return false;
-  if(armor.name==ArmorName::outpost || armor.name==ArmorName::base ||
-    (armor.type==ArmorType::big && (armor.name==ArmorName::three ||
-     armor.name==ArmorName::four || armor.name==ArmorName::five))) {
-    armor.pose_status="unsupported_four_plate_model"; return false;
+  armor.pose_valid = false;
+  armor.pose_status = "invalid_corners";
+  armor.pose_rms_px = std::numeric_limits<double>::quiet_NaN();
+  if (armor.points.size() != 4) return false;
+  if (
+    armor.name == ArmorName::outpost || armor.name == ArmorName::base ||
+    (armor.type == ArmorType::big &&
+     (armor.name == ArmorName::three || armor.name == ArmorName::four ||
+      armor.name == ArmorName::five))) {
+    armor.pose_status = "unsupported_four_plate_model";
+    return false;
   }
   rmcs_ekf::RobustPnp pnp;
-  pnp.camera=camera_feature();pnp.armor.large=armor.type==ArmorType::big;
-  pnp.armor.tl=armor.points[0];pnp.armor.tr=armor.points[1];
-  pnp.armor.br=armor.points[2];pnp.armor.bl=armor.points[3];
-  pnp.noise_observation=ekf_config_.noise_observation;pnp.max_rms_px=ekf_config_.init_max_rms_px;
+  pnp.camera = camera_feature();
+  pnp.armor.large = armor.type == ArmorType::big;
+  pnp.armor.tl = armor.points[0];
+  pnp.armor.tr = armor.points[1];
+  pnp.armor.br = armor.points[2];
+  pnp.armor.bl = armor.points[3];
+  pnp.noise_observation = ekf_config_.noise_observation;
+  pnp.max_rms_px = ekf_config_.init_max_rms_px;
   rmcs_ekf::Armor3d result;
-  if(!pnp.solve(result,&armor.pose_status,&armor.pose_rms_px)) return false;
-  const Eigen::Matrix3d world_rotation=result.orientation.toRotationMatrix();
-  const Eigen::Vector3d gimbal_position=R_gimbal2world_.transpose()*result.translation;
-  const Eigen::Vector3d world_ypr=tools::eulers(world_rotation,2,1,0);
-  const Eigen::Vector3d gimbal_ypr=tools::eulers(R_gimbal2world_.transpose()*world_rotation,2,1,0);
-  armor.xyz_in_world=result.translation;armor.xyz_in_gimbal=gimbal_position;
-  armor.ypr_in_world=world_ypr;armor.ypr_in_gimbal=gimbal_ypr;
-  armor.ypd_in_world=tools::xyz2ypd(result.translation);
-  armor.yaw_raw=world_ypr[0];armor.pose_valid=true;
+  if (!pnp.solve(result, &armor.pose_status, &armor.pose_rms_px)) return false;
+  const Eigen::Matrix3d world_rotation = result.orientation.toRotationMatrix();
+  const Eigen::Vector3d gimbal_position = R_gimbal2world_.transpose() * result.translation;
+  const Eigen::Vector3d world_ypr = tools::eulers(world_rotation, 2, 1, 0);
+  const Eigen::Vector3d gimbal_ypr =
+    tools::eulers(R_gimbal2world_.transpose() * world_rotation, 2, 1, 0);
+  armor.xyz_in_world = result.translation;
+  armor.xyz_in_gimbal = gimbal_position;
+  armor.ypr_in_world = world_ypr;
+  armor.ypr_in_gimbal = gimbal_ypr;
+  armor.ypd_in_world = tools::xyz2ypd(result.translation);
+  armor.yaw_raw = world_ypr[0];
+  armor.pose_valid = true;
   return true;
 }
 

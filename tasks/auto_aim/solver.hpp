@@ -40,11 +40,6 @@ private:
   Eigen::Matrix3d R_camera2gimbal_;
   Eigen::Vector3d t_camera2gimbal_;
   Eigen::Matrix3d R_gimbal2world_;
-
-
-
-
-
 };
 
 }  // namespace auto_aim
