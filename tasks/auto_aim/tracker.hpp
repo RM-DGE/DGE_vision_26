@@ -23,10 +23,9 @@ public:
   Tracker(const std::string & config_path, Solver & solver);
 
   std::string state() const;
-  struct RuntimeStats { std::size_t reinitializations, recoveries, candidate_failures, track_id; };
+  struct RuntimeStats { std::size_t reinitializations, track_id; };
   RuntimeStats runtime_stats() const {
-    return {reinit_count_, recovery_count_+target_.recovery_status().recovery_count,
-      candidate_failed_count_+target_.recovery_status().candidate_failed_count, track_id_};
+    return {reinit_count_, track_id_};
   }
 
   std::list<Target> track(
@@ -45,14 +44,13 @@ private:
   double max_frame_gap_s_ = 0.1;
   int detect_count_;
   int temp_lost_count_;
-  std::string state_, pre_state_;
+  std::string state_;
   Target target_;
   rmcs_ekf::Config ekf_config_;
-  rmcs_ekf::RecoverySettings recovery_settings_;
   std::chrono::steady_clock::time_point last_timestamp_;
   ArmorPriority omni_target_priority_;
   bool timestamp_initialized_=false;
-  std::size_t reinit_count_=0, recovery_count_=0, candidate_failed_count_=0;
+  std::size_t reinit_count_=0;
   std::size_t track_id_=0;
   std::shared_ptr<tools::EkfRecorder> recorder_;
   bool accept_timestamp(std::chrono::steady_clock::time_point t);

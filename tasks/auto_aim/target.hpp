@@ -11,7 +11,6 @@
 
 #include "armor.hpp"
 #include "rmcs_ekf/rmcs_ekf.hpp"
-#include "rmcs_ekf/recovery.hpp"
 
 namespace auto_aim
 {
@@ -31,8 +30,7 @@ public:
   Target() = default;
   Target(
     const Armor & armor, std::chrono::steady_clock::time_point t,
-    const rmcs_ekf::Config & ekf_config, const rmcs_ekf::CameraFeature & camera,
-    const rmcs_ekf::RecoverySettings & recovery_settings={});
+    const rmcs_ekf::Config & ekf_config, const rmcs_ekf::CameraFeature & camera);
 
   /// 测试/离线规划用的虚拟 4 板目标；不依赖相机和检测。
   static auto synthetic(double x, double vyaw, double radius, double h) -> Target;
@@ -59,18 +57,15 @@ public:
   bool geometry_ready(int plate_id) const
   { return plate_id>=0 && plate_id<4 && rmcs_model_.geometry_ready()[plate_id%2]; }
   auto armor_count() const -> std::size_t;
-  // v0.32: 4 板 EKF 的初始化来源。0 = 未初始化，1 = Solver 位姿，2 = RobustPnp
+  // 初始化来源：0 = 未初始化，1 = Solver 验收后的位姿。
   auto init_source() const -> int { return init_source_; }
 
   // 统一 EKF 健康状态，供 Foxglove / PlotJuggler 使用。
   auto diagnostics() const -> rmcs_ekf::Diagnostics;
   const rmcs_ekf::UpdateReport & update_report() const { return rmcs_model_.last_report(); }
   Color color() const { return color_; }
-  bool reliable() const { return recovery_.status().reliable; }
-  const rmcs_ekf::RecoveryStatus & recovery_status() const { return recovery_.status(); }
   auto future_covariance(double dt) const -> rmcs_ekf::RobotModel::Covariance
   { return rmcs_model_.future_covariance(dt); }
-  void interrupt() { recovery_.interrupt(); frame_valid_=false; }
 
   bool checkinit() const { return isinit; }
 
@@ -80,8 +75,6 @@ private:
   // 4-armor pixel-domain EKF (rmcs port)
   int init_source_ = 0;
   rmcs_ekf::RobotModel rmcs_model_;
-  rmcs_ekf::RecoveryManager recovery_;
-  rmcs_ekf::RobotModel prediction_;
   bool frame_valid_=false;
   Color color_=Color::extinguish;
 };

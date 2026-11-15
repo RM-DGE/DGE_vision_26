@@ -1402,21 +1402,8 @@ void FoxgloveServer::publish_debug(
       state.radius_lateral, state.height_lateral};
 
     const auto diag = target.diagnostics();
-    const auto recovery = target.recovery_status();
-    const char * health_names[] = {"INIT", "HEALTHY", "COASTING", "DEGRADED", "LOST"};
-    dbg["health"] = health_names[static_cast<int>(recovery.health)];
-    dbg["reliable"] = recovery.reliable;
-    dbg["candidate_active"] = recovery.candidate_active;
-    dbg["candidate_id"] = recovery.candidate_id;
-    dbg["recovery_count"] = recovery.recovery_count;
-    dbg["recovery_event"] = recovery.event;
-    dbg["last_accepted_age"] = recovery.last_accepted_age;
     dbg["nis_valid"] = diag.nis_valid;
     dbg["nis_count"] = diag.nis_count;
-    status_row("跟踪健康", health_names[static_cast<int>(recovery.health)], "按图像时间判断的生命周期");
-    status_row("预测可靠", recovery.reliable ? "是" : "否", "保留轨迹不等于允许信任预测");
-    status_row("恢复候选", recovery.candidate_active ? "后续帧验证中" : "无", recovery.event);
-    status_row("恢复接管次数", std::to_string(recovery.recovery_count), "候选通过独立后续帧验证后接管");
     for (int id = 0; id < 8; ++id) {
       const auto & pixel = diag.pixel_innovations[id];
       if (!pixel.valid) continue;
@@ -1436,8 +1423,7 @@ void FoxgloveServer::publish_debug(
       "需有效更新、时间跨度、另一板组观测及半径不确定度共同满足");
     status_row("几何学习 1/3", diag.report.geometry_ready[1] ? "已确认" : "学习中",
       "另需高差不确定度通过；未确认的板组不用于任意预测选板");
-    status_row("连续未更新", std::to_string(diag.no_update_frames), "有检测但没有接受更新的连续帧数");
-    status_row("重建次数", std::to_string(diag.reinit_count), "当前目标内自动重建计数");
+    status_row("连续未更新", std::to_string(diag.no_update_frames), "连续没有接受更新的帧数，包含无检测与全部拒绝");
     status_row("NIS 门控配置", diag.nis_gate_enabled ? "启用" : "关闭",
       "启用后仍有预热期；曲线参考线不代表门控开启");
     status_row("门控阈值", std::to_string(diag.nis_gate_threshold), "仅门控实际生效时用于拒绝观测");
@@ -1484,7 +1470,6 @@ void FoxgloveServer::publish_debug(
     dbg["last_id"] = diag.last_observed_id;
     dbg["anchor_err_px"] = diag.anchor_error;
     dbg["ekf_no_update_frames"] = diag.no_update_frames;
-    dbg["ekf_reinits"] = diag.reinit_count;
     dbg["uses_rmcs_ekf"] = 1.0;  // DGE 现在只有 4 板 rmcs 像素 EKF
     dbg["ekf_init_source"] = target.init_source();  // 1=统一约束像素位姿，0=未初始化
 

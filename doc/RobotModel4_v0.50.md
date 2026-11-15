@@ -1,5 +1,7 @@
 # RobotModel4 v0.50 修改记录（EKF 初始化几何与跟踪诊断）
 
+> **历史文档，不作为当前算法验收依据。** 当前初始化、关联与生命周期以源码及 [v0.62](RobotModel4_v0.62.md)、[EKF 技术文档](EKF技术文档.md) 为准；本页的 RobustPnP 回退、`auto_reinit_after_no_update` 和 `ekf_reinits` 不再适用。
+
 > 基于 v0.40（`test` 分支）。只合并 new-sim 工程对 EKF 的改动：
 > **4 板像素 EKF 的初始化几何**，以及 **Tracker 的帧间隔 / 空帧诊断清理**。
 > 不包含 `rm_aim_sim` 适配层、Foxglove 模型可视化、布局、测试和 `armor.hpp`

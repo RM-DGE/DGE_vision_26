@@ -590,19 +590,6 @@ bool RobotModel::valid_state(const StateVector & x) const {
   for(int i=3;i<6;++i) if(x[i]<config_.velocity_min || x[i]>config_.velocity_max) return false;
   return config_.rotation_speed_limit<=0 || std::abs(x[7])<=config_.rotation_speed_limit;
 }
-bool RobotModel::import_snapshot(const StateVector & x,const Covariance & P,bool large,double elapsed) {
-  if(!valid_state(x) || !P.allFinite() || !std::isfinite(elapsed) || elapsed<0
-    || !P.isApprox(P.transpose(),1e-10)) return false;
-  Eigen::LDLT<Covariance> factor(P);
-  if(factor.info()!=Eigen::Success || (factor.vectorD().array()<=0).any()) return false;
-  state_=x;state_[6]=normalize_angle(state_[6]);covariance_=P;large_=large;
-  elapsed_s_=elapsed;observable_.large=large;observable_dirty_=true;
-  // A fitted snapshot may change the phase/plate labeling; reconfirm its geometry.
-  geometry_ready_={false,false};geometry_good_updates_={};
-  geometry_first_good_={-1,-1};geometry_last_good_={-1,-1};
-  last_observed_id_=-1;jumped_=false;
-  return true;
-}
 
 auto RobotModel::refresh_observable() const -> void
 {
@@ -818,7 +805,7 @@ auto RobotModel::update_one(const Eigen::Vector2d & upper, const Eigen::Vector2d
     config_.nis_gate_threshold > 0.0 ? config_.nis_gate_threshold : config_.nis_threshold;
 
   if (gate_active && nis > gate_threshold) {
-    // Reject without changing the prior; recovery handles persistent mismatch.
+    // Reject without changing the prior; Tracker handles persistent missing updates.
     last_update_accepted_ = false;
     ++frame_rejected_count_;
     ++nis_rejected_count_;
@@ -905,7 +892,6 @@ auto RobotModel::diagnostics() const -> Diagnostics
   result.nis_rejected_count = nis_rejected_count_;
   result.nis_consecutive_rejects = consecutive_nis_rejects_;
   result.no_update_frames = no_update_frames_;
-  result.reinit_count = reinit_count_;
   result.last_observed_id = last_observed_id_;
   result.converged = converge();
   result.diverged = diverged();
@@ -986,12 +972,7 @@ auto RobotModel::diverged() const -> bool
     || !covariance_.allFinite())
     return true;
 
-  // A deadlock where detections keep arriving but nothing is accepted is just
-  // as bad as a state blow-up; let the tracker drop and re-acquire the target.
-
-
-  // Let the filter settle for a few frames after initialization; the first
-  // sequential updates can legitimately produce large velocity corrections.
+  // Numerical and physical validity only; Tracker owns missing-update expiry.
   if (!valid_state(state_)) return true;
 
   return covariance_(kStateX, kStateX) > config_.diverge_cov

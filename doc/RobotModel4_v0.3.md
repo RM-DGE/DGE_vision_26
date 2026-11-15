@@ -3,7 +3,9 @@
 > **历史文档**：本文的 `q_rate_aware` 已被 `q_accel_*` / `q_alpha` 取代；
 > v0.60 起过程噪声只保留 CWNA，`process_model` 开关已删除。文中提到的
 > `auto_reinit_after_no_update`、`max_no_update_frames`、`nis_reject_cov_inflation`
-> 等键也已删除，恢复改由 `RecoveryManager` 按图像时间处理。当前配置见 `configs/*.yaml`。
+> 等键也已删除。当前由 Tracker 按连续无更新帧数暂存，失效后重新创建 Target；
+> `RecoveryManager` 已于 v0.62 移除。当前算法见 [v0.62](RobotModel4_v0.62.md)，配置见 `configs/*.yaml`。
+> 本文的 `ekf_reinits` 与旧重建阈值不再使用；当前 `no_update_frames` 也包含无检测帧。
 >
 > 范围：只改 `tasks/auto_aim/rmcs_ekf/`（11 维、4 板、像素观测），
 > legacy 2/3 板 EKF 和 Target/Tracker 的接口不变。

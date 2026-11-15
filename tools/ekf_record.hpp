@@ -16,7 +16,7 @@
 
 namespace tools {
 using EkfJson = nlohmann::json;
-inline constexpr char kEkfAlgorithm[] = "RobotModel4_v0.61";
+inline constexpr char kEkfAlgorithm[] = "RobotModel4_v0.62";
 inline EkfJson ekf_camera_json(const rmcs_ekf::CameraFeature & c) {
   return {{"matrix",c.camera_matrix},{"distortion",c.distort_coeff},
     {"q_wxyz",{c.orientation.w(),c.orientation.x(),c.orientation.y(),c.orientation.z()}},
@@ -36,7 +36,6 @@ inline EkfJson ekf_armors_json(const std::list<auto_aim::Armor> & armors) {
 inline EkfJson ekf_target_json(const auto_aim::Target * target) {
   if(!target) return nullptr;
   const auto d=target->diagnostics(); const auto s=target->state();
-  const auto r=target->recovery_status();
   const auto & report=target->update_report();
   auto reasons=EkfJson::array();
   for(const auto reason:report.reject_reasons)reasons.push_back(static_cast<int>(reason));
@@ -57,12 +56,8 @@ inline EkfJson ekf_target_json(const auto_aim::Target * target) {
       {"geometry_ready",report.geometry_ready},{"geometry_good_updates",report.geometry_good_updates},
       {"geometry_learning_progress",report.geometry_learning_progress},
       {"association_ms",report.association_ms},{"update_ms",report.update_ms}}},{"accepted",d.frame_update_count},{"rejected",d.frame_rejected_count},
-    {"accepted_frames",d.update_count},{"residuals",residuals},{"health",int(r.health)},
-    {"reliable",r.reliable},{"candidate_active",r.candidate_active},{"candidate_id",r.candidate_id},
-    {"last_accepted_age",r.last_accepted_age},{"event",r.event},{"recoveries",r.recovery_count},
-    {"candidate_failures",r.candidate_failed_count},{"candidate_time",r.candidate_time},
-    {"window_begin",r.window_begin},{"window_end",r.window_end},{"prior_time",r.prior_time},
-    {"validation_frames",r.validation_frames},{"validation_rms",r.validation_rms},{"fit_cost",r.fit_cost}};
+    {"accepted_frames",d.update_count},{"residuals",residuals},
+    {"converged",d.converged},{"diverged",d.diverged},{"no_update_frames",d.no_update_frames}};
 }
 class EkfRecorder {
 public:
@@ -80,7 +75,7 @@ public:
       while(config_stream.get(byte)){hash^=static_cast<unsigned char>(byte);hash*=1099511628211ULL;}
       std::ostringstream hash_text;hash_text<<std::hex<<hash;
       std::ofstream manifest(directory/"manifest.json");
-      manifest << EkfJson{{"schema",1},{"algorithm",kEkfAlgorithm},{"clock","image_steady_ns"},
+      manifest << EkfJson{{"schema",2},{"algorithm",kEkfAlgorithm},{"clock","image_steady_ns"},
         {"units","m,s,rad,px"},{"compiler",__VERSION__},{"source_sha256",HHH_EKF_SOURCE_HASH},{"config_fnv1a64",hash_text.str()},{"opencv",CV_VERSION},
         {"input_scope","raw main-camera and optional omni detections before tracker filtering"}}.dump(2);
       logger()->info("[EKF] recording {}",directory.string());

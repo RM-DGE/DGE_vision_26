@@ -1,5 +1,7 @@
 # RobotModel4 v0.32 修改记录（观测侧修复）
 
+> **历史文档**：当前算法见 [v0.62](RobotModel4_v0.62.md)。初始化已统一为 Solver 的受约束像素位姿解算和初值验收，不再使用本页的 Solver/RobustPnP 双路径；重建由 Tracker 管理，旧 `ekf_reinits` 字段已删除。下面保留当时的实现与测试记录。
+
 > 基于 v0.21（`2bc3427 RobotModel4 v0.21`，文档 `RobotModel4_v0.3.md`）。
 > 范围：4 板像素 EKF 的**初始化观测源**与**编译/数值正确性**。滤波器结构、Q/R、
 > 门控、收敛判据均未改动。新行为都有 YAML 开关，可回退做 A/B。

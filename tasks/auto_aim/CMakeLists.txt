@@ -20,7 +20,6 @@ add_library(auto_aim OBJECT
     rmcs_ekf/rmcs_ekf.cpp
     rmcs_ekf/projection.cpp
     rmcs_ekf/association.cpp
-    rmcs_ekf/recovery.cpp
     yolos/yolov5.cpp
     yolos/yolov8.cpp
     yolos/yolo11.cpp

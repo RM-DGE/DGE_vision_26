@@ -325,7 +325,7 @@ struct Config
   double association_ambiguity_gap = 2.0;
   double nis_gate_warmup_s = 0.1;
 
-  // Association / recovery
+  // Association
   // Gross-error gate on the anchor plate: mean corner error in pixels, and a
   // scale-aware floor relative to the predicted plate width. <= 0 disables.
   double anchor_max_corner_error = 40.0;
@@ -419,8 +419,7 @@ struct Diagnostics
   std::size_t frame_rejected_count = 0;  // 当前帧因 NIS/投影无效被拒绝的灯条数
   std::size_t nis_rejected_count = 0;    // 累计 NIS 拒绝次数
   int nis_consecutive_rejects = 0;       // 连续 NIS 拒绝次数
-  int no_update_frames = 0;              // 连续“有检测但 0 次接受更新”的帧数
-  int reinit_count = 0;                  // 累计自动重初始化次数
+  int no_update_frames = 0;              // 连续无接受更新的帧数（含无检测）
   int last_observed_id = -1;
   bool converged = false;
   bool diverged = false;
@@ -479,7 +478,6 @@ public:
   double elapsed() const { return elapsed_s_; }
   const StateVector & state_vector() const { return state_; }
   const UpdateReport & last_report() const { return report_; }
-  bool import_snapshot(const StateVector & x, const Covariance & P, bool large, double elapsed=0);
   bool valid_state(const StateVector & x) const;
   static Covariance transition(double dt);
   ProcessNoise process_covariance(double dt) const;
@@ -584,10 +582,9 @@ private:
   std::size_t nis_rejected_count_ = 0;
   int consecutive_nis_rejects_ = 0;
 
-  // Association / recovery diagnostics
+  // Association / update diagnostics
   double last_anchor_error_ = 0.0;
   int no_update_frames_ = 0;
-  int reinit_count_ = 0;
 
   std::deque<int> recent_nis_failures_;
 };

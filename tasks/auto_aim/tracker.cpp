@@ -53,7 +53,6 @@ Tracker::Tracker(const std::string & config_path, Solver & solver)
   detect_count_(0),
   temp_lost_count_(0),
   state_{"lost"},
-  pre_state_{"lost"},
   last_timestamp_(std::chrono::steady_clock::now()),
   omni_target_priority_{ArmorPriority::fifth}
 {
@@ -61,11 +60,12 @@ Tracker::Tracker(const std::string & config_path, Solver & solver)
   enemy_color_ = (yaml["enemy_color"].as<std::string>() == "red") ? Color::red : Color::blue;
   min_detect_count_ = yaml["min_detect_count"].as<int>();
   max_temp_lost_count_ = yaml["max_temp_lost_count"].as<int>();
+  if (min_detect_count_ < 1 || max_temp_lost_count_ < 0)
+    throw std::invalid_argument("min_detect_count must be >= 1 and max_temp_lost_count >= 0");
   max_frame_gap_s_ = yaml["max_frame_gap_s"].as<double>(0.1);
   if (!std::isfinite(max_frame_gap_s_) || max_frame_gap_s_ <= 0)
     throw std::invalid_argument("max_frame_gap_s must be finite and positive");
   ekf_config_ = rmcs_ekf::load_config(yaml["ekf"]);
-  recovery_settings_=rmcs_ekf::load_recovery_settings(yaml["recovery"]);
   recorder_=std::make_shared<tools::EkfRecorder>(config_path);
 }
 
@@ -75,7 +75,7 @@ bool Tracker::accept_timestamp(std::chrono::steady_clock::time_point t)
     const double dt=tools::delta_time(t,last_timestamp_);
     if(!std::isfinite(dt) || dt<=0) return false;
     if(dt>max_frame_gap_s_) {
-      target_.interrupt();state_="lost";pre_state_="lost";
+      state_="lost";
       detect_count_=temp_lost_count_=0;
     }
   }
@@ -116,15 +116,6 @@ std::list<Target> Tracker::track(
   }
 
   state_machine(found);
-
-  // 发散检测
-  if (state_ != "lost" && target_.diverged()) {
-    tools::logger()->debug(
-      "[Tracker] Target diverged! name={}",
-      ARMOR_NAMES.at(static_cast<size_t>(target_.name)));
-    state_ = "lost";
-    return {};
-  }
 
   if (state_ == "lost") return {};
 
@@ -181,6 +172,7 @@ std::tuple<omniperception::DetectionResult, std::list<Target>> Tracker::track(
     state_ == "tracking" && !temp_target.armors.empty() &&
     temp_target.armors.front().priority < target_.priority && target_.converge()) {
     state_ = "switching";
+    temp_lost_count_ = 0;
     switch_target = omniperception::DetectionResult{
       temp_target.armors, t, temp_target.delta_yaw, temp_target.delta_pitch};
     omni_target_priority_ = temp_target.armors.front().priority;
@@ -196,18 +188,8 @@ std::tuple<omniperception::DetectionResult, std::list<Target>> Tracker::track(
     found = update_target(armors, t);
   }
 
-  pre_state_ = state_;
   // 更新状态机
   state_machine(found);
-
-  // 发散检测
-  if (state_ != "lost" && target_.diverged()) {
-    tools::logger()->debug(
-      "[Tracker] Target diverged! name={}",
-      ARMOR_NAMES.at(static_cast<size_t>(target_.name)));
-    state_ = "lost";
-    return {switch_target, {}};  // 返回switch_target和空的targets
-  }
 
   if (state_ == "lost") return {switch_target, {}};  // 返回switch_target和空的targets
 
@@ -217,50 +199,49 @@ std::tuple<omniperception::DetectionResult, std::list<Target>> Tracker::track(
 
 void Tracker::state_machine(bool found)
 {
-  // RecoveryManager owns estimator retention and loss; business switching remains separate.
-  if(state_!="lost" && state_!="switching") {
-    if(target_.recovery_status().health==rmcs_ekf::Health::LOST) {state_="lost";return;}
-    if(found) {
-      ++detect_count_;
-      state_=(target_.reliable() && detect_count_>=min_detect_count_) ? "tracking" : "detecting";
-    } else state_="temp_lost";
+  // A numerically invalid model must not survive the temporary-loss allowance.
+  if ((found || state_ != "lost") && target_.diverged()) {
+    tools::logger()->debug("[Tracker] Target diverged! name={}",
+      ARMOR_NAMES.at(static_cast<size_t>(target_.name)));
+    state_ = "lost";
+    detect_count_ = temp_lost_count_ = 0;
     return;
   }
+
   if (state_ == "lost") {
     if (!found) return;
-
-    state_ = "detecting";
+    // A validated initialization counts as the first confirmation.
     detect_count_ = 1;
+    temp_lost_count_ = 0;
+    state_ = detect_count_ >= min_detect_count_ ? "tracking" : "detecting";
   }
 
   else if (state_ == "detecting") {
     if (found) {
-      detect_count_++;
+      temp_lost_count_ = 0;
+      ++detect_count_;
       if (detect_count_ >= min_detect_count_) state_ = "tracking";
     } else {
+      // Restart consecutive confirmation, keeping this Target during short losses.
       detect_count_ = 0;
-      state_ = "lost";
+      if (++temp_lost_count_ > max_temp_lost_count_) state_ = "lost";
     }
   }
 
   else if (state_ == "tracking") {
-    if (found) return;
-
-    temp_lost_count_ = 1;
-    state_ = "temp_lost";
+    temp_lost_count_ = found ? 0 : 1;
+    if (!found)
+      state_ = temp_lost_count_ > max_temp_lost_count_ ? "lost" : "temp_lost";
   }
 
   else if (state_ == "switching") {
-    if (found) {
-      state_ = "detecting";
-    } else {
-      temp_lost_count_++;
-      if (temp_lost_count_ > 200) state_ = "lost";
-    }
+    // Successful set_target() already restarts confirmation via the lost branch.
+    if (++temp_lost_count_ > 200) state_ = "lost";
   }
 
   else if (state_ == "temp_lost") {
     if (found) {
+      temp_lost_count_ = 0;
       state_ = "tracking";
     } else {
       temp_lost_count_++;
@@ -278,16 +259,16 @@ bool Tracker::set_target(std::list<Armor> & armors, std::chrono::steady_clock::t
 
   if (!solver_.solve(armor)) return false;
 
-  Target next(armor, t, ekf_config_, solver_.camera_feature(), recovery_settings_);
+  Target next(armor, t, ekf_config_, solver_.camera_feature());
   if (!next.checkinit()) {
     tools::logger()->warn(
       "[Tracker] failed to initialize 4-armor EKF for {}", ARMOR_NAMES[armor.name]);
     return false;
   }
-  recovery_count_+=target_.recovery_status().recovery_count;
-  candidate_failed_count_+=target_.recovery_status().candidate_failed_count;
   if(target_.checkinit()) ++reinit_count_;
   target_=std::move(next); ++track_id_;
+  // Reacquisition and priority switches both start a fresh confirmation sequence.
+  state_="lost";
   detect_count_=temp_lost_count_=0;
 
   return true;
@@ -305,7 +286,7 @@ bool Tracker::update_target(std::list<Armor> & armors, std::chrono::steady_clock
 
   if (found_count == 0) {
     // Clear per-frame diagnostics without counting a missed detection as a
-    // rejected measurement. Recovery remains controlled by the lost state.
+    // rejected measurement. Tracker still counts this as a missing update.
     target_.update({}, solver_.camera_feature());
     return false;
   }

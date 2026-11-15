@@ -37,8 +37,8 @@ max_side_ratio: 1.5
 max_rectangular_error: 25 # degree
 
 #####-----tracker参数-----#####
-min_detect_count: 5 # 最小确认帧数
-max_temp_lost_count: 15 #最大暂存丢失帧数
+min_detect_count: 5 # 连续成功帧数（有效初始化计第 1 帧），中断则重新计数
+max_temp_lost_count: 15 # 连续无有效更新最多保留 15 帧，第 16 帧 LOST
 
 #####-----4板 rmcs 像素 EKF-----#####
 ekf:
@@ -178,23 +178,3 @@ model: "assets/yolo11_buff_int8.xml"
 #####-----buff_aimer参数-----#####
 fire_gap_time: 0.700   # s
 predict_time: 0.120     # s
-
-#####-----V0.60 恢复管理器-----#####
-recovery:
-  trigger_s: 0.04
-  window_s: 0.12
-  sample_s: 0.015
-  expiry_s: 0.15
-  confirm_s: 0.02
-  coast_s: 0.15
-  lost_s: 0.5
-  max_rms_px: 5.0
-  improvement_ratio: 0.7
-  identity_distance_m: 0.8
-  future_position_variance: 0.04
-  covariance_inflation: 2.0
-  max_fit_ms: 20.0
-  min_frames: 3
-  max_frames: 8
-  max_seeds: 4
-  iterations: 8

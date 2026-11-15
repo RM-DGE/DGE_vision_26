@@ -28,13 +28,11 @@ auto to_armor2d(const Armor & armor) -> rmcs_ekf::Armor2d
 
 Target::Target(
   const Armor & armor, std::chrono::steady_clock::time_point t,
-  const rmcs_ekf::Config & ekf_config, const rmcs_ekf::CameraFeature & camera,
-  const rmcs_ekf::RecoverySettings & recovery_settings)
+  const rmcs_ekf::Config & ekf_config, const rmcs_ekf::CameraFeature & camera)
 : name(armor.name)
 , armor_type(armor.type)
 , priority(armor.priority)
 , t_(t)
-, recovery_(recovery_settings)
 {
   color_=armor.color;
   if (armor.points.size() < 4) {
@@ -58,7 +56,6 @@ Target::Target(
   }
 
   isinit = true;
-  recovery_.reset(std::chrono::duration<double>(t_.time_since_epoch()).count());
 }
 
 auto Target::synthetic(double x, double vyaw, double radius, double h) -> Target
@@ -95,7 +92,6 @@ void Target::predict(std::chrono::steady_clock::time_point t)
     return;
   }
   rmcs_model_.predict(dt);
-  prediction_=rmcs_model_;
   frame_valid_=true;
   t_ = t;
 }
@@ -121,10 +117,6 @@ void Target::update(const std::list<Armor> & armors, const rmcs_ekf::CameraFeatu
   }
 
   rmcs_model_.correct(armors2d, {}, camera);
-  // Conservatively reject same-class mixtures that cannot form one four-plate vehicle.
-  const bool identity_consistent=armors2d.size()<=2;
-  recovery_.process(rmcs_model_,prediction_,armors2d,camera,
-    std::chrono::duration<double>(t_.time_since_epoch()).count(),identity_consistent);
 }
 
 auto Target::state() const -> rmcs_ekf::State { return rmcs_model_.state(); }
@@ -145,7 +137,7 @@ auto Target::xyza_list() const -> std::vector<Eigen::Vector4d>
   return result;
 }
 
-auto Target::converge() const -> bool { return reliable() && rmcs_model_.converge(); }
+auto Target::converge() const -> bool { return rmcs_model_.converge(); }
 
 auto Target::diverged() const -> bool { return rmcs_model_.diverged(); }
 

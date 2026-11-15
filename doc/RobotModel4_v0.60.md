@@ -1,6 +1,6 @@
 # RobotModel4_v0.60
 
-本文保留 v0.60 的设计记录。当前版本的单板跟随修复与几何学习改动见 [RobotModel4_v0.61](RobotModel4_v0.61.md)，复测以 [EKF 仿真测试指南](EKF仿真测试指南.md) 为准。
+本文保留 v0.60 的历史设计记录。当前实现见 [RobotModel4_v0.62](RobotModel4_v0.62.md) 和 [EKF 技术文档第 5 节](EKF技术文档.md)。本页的窗口拟合、备用接管、health/reliable、0.5 s 计时及 `recovery:` 配置均已删除；下面的旧配置、文件表和验收目标不用于当前程序。复测以 [EKF 仿真测试指南](EKF仿真测试指南.md) 为准。
 
 版本定位：把 4 板像素 EKF 从“能跑”推进到“观测可解释、失配可恢复、问题可回放”。本版不改变 11 维状态和像素观测的基本框架，重点是投影与雅可比一致、关联可判定、恢复按图像时间分级处理，以及诊断数据可离线复现。
 
@@ -117,6 +117,8 @@ $$
 
 ### 2.5 恢复
 
+> v0.62 已替代本节：Tracker 按 `max_temp_lost_count` 保留连续无更新帧，超额或发散后 LOST，再创建新 Target。以下仅记录 v0.60 设计。
+
 健康状态：`INIT / HEALTHY / COASTING / DEGRADED / LOST`，全部按图像时间推进。
 
 ```text
@@ -146,7 +148,7 @@ nis_max_consecutive_rejects
 nis_reject_cov_inflation
 ```
 
-新增 `recovery:` 段（`standard3 / sentry / daedalus` 均已配置）：
+v0.60 当时新增的 `recovery:` 段（v0.62 已整体删除，下表不再用于配置）：
 
 | 键 | 默认 | 含义 |
 |---|---|---|
@@ -220,6 +222,8 @@ cmake --build build-ekf -j4
 构建状态：`EKF_ONLY` 配置、编译及 `ekf_replay --help` 已在 WSL（Ubuntu 22.04，OpenCV 4.5.4）验证通过；完整工程、仿真与实车尚未在本版验收。
 
 ## 6、调试界面
+
+> 下文是旧字段说明。当前状态表看接受/拒绝、连续未更新、几何学习及模型收敛；health/reliable、候选和接管字段已删除。当前字段见 [布局说明](../foxglove_layouts/README.md)。
 
 两份布局均保留“窗口”画面和原 3D 面板，右侧 5 条曲线，EKF 布局另有中文状态表。
 

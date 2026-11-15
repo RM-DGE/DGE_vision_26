@@ -82,8 +82,8 @@ send_canid: 0xff
 can_interface: "can0"
 
 #####-----tracker参数-----#####
-min_detect_count: 5
-max_temp_lost_count: 25
+min_detect_count: 5 # 连续成功帧数（有效初始化计第 1 帧），中断则重新计数
+max_temp_lost_count: 25 # 连续无有效更新最多保留 25 帧，第 26 帧 LOST
 
 #####-----4板 rmcs 像素 EKF-----#####
 # 真机检测角点噪声通常比仿真小；先用 rmcs 默认 40 px^2，再按 NIS/残差调。
@@ -186,24 +186,3 @@ ros2:
   target_pos_topic: "/auto_aim_target_pos"
   target_info_topic: "/auto_aim_target_info"
   imu_frame_id: "imu_link"
-  
-
-#####-----V0.60 恢复管理器-----#####
-recovery:
-  trigger_s: 0.04        # 连续拒绝多久后启动候选拟合
-  window_s: 0.12         # 保留的观测窗口长度
-  sample_s: 0.015        # 窗口最小采样间隔
-  expiry_s: 0.15         # 候选超时时间
-  confirm_s: 0.02        # 候选接管所需的连续验证时长
-  coast_s: 0.15          # 最后接受后仍视为可靠的最长时间
-  lost_s: 0.5            # 超过此时间无接受更新则判 LOST
-  max_rms_px: 5.0        # 候选验证帧最大允许像素 RMS
-  improvement_ratio: 0.7 # 候选必须比主模型好的比例
-  identity_distance_m: 0.8
-  future_position_variance: 0.04
-  covariance_inflation: 2.0
-  max_fit_ms: 20.0
-  min_frames: 3
-  max_frames: 8
-  max_seeds: 4
-  iterations: 8

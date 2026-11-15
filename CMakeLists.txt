@@ -34,7 +34,6 @@ if(EKF_ONLY)
     tasks/auto_aim/rmcs_ekf/rmcs_ekf.cpp
     tasks/auto_aim/rmcs_ekf/projection.cpp
     tasks/auto_aim/rmcs_ekf/association.cpp
-    tasks/auto_aim/rmcs_ekf/recovery.cpp
     tools/logger.cpp
     tools/math_tools.cpp
     tasks/auto_aim/armor.cpp
