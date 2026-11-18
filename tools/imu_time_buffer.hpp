@@ -64,6 +64,8 @@ class ImuTimeBuffer
 public:
   explicit ImuTimeBuffer(std::size_t capacity = 5000);
   bool push(const TimedImu & sample);
+  // Explicit latest-sample access; caller must check its age. Never extrapolates.
+  ImuQuery latest() const;
   ImuQuery query(TimePoint time, double max_gap_ms) const;
   ImuQuery wait_query(TimePoint time, double max_gap_ms, double max_wait_ms) const;
   std::vector<TimedImu> snapshot() const;

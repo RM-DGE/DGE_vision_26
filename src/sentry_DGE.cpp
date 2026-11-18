@@ -30,18 +30,18 @@
  */
 
 #include <fmt/core.h>
+#include <yaml-cpp/yaml.h>
 
-#include <chrono>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <memory>
 #include <opencv2/opencv.hpp>
 #include <thread>
-#include <yaml-cpp/yaml.h>
 
+#include "io/Daedalus/daedalus_cboard.hpp"
 #include "io/camera.hpp"
 #include "io/cboard.hpp"
-#include "io/Daedalus/daedalus_cboard.hpp"
 #include "io/usbcamera/usbcamera.hpp"
 #include "tasks/auto_aim/aimer.hpp"
 #include "tasks/auto_aim/shooter.hpp"
@@ -65,7 +65,6 @@ const std::string keys =
   "{help h usage ? |                     | 输出命令行参数说明}"
   "{@config-path   | configs/sentry.yaml | 位置参数，yaml配置文件路径 }"
   "{d display      |                     | 显示主相机和全向感知画面       }";
-
 
 int main(int argc, char * argv[])
 {
@@ -93,10 +92,8 @@ int main(int argc, char * argv[])
   std::string usb_right_device = "video4";
   {
     auto yaml = YAML::LoadFile(config_path);
-    if (yaml["usb_left_device"])
-      usb_left_device = yaml["usb_left_device"].as<std::string>();
-    if (yaml["usb_right_device"])
-      usb_right_device = yaml["usb_right_device"].as<std::string>();
+    if (yaml["usb_left_device"]) usb_left_device = yaml["usb_left_device"].as<std::string>();
+    if (yaml["usb_right_device"]) usb_right_device = yaml["usb_right_device"].as<std::string>();
   }
 
   // 真机使用 CBoard（串口），仿真使用 DaedalusCBoard（共享内存）
@@ -159,22 +156,23 @@ int main(int argc, char * argv[])
 
     // 2. 取图像时刻的云台姿态
     const auto aligned = cboard.imu_query(
-      tools::time_sync::query_time(timestamp, time_sync.imu_delay_ms),
-      time_sync.max_gap_ms, time_sync.wait_ms);
+      tools::time_sync::query_time(timestamp, time_sync.imu_delay_ms), time_sync.max_gap_ms,
+      time_sync.wait_ms);
     ++alignment_counts[static_cast<std::size_t>(aligned.status)];
     max_alignment_wait_ms = std::max(max_alignment_wait_ms, aligned.wait_ms);
     const auto alignment_now = std::chrono::steady_clock::now();
     if (alignment_now - last_alignment_log >= 1s) {
       tools::logger()->info(
         "[time_sync] ok={} empty={} before_buffer={} missing_right={} gap_too_large={} "
-        "invalid_sample={} wait_max_ms={:.3f}", alignment_counts[0], alignment_counts[1],
-        alignment_counts[2], alignment_counts[3], alignment_counts[4], alignment_counts[5],
-        max_alignment_wait_ms);
+        "invalid_sample={} wait_max_ms={:.3f}",
+        alignment_counts[0], alignment_counts[1], alignment_counts[2], alignment_counts[3],
+        alignment_counts[4], alignment_counts[5], max_alignment_wait_ms);
       last_alignment_log = alignment_now;
     }
     if (!aligned.valid()) {
       cboard.send(io::Command{false, false, 0, 0});
-      tools::logger()->debug("[time_sync] skipped image_ns={} reason={} wait_ms={:.3f}",
+      tools::logger()->debug(
+        "[time_sync] skipped image_ns={} reason={} wait_ms={:.3f}",
         std::chrono::duration_cast<std::chrono::nanoseconds>(timestamp.time_since_epoch()).count(),
         tools::time_sync::status_name(aligned.status), aligned.wait_ms);
       if (display && cv::waitKey(1) == 'q') break;
@@ -230,7 +228,7 @@ int main(int argc, char * argv[])
 
     /// 发射逻辑
     // switching/lost 阶段 targets 为空，Shooter 会返回 false，不会误开火
-    command.shoot = shooter.shoot(command, aimer, targets, gimbal_pos);
+    command.shoot = shooter.shoot(command, aimer, targets, cboard.latest_imu(), solver);
 
     /// 下发云台/发射指令
     /// ROS 通信暂时关闭，云台指令直接写串口。
@@ -261,7 +259,8 @@ int main(int argc, char * argv[])
         detection_queue.size());
 
       cv::Mat radar;
-      omniperception::draw_omni_radar(radar, detection_queue, gimbal_pos[0], command, tracker.state());
+      omniperception::draw_omni_radar(
+        radar, detection_queue, gimbal_pos[0], command, tracker.state());
 
       cv::resize(main_view, main_view, {}, 0.5, 0.5);
       cv::imshow("sentry_DGE", main_view);

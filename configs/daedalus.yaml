@@ -140,10 +140,16 @@ high_speed_delay_time: 0.05 # s
 low_speed_delay_time: 0.05 # s
 
 #####-----shooter参数-----#####
+# Legacy angular keys below are unused by the geometric Shooter.
 first_tolerance: 3 # 近距离射击容差，degree
 second_tolerance: 2 # 远距离射击容差，degree
 judge_distance: 2 #距离判断阈值
 auto_fire: true # 是否由自瞄控制射击
+# Shooter physical acceptance region (full size, metres); replaces angular tolerances.
+shoot_width_small_m: 0.12
+shoot_width_large_m: 0.23
+shoot_height_m: 0.08
+shoot_max_imu_age_ms: 20.0 # latest receive-time IMU age; not a sensor latency calibration
 
 #####-----相机选择-----#####
 camera_name: "daedalus"   # 走共享内存接 Daedalus 仿真器

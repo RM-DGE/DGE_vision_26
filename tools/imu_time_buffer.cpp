@@ -140,6 +140,17 @@ ImuQuery ImuTimeBuffer::wait_query(TimePoint time, double max_gap_ms, double max
   return result;
 }
 
+ImuQuery ImuTimeBuffer::latest() const
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (samples_.empty()) return {};
+  ImuQuery result;
+  result.status = ImuQueryStatus::ok;
+  result.q = samples_.back().q;
+  result.left_time = result.right_time = samples_.back().timestamp;
+  return result;
+}
+
 std::vector<TimedImu> ImuTimeBuffer::snapshot() const
 {
   std::lock_guard<std::mutex> lock(mutex_);

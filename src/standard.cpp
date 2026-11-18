@@ -80,7 +80,7 @@
 //   auto last_alignment_log = std::chrono::steady_clock::now();
 //   double max_alignment_wait_ms = 0;
 
-//   while (!exiter.exit()) 
+//   while (!exiter.exit())
 //   {
 //     // 1. 读取图像
 //     camera.read_for(img, t, 100ms);
@@ -131,10 +131,9 @@
 //     // 4. 发送数据
 //     cboard.send(command);
 
-    
 //     //可视化
 //     for(const auto& armor : armors) {
-//         for(int i=0; i<4; i++) 
+//         for(int i=0; i<4; i++)
 //             cv::line(img, armor.points[i], armor.points[(i+1)%4], {0,255,0}, 2);
 //     }
 
@@ -159,9 +158,9 @@
 
 //     //     // 调用 solver 将世界坐标系下的 3D 预测点和 Yaw 角，重投影回 2D 像素坐标
 //     //     auto image_points = solver.reproject_armor(
-//     //         aim_xyza.head(3), 
-//     //         aim_xyza[3], 
-//     //         target.armor_type, 
+//     //         aim_xyza.head(3),
+//     //         aim_xyza[3],
+//     //         target.armor_type,
 //     //         target.name
 //     //     );
 
@@ -176,7 +175,7 @@
 //     int font = cv::FONT_HERSHEY_SIMPLEX;
 //     double scale = 0.7; // 字体大小
 //     int thickness = 1;  // 字体粗细
-    
+
 //     // 1. 第一行：FPS (青色)
 //     auto current_time = std::chrono::steady_clock::now();
 //     std::chrono::duration<double> diff = current_time - last_time;
@@ -200,11 +199,10 @@
 //     cv::imshow("Standard Test", img);
 //     if (cv::waitKey(1) == 'q') break;
 
-    
 //     // //曲线可视化
 //     // nlohmann::json debug_data;
 //     // // 1. 记录变量
-//     // if (!targets.empty()) 
+//     // if (!targets.empty())
 //     // {
 //     //     auto target = targets.front();
 //     //     debug_data["kf_y"] = target.ekf_x()[2]; // EKF预测的X
@@ -221,7 +219,9 @@
 //   return 0;
 // }
 #include <fmt/core.h>
+
 #include <chrono>
+#include <nlohmann/json.hpp>
 #include <opencv2/opencv.hpp>
 #include <thread>
 
@@ -232,12 +232,11 @@
 #include "tasks/auto_aim/solver.hpp"
 #include "tasks/auto_aim/tracker.hpp"
 #include "tasks/auto_aim/yolo.hpp"
+#include "tools/Foxglove/foxglove.hpp"
 #include "tools/exiter.hpp"
 #include "tools/logger.hpp"
-#include "tools/plotter.hpp"
-#include "tools/Foxglove/foxglove.hpp"
-#include <nlohmann/json.hpp>
 #include "tools/math_tools.hpp"
+#include "tools/plotter.hpp"
 
 using namespace std::chrono_literals;
 
@@ -260,7 +259,7 @@ int main(int argc, char * argv[])
   tools::Exiter exiter;
   tools::Plotter plotter;
 
-  io::CBoard cboard(config_path); 
+  io::CBoard cboard(config_path);
   io::Camera camera(config_path);
 
   auto_aim::YOLO detector(config_path, false);
@@ -282,16 +281,15 @@ int main(int argc, char * argv[])
   auto last_time = std::chrono::steady_clock::now();
   double fps = 0.0;
 
-  while (!exiter.exit()) 
-  {
+  while (!exiter.exit()) {
     // 1. 读取图像
     camera.read(img, t);
     if (img.empty()) {
-        std::this_thread::sleep_for(10ms);
-        continue;
+      std::this_thread::sleep_for(10ms);
+      continue;
     }
-    cboard.mode = io::Mode::auto_aim;//强制自瞄
-    cboard.bullet_speed = 24.5; // 强制弹速
+    cboard.mode = io::Mode::auto_aim;  //强制自瞄
+    cboard.bullet_speed = 24.5;        // 强制弹速
 
     Eigen::Quaterniond q = cboard.imu_at(t - 1ms);
 
@@ -303,8 +301,10 @@ int main(int argc, char * argv[])
     auto command = aimer.aim(targets, t, cboard.bullet_speed);
 
     // 射击逻辑
-    Eigen::Vector3d current_ypr = tools::eulers(solver.R_gimbal2world(), 2, 1, 0);
-    command.shoot = shooter.shoot(command, aimer, targets, current_ypr);
+    // Keep the exposure-time solver pose for vision; fire uses the newest real IMU sample.
+    command.shoot = shooter.shoot(command, aimer, targets, cboard.latest_imu(), solver);
+    // Image diagnostics still describe the exposure-time pose.
+    const Eigen::Vector3d current_ypr = tools::eulers(solver.R_gimbal2world(), 2, 1, 0);
 
     // 4. 发送数据
     cboard.send(command);
@@ -333,9 +333,9 @@ int main(int argc, char * argv[])
     cv::Mat window = img.clone();
 
     //可视化
-    for(const auto& armor : armors) {
-        for(int i=0; i<4; i++) 
-            cv::line(window, armor.points[i], armor.points[(i+1)%4], {0,255,0}, 2);
+    for (const auto & armor : armors) {
+      for (int i = 0; i < 4; i++)
+        cv::line(window, armor.points[i], armor.points[(i + 1) % 4], {0, 255, 0}, 2);
     }
 
     // //红框
@@ -345,9 +345,9 @@ int main(int argc, char * argv[])
 
     //     // 调用 solver 将世界坐标系下的 3D 预测点和 Yaw 角，重投影回 2D 像素坐标
     //     auto image_points = solver.reproject_armor(
-    //         aim_xyza.head(3), 
-    //         aim_xyza[3], 
-    //         target.armor_type, 
+    //         aim_xyza.head(3),
+    //         aim_xyza[3],
+    //         target.armor_type,
     //         target.name
     //     );
 
@@ -360,19 +360,22 @@ int main(int argc, char * argv[])
     cv::resize(window, window, {}, 0.5, 0.5);
     // --- 绘制文字 ---
     int font = cv::FONT_HERSHEY_SIMPLEX;
-    double scale = 0.7; // 字体大小
-    int thickness = 1;  // 字体粗细
-    
+    double scale = 0.7;  // 字体大小
+    int thickness = 1;   // 字体粗细
+
     // 1. 第一行：FPS (青色)
     std::string text_fps = fmt::format("FPS: {:.1f}", fps);
-    cv::putText(window, text_fps, cv::Point(10, 20), font, scale, cv::Scalar(255, 255, 255), thickness);
+    cv::putText(
+      window, text_fps, cv::Point(10, 20), font, scale, cv::Scalar(255, 255, 255), thickness);
     // 2. 第二行：Yaw 和 Pitch (绿色)
     std::string text_angles = fmt::format("Yaw: {:.2f}  Pitch: {:.2f}", command.yaw, command.pitch);
-    cv::putText(window, text_angles, cv::Point(10, 40), font, scale, cv::Scalar(0, 255, 0), thickness);
+    cv::putText(
+      window, text_angles, cv::Point(10, 40), font, scale, cv::Scalar(0, 255, 0), thickness);
     // 3. 第三行：Shoot 0/1 (红色)
     // Shoot 状态通过三目运算符转换为 1 或 0
     std::string text_shoot = fmt::format("Shoot: {}", command.shoot ? 1 : 0);
-    cv::putText(window, text_shoot, cv::Point(10, 60), font, scale, cv::Scalar(0, 0, 255), thickness);
+    cv::putText(
+      window, text_shoot, cv::Point(10, 60), font, scale, cv::Scalar(0, 0, 255), thickness);
 
     foxglove.publish_image(img, 70, window);
     if (display) {
@@ -380,11 +383,10 @@ int main(int argc, char * argv[])
       if (cv::waitKey(1) == 'q') break;
     }
 
-    
     // //曲线可视化
     // nlohmann::json debug_data;
     // // 1. 记录变量
-    // if (!targets.empty()) 
+    // if (!targets.empty())
     // {
     //     auto target = targets.front();
     //     debug_data["kf_y"] = target.ekf_x()[2]; // EKF预测的X
@@ -397,5 +399,5 @@ int main(int argc, char * argv[])
     // plotter.plot(debug_data);
   }
 
-return 0;
+  return 0;
 }

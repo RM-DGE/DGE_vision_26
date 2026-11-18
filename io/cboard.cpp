@@ -25,8 +25,9 @@ namespace io
 
 //初始化C板通信
 CBoard::CBoard(const std::string & config_path)
-: serial_(read_yaml(config_path), read_baudrate(config_path),
-          std::bind(&CBoard::callback, this, std::placeholders::_1))
+: serial_(
+    read_yaml(config_path), read_baudrate(config_path),
+    std::bind(&CBoard::callback, this, std::placeholders::_1))
 {
   tools::logger()->info("[Cboard] Opened; alignment waits for real IMU samples.");
 }
@@ -40,11 +41,21 @@ tools::time_sync::ImuQuery CBoard::imu_query(
 }
 
 // 发送控制指令到C板
+tools::time_sync::ImuQuery CBoard::latest_imu()
+{
+  const auto generation = serial_.connection_generation();
+  if (imu_generation_.load() != generation) return {};
+  auto sample = imu_buffer_.latest();
+  if (imu_generation_.load() != generation || serial_.connection_generation() != generation)
+    return {};
+  return sample;
+}
+
 void CBoard::send(Command command) const
 {
   ControlDataFrame frame;
   frame.header = 0xCC;
-  
+
   frame.control = (command.control) ? 1 : 0;
   frame.shoot = (command.shoot) ? 1 : 0;
   frame.yaw = (int16_t)(command.yaw * 10000);
@@ -57,8 +68,7 @@ void CBoard::send(Command command) const
   std::vector<uint8_t> data(sizeof(frame));
   std::memcpy(data.data(), &frame, sizeof(frame));
 
-  try 
-  {
+  try {
     serial_.write(data);
   } catch (const std::exception & e) {
     tools::logger()->warn("Serial write failed: {}", e.what());
@@ -69,7 +79,7 @@ void CBoard::send(Command command) const
 void CBoard::callback(const std::vector<uint8_t> & frame)
 {
   auto timestamp = std::chrono::steady_clock::now();
-  
+
   if (frame.empty()) return;
   const auto generation = serial_.connection_generation();
   if (generation != imu_generation_.load()) {
@@ -80,15 +90,16 @@ void CBoard::callback(const std::vector<uint8_t> & frame)
 
   if (header == 0xAA) {
     if (frame.size() != sizeof(IMUDataFrame)) {
-      tools::logger()->warn("IMU frame size mismatch: expected {}, got {}", sizeof(IMUDataFrame), frame.size());
+      tools::logger()->warn(
+        "IMU frame size mismatch: expected {}, got {}", sizeof(IMUDataFrame), frame.size());
       return;
     }
-    
-    const auto* data = reinterpret_cast<const IMUDataFrame*>(frame.data());
-    
-    if (data->tail != 0xDD) { 
+
+    const auto * data = reinterpret_cast<const IMUDataFrame *>(frame.data());
+
+    if (data->tail != 0xDD) {
       tools::logger()->warn("Invalid IMU frame tail: expected 0x55, got 0x{:02X}", data->tail);
-      return; // 帧尾不对，说明发生了数据错位，直接丢弃该帧
+      return;  // 帧尾不对，说明发生了数据错位，直接丢弃该帧
     }
 
     double w = data->w / 10000.0;
@@ -110,19 +121,18 @@ void CBoard::callback(const std::vector<uint8_t> & frame)
 
     // ROS 桥接层观察者：只做 mailbox 更新，不在这里 publish。
     {
-        std::lock_guard<std::mutex> lock(observer_mutex_);
-        if (imu_observer_) {
-          imu_observer_(ImuSample{Eigen::Quaterniond{w, x, y, z}, timestamp});
-        }
+      std::lock_guard<std::mutex> lock(observer_mutex_);
+      if (imu_observer_) {
+        imu_observer_(ImuSample{Eigen::Quaterniond{w, x, y, z}, timestamp});
+      }
     }
-  } 
-  else if (header == 0xBB) {
+  } else if (header == 0xBB) {
     if (frame.size() != sizeof(StatusDataFrame)) {
       tools::logger()->warn("Status frame size mismatch");
       return;
     }
 
-    const auto* data = reinterpret_cast<const StatusDataFrame*>(frame.data());
+    const auto * data = reinterpret_cast<const StatusDataFrame *>(frame.data());
 
     bullet_speed = data->bullet_speed / 100.0;
     int m = data->mode;
@@ -133,18 +143,18 @@ void CBoard::callback(const std::vector<uint8_t> & frame)
 
     // ROS 桥接层观察者：状态低频，直接拷贝即可。
     {
-        std::lock_guard<std::mutex> lock(observer_mutex_);
-        if (status_observer_) {
-          status_observer_(StatusSample{
-            bullet_speed, static_cast<int>(mode), shoot_mode, ft_angle, timestamp});
-        }
+      std::lock_guard<std::mutex> lock(observer_mutex_);
+      if (status_observer_) {
+        status_observer_(
+          StatusSample{bullet_speed, static_cast<int>(mode), shoot_mode, ft_angle, timestamp});
+      }
     }
 
     static auto last_log_time = std::chrono::steady_clock::time_point::min();
     if (tools::delta_time(timestamp, last_log_time) >= 1.0) {
       tools::logger()->info(
-        "[CBoard] Speed: {:.2f}, Mode: {}, Shoot: {}", //, FT: {:.2f}",
-        bullet_speed);//, ft_angle);, SHOOT_MODES[shoot_mode]
+        "[CBoard] Speed: {:.2f}, Mode: {}, Shoot: {}",  //, FT: {:.2f}",
+        bullet_speed);                                  //, ft_angle);, SHOOT_MODES[shoot_mode]
       last_log_time = timestamp;
     }
   } else {

@@ -10,6 +10,7 @@
 
 #include "tasks/auto_aim/aimer.hpp"
 #include "tasks/auto_aim/rmcs_ekf/projection.hpp"
+#include "tasks/auto_aim/shooter.hpp"
 #include "tasks/auto_aim/tracker.hpp"
 
 namespace
@@ -125,6 +126,119 @@ void aim_switching(const std::string & config)
     aimer.aim({}, base.time(), 24.5, false);
     require(!aimer.debug_aim_point.valid, "empty target must clear stale aim marker");
   }
+}
+void shooter_pitch_window(const std::string & config)
+{
+  auto_aim::Aimer aimer(config);
+  auto_aim::Shooter shooter(config);
+  const auto target = auto_aim::Target::synthetic(2.5, 0., .25, .08);
+  const io::Command command{true, false, 0., -.15};
+  aimer.debug_aim_point = {true, {2.25, 0., .3, 0.}, 0};
+
+  require(
+    !shooter.shoot(command, aimer, {target}, {0., -.12, 0.}),
+    "yaw aligned but pitch outside the window must inhibit firing");
+  require(
+    !shooter.shoot(command, aimer, {target}, {0., -.18, 0.}),
+    "pitch outside the opposite edge must inhibit firing");
+  require(
+    shooter.shoot(command, aimer, {target}, {0., -.16, 0.}),
+    "both angles inside the window must allow firing");
+  require(
+    !shooter.shoot(command, aimer, {target}, {.10, -.15, 0.}),
+    "pitch alignment must not bypass the yaw window");
+
+  aimer.debug_aim_point.xyza.x() = 4.;
+  require(
+    !shooter.shoot(command, aimer, {target}, {0., -.162, 0.}),
+    "the same offset must be rejected by a narrower pitch window at longer range");
+  aimer.debug_aim_point.xyza.x() = 10.;
+  require(
+    !shooter.shoot(command, aimer, {target}, {0., -.156, 0.}),
+    "a physical pitch window must continue shrinking beyond five meters");
+
+  auto_aim::Shooter spinning_shooter(config);
+  const auto spinning_target = auto_aim::Target::synthetic(2.5, 5., .25, .08);
+  const io::Command spinning_command{true, false, .20, -.15};
+  aimer.debug_aim_point.xyza.x() = 2.25;
+  require(
+    !spinning_shooter.shoot(spinning_command, aimer, {spinning_target}, {.20, -.12, 0.}),
+    "the spin branch must also require pitch alignment");
+}
+void shooter_geometry(const std::string & config)
+{
+  auto_aim::Aimer aimer(config);
+  const auto target = auto_aim::Target::synthetic(4.25, 0., .25, .08);
+  const auto spin = auto_aim::Target::synthetic(4.25, 12., .25, .08);
+  const io::Command command{true, false, 0., -.15};
+  aimer.debug_aim_point = {true, {4., 0., .3, 0.}, 0};
+  auto_aim::Shooter shooter(config);
+  require(
+    !shooter.shoot(command, aimer, {target}, {.03, -.15, 0.}),
+    "yaw outside physical plate width must be rejected");
+  require(
+    !shooter.shoot(command, aimer, {spin}, {.03, -.15, 0.}),
+    "rotation must not widen the physical window");
+  require(
+    shooter.shoot(command, aimer, {target}, {.01, -.15, 0.}),
+    "front-facing plate accepts an interior ray");
+  auto large = target;
+  large.armor_type = auto_aim::ArmorType::big;
+  require(
+    !shooter.shoot(command, aimer, {target}, {.02, -.15, 0.}) &&
+      shooter.shoot(command, aimer, {large}, {.02, -.15, 0.}),
+    "large and small plates must use their configured physical widths");
+  aimer.debug_aim_point.xyza.w() = 70. / 57.3;
+  require(
+    !shooter.shoot(command, aimer, {target}, {.01, -.15, 0.}), "oblique plate narrows yaw window");
+  aimer.debug_aim_point.xyza = {-4., 0., .3, M_PI};
+  const io::Command wrapped{true, false, M_PI - .002, -.15};
+  require(
+    shooter.shoot(wrapped, aimer, {target}, {-M_PI + .002, -.15, 0.}),
+    "a wrapped yaw and command change must not veto an aligned ray");
+  aimer.debug_aim_point.xyza = {4., 0., .3, M_PI};
+  require(
+    !shooter.shoot(command, aimer, {target}, {0., -.15, 0.}),
+    "rear-facing plate must not authorize firing");
+}
+void shooter_attitude_time(const std::string & config)
+{
+  auto_aim::Aimer aimer(config);
+  auto_aim::Solver solver(config);
+  auto_aim::Shooter shooter(config);
+  const auto target = auto_aim::Target::synthetic(4.25, 0., .25, .08);
+  aimer.debug_aim_point = {true, {4., 0., 0., 0.}, 0};
+  const io::Command cmd{true, false, 0., 0.};
+  tools::time_sync::ImuQuery sample;
+  sample.status = tools::time_sync::ImuQueryStatus::ok;
+  sample.left_time = sample.right_time = std::chrono::steady_clock::now();
+  require(shooter.shoot(cmd, aimer, {target}, sample, solver), "fresh aligned IMU permits firing");
+  sample.q.coeffs().setZero();
+  require(
+    !shooter.shoot(cmd, aimer, {target}, sample, solver), "invalid quaternion must reject firing");
+  sample.q = Eigen::Quaterniond::Identity();
+  sample.left_time -= std::chrono::milliseconds(1);
+  require(
+    !shooter.shoot(cmd, aimer, {target}, sample, solver),
+    "interpolation must not masquerade as a latest sample");
+  sample.left_time = sample.right_time = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+  require(
+    !shooter.shoot(cmd, aimer, {target}, sample, solver), "stale aligned IMU must reject firing");
+  sample.left_time = sample.right_time = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+  require(
+    !shooter.shoot(cmd, aimer, {target}, sample, solver),
+    "future IMU timestamp must reject firing");
+  sample = {};
+  require(!shooter.shoot(cmd, aimer, {target}, sample, solver), "missing IMU must reject firing");
+  const auto before = solver.R_gimbal2world();
+  sample.status = tools::time_sync::ImuQueryStatus::ok;
+  sample.left_time = sample.right_time = std::chrono::steady_clock::now();
+  sample.q = Eigen::Quaterniond(Eigen::AngleAxisd(.4, Eigen::Vector3d::UnitZ()));
+  require(
+    !shooter.shoot(cmd, aimer, {target}, sample, solver),
+    "new misaligned IMU overrides old aligned pose");
+  require(
+    solver.R_gimbal2world().isApprox(before), "fire check must preserve exposure-time solver pose");
 }
 std::string tracker_config(
   const std::string & base, int confirmations, int missing, bool nis_case = false)
@@ -438,6 +552,9 @@ int main(int argc, char ** argv)
   run("aim switching", [&] { aim_switching(argc > 1 ? argv[1] : "configs/daedalus.yaml"); });
   if (argc > 2) run("aim switching with unequal delays", [&] { aim_switching(argv[2]); });
   const std::string config = argc > 1 ? argv[1] : "configs/daedalus.yaml";
+  run("shooter pitch window", [&] { shooter_pitch_window(config); });
+  run("shooter geometry", [&] { shooter_geometry(config); });
+  run("shooter attitude time", [&] { shooter_attitude_time(config); });
   run("frame allowance 2", [&] { target_lifecycle(config, 2, 10, false); });
   run("frame allowance 15", [&] { target_lifecycle(config, 15, 10, false); });
   run("frame allowance 15 at 50 FPS / omni", [&] { target_lifecycle(config, 15, 20, true); });

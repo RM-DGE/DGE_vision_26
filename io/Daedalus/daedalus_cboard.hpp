@@ -1,14 +1,14 @@
 #ifndef IO__DAEDALUS_CBOARD_HPP
 #define IO__DAEDALUS_CBOARD_HPP
 
+#include <yaml-cpp/yaml.h>
+
 #include <algorithm>
 #include <cmath>
 #include <utility>
 
-#include <yaml-cpp/yaml.h>
-
-#include "io/cboard.hpp"
 #include "io/Daedalus/shared.hpp"
+#include "io/cboard.hpp"
 #include "tools/math_tools.hpp"
 
 namespace io
@@ -55,11 +55,19 @@ public:
   {
     auto & shared = DaedalusShared::instance("");
     std::lock_guard<std::mutex> lock(shared.imu_observer_mutex);
-    if (!observer) { shared.imu_observer = {}; return; }
+    if (!observer) {
+      shared.imu_observer = {};
+      return;
+    }
     shared.imu_observer = [callback = std::move(observer)](
-      const Eigen::Quaterniond& q, tools::time_sync::TimePoint timestamp) {
+                            const Eigen::Quaterniond & q, tools::time_sync::TimePoint timestamp) {
       callback(ImuSample{q, timestamp});
     };
+  }
+
+  tools::time_sync::ImuQuery latest_imu() override
+  {
+    return DaedalusShared::instance("").imu_buffer.latest();
   }
 
   void send(Command command) const override

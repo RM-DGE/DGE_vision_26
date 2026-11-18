@@ -1,128 +1,82 @@
 #include "shooter.hpp"
 
 #include <yaml-cpp/yaml.h>
-#include <cmath>
-#include <algorithm> // 引入 std::min
 
-#include "tools/logger.hpp"
+#include <algorithm>
+#include <cmath>
+#include <stdexcept>
+
+#include "solver.hpp"
 #include "tools/math_tools.hpp"
 
 namespace auto_aim
 {
-Shooter::Shooter(const std::string & config_path) : last_command_{false, false, 0, 0}
+Shooter::Shooter(const std::string & config_path)
 {
-  auto yaml = YAML::LoadFile(config_path);
-  first_tolerance_ = yaml["first_tolerance"].as<double>() / 57.3;    // degree to rad
-  second_tolerance_ = yaml["second_tolerance"].as<double>() / 57.3;  // degree to rad
-  judge_distance_ = yaml["judge_distance"].as<double>();
+  const auto yaml = YAML::LoadFile(config_path);
+  width_small_m_ = yaml["shoot_width_small_m"].as<double>(0.12);
+  width_large_m_ = yaml["shoot_width_large_m"].as<double>(0.23);
+  height_m_ = yaml["shoot_height_m"].as<double>(0.08);
+  max_imu_age_ms_ = yaml["shoot_max_imu_age_ms"].as<double>(20.0);
   auto_fire_ = yaml["auto_fire"].as<bool>();
+  for (double value : {width_small_m_, width_large_m_, height_m_, max_imu_age_ms_})
+    if (!std::isfinite(value) || value <= 0)
+      throw std::invalid_argument("Shooter dimensions and IMU age must be finite and positive");
 }
 
 bool Shooter::shoot(
-  const io::Command & command, const auto_aim::Aimer & aimer,
-  const std::list<auto_aim::Target> & targets, const Eigen::Vector3d & gimbal_pos)
+  const io::Command & command, const Aimer & aimer, const std::list<Target> & targets,
+  const tools::time_sync::ImuQuery & attitude, const Solver & solver)
 {
-  if (!command.control || targets.empty() || !auto_fire_ || !aimer.debug_aim_point.valid) {
-    last_command_ = command;
+  if (
+    !attitude.valid() || attitude.left_time != attitude.right_time ||
+    !attitude.q.coeffs().allFinite() || std::abs(attitude.q.squaredNorm() - 1.) > .1)
     return false;
-  }
-
-  auto target = targets.front();
-  auto target_x = target.state().x;
-  auto target_y = target.state().y;
-  
-  // 计算目标距离
-  double distance = std::sqrt(tools::square(target_x) + tools::square(target_y));
-  
-  // 获取目标的旋转角速度 (omega)
-  double omega = target.state().rotation_speed; 
-  double abs_omega = std::abs(omega);
-
-  // 1. 基础宽容度判定
-  double tolerance = distance > judge_distance_ ? second_tolerance_ : first_tolerance_;
-
-  // 2. 小陀螺动态容差放大
-  if (abs_omega > 1.5) {
-    double multiplier = 1.0 + 0.4 * (abs_omega - 1.5);
-    multiplier = std::min(multiplier, 2.0); // 为了安全，最高放大2倍
-    tolerance *= multiplier;
-  }
-
-  // 3. 计算云台当前绝对 Yaw 与 预测指令 Yaw 的最短角度误差
-  double yaw_error = std::abs(tools::limit_rad(gimbal_pos[0] - command.yaw));
-  
-  // 4. 计算两次指令的突变差值 (当前预测点 vs 上一帧预测点)
-  double command_diff = std::abs(tools::limit_rad(last_command_.yaw - command.yaw));
-
-  // --- 新增：物理防走火极限 ---
-  // 设定小陀螺切换装甲板允许的最大合法物理跳变（18度 = 0.314 弧度）
-  // 超过这个值，说明是切换到了另一个机器人，或者是目标刚刚进入视野，绝对禁止开火！
-  double max_plate_switch_jump = 18.0 / 57.3; 
-
-  bool should_shoot = false;
-
-  // 逻辑 A: 常规平移目标
-  // 要求极高的连续性（严苛的 command_diff），防止手抖或检测框微小跳动
-  bool normal_shoot = (command_diff < tolerance * 2) && (yaw_error < tolerance);
-
-  // 逻辑 B: 应对小陀螺/前哨站
-  // 允许跳变，但跳变必须小于装甲板切换的物理极限 (max_plate_switch_jump)
-  // 且云台枪管当前扫过了被放大的判定窗口 (yaw_error < tolerance)
-  bool spin_shoot = (abs_omega > 1.5) && 
-                    (command_diff < max_plate_switch_jump) && 
-                    (yaw_error < tolerance);
-
-  if (normal_shoot || spin_shoot) {
-    should_shoot = true;
-  }
-
-  last_command_ = command;
-  return should_shoot;
+  const double age_ms = std::chrono::duration<double, std::milli>(
+                          std::chrono::steady_clock::now() - attitude.right_time)
+                          .count();
+  if (age_ms < 0 || age_ms > max_imu_age_ms_) return false;
+  const auto ypr = tools::eulers(solver.R_gimbal2world(attitude.q.normalized()), 2, 1, 0);
+  return shoot(command, aimer, targets, ypr);
 }
 
+bool Shooter::shoot(
+  const io::Command & command, const Aimer & aimer, const std::list<Target> & targets,
+  const Eigen::Vector3d & gimbal_pos)
+{
+  if (
+    !command.control || targets.empty() || !auto_fire_ || !aimer.debug_aim_point.valid ||
+    !gimbal_pos.allFinite() || !std::isfinite(command.yaw) || !std::isfinite(command.pitch))
+    return false;
+  const auto & aim = aimer.debug_aim_point.xyza;
+  if (!aim.allFinite()) return false;
+  const double distance = std::hypot(aim.x(), aim.y());
+  if (distance < .01) return false;
+  const double bearing = std::atan2(aim.y(), aim.x());
+  const double facing = std::cos(tools::limit_rad(aim.w() - bearing));
+  if (facing <= 1e-6) return false;
+
+  // Actual horizontal edge rays of the predicted plate; retain the smaller
+  // half-window to avoid enlarging the asymmetric projection of an oblique plate.
+  const double half_width =
+    .5 * (targets.front().armor_type == ArmorType::big ? width_large_m_ : width_small_m_);
+  const Eigen::Vector2d edge(-std::sin(aim.w()) * half_width, std::cos(aim.w()) * half_width);
+  const double left =
+    tools::limit_rad(std::atan2(aim.y() + edge.y(), aim.x() + edge.x()) - bearing);
+  const double right =
+    tools::limit_rad(std::atan2(aim.y() - edge.y(), aim.x() - edge.x()) - bearing);
+  if (left * right >= 0) return false;
+  const double yaw_window = std::min(std::abs(left), std::abs(right));
+  const double yaw_error = std::abs(tools::limit_rad(gimbal_pos[0] - command.yaw));
+  if (yaw_error >= yaw_window) return false;
+
+  // Preserve the existing conservative oblique-plate height reduction.
+  // No distance cap: a fixed physical region gets smaller in angle at longer range.
+  const double half_height = .5 * height_m_ * facing;
+  const double center_pitch = -std::atan2(aim.z(), distance);
+  const double lower = -std::atan2(aim.z() + half_height, distance) - center_pitch;
+  const double upper = -std::atan2(aim.z() - half_height, distance) - center_pitch;
+  const double pitch_error = gimbal_pos[1] - command.pitch;
+  return pitch_error >= lower && pitch_error <= upper;
+}
 }  // namespace auto_aim
-
-
-// #include "shooter.hpp"
-
-// #include <yaml-cpp/yaml.h>
-
-// #include "tools/logger.hpp"
-// #include "tools/math_tools.hpp"
-
-// namespace auto_aim
-// {
-// Shooter::Shooter(const std::string & config_path) : last_command_{false, false, 0, 0}
-// {
-//   auto yaml = YAML::LoadFile(config_path);
-//   first_tolerance_ = yaml["first_tolerance"].as<double>() / 57.3;    // degree to rad
-//   second_tolerance_ = yaml["second_tolerance"].as<double>() / 57.3;  // degree to rad
-//   judge_distance_ = yaml["judge_distance"].as<double>();
-//   auto_fire_ = yaml["auto_fire"].as<bool>();
-// }
-
-// bool Shooter::shoot(
-//   const io::Command & command, const auto_aim::Aimer & aimer,
-//   const std::list<auto_aim::Target> & targets, const Eigen::Vector3d & gimbal_pos)
-// {
-//   if (!command.control || targets.empty() || !auto_fire_) return false;
-
-//   auto target_x = targets.front().ekf_x()[0];
-//   auto target_y = targets.front().ekf_x()[2];
-//   auto tolerance = std::sqrt(tools::square(target_x) + tools::square(target_y)) > judge_distance_
-//                      ? second_tolerance_
-//                      : first_tolerance_;
-//   // tools::logger()->debug("d(command.yaw) is {:.4f}", std::abs(last_command_.yaw - command.yaw));
-//   if (
-//     std::abs(last_command_.yaw - command.yaw) < tolerance * 2 &&  //此时认为command突变不应该射击
-//     std::abs(gimbal_pos[0] - last_command_.yaw) < tolerance &&    //应该减去上一次command的yaw值
-//     aimer.debug_aim_point.valid) {
-//     last_command_ = command;
-//     return true;
-//   }
-
-//   last_command_ = command;
-//   return false;
-// }
-
-// }  // namespace auto_aim

@@ -47,7 +47,7 @@ if(EKF_ONLY)
   add_executable(ekf_replay tools/ekf_replay.cpp)
   target_link_libraries(ekf_replay PRIVATE ekf_core)
   if(BUILD_TESTING)
-    add_executable(ekf_algorithm_test tests/ekf_algorithm_test.cpp)
+    add_executable(ekf_algorithm_test tests/ekf_algorithm_test.cpp tasks/auto_aim/shooter.cpp)
     target_link_libraries(ekf_algorithm_test PRIVATE ekf_core)
     add_test(NAME ekf_algorithm COMMAND ekf_algorithm_test
       ${PROJECT_SOURCE_DIR}/configs/daedalus.yaml ${PROJECT_SOURCE_DIR}/configs/sentry.yaml)

@@ -53,6 +53,19 @@ void orientation(const Eigen::Quaterniond & got, const Eigen::Quaterniond & want
 }
 void test_interpolation_and_boundaries()
 {
+  ImuTimeBuffer live;
+  check(!live.latest().valid(), "latest IMU must fail on an empty buffer");
+  live.push({at(0), yaw(0)});
+  live.push({at(10), yaw(1)});
+  const auto latest = live.latest();
+  check(
+    latest.valid() && latest.left_time == at(10) && latest.right_time == at(10),
+    "latest IMU must preserve its real timestamp");
+  orientation(latest.q, yaw(1));
+  orientation(live.query(at(0), 20).q, yaw(0));
+  check(!live.query(at(11), 20).valid(), "latest access must not enable future interpolation");
+  live.clear();
+  check(!live.latest().valid(), "clearing on reconnect must discard the latest attitude");
   const std::vector<TimedImu> samples{{at(0), yaw(0)}, {at(10), yaw(1)}};
   check(query_samples({}, at(0), 20).status == ImuQueryStatus::empty, "empty buffer status");
   auto middle = query_samples(samples, at(2.5), 20);
