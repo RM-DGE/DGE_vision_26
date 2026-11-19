@@ -1,0 +1,1 @@
+/usr/bin/c++ -O3 -DNDEBUG CMakeFiles/time_sync_core_test.dir/tests/time_sync_core_test.cpp.o -o time_sync_core_test  libtime_offset_calibration.a libtime_sync_core.a /usr/lib/x86_64-linux-gnu/libyaml-cpp.so.0.7.0 

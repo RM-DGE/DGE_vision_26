@@ -1,0 +1,2 @@
+/usr/bin/ar qc libtime_sync_recording.a CMakeFiles/time_sync_recording.dir/tools/time_sync_recorder.cpp.o
+/usr/bin/ranlib libtime_sync_recording.a

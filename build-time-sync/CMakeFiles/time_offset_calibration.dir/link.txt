@@ -1,0 +1,2 @@
+/usr/bin/ar qc libtime_offset_calibration.a CMakeFiles/time_offset_calibration.dir/tools/time_offset_calibration.cpp.o
+/usr/bin/ranlib libtime_offset_calibration.a

@@ -1,0 +1,2 @@
+/usr/bin/ar qc libtime_sync_core.a CMakeFiles/time_sync_core.dir/tools/imu_time_buffer.cpp.o CMakeFiles/time_sync_core.dir/tools/time_sync_config.cpp.o CMakeFiles/time_sync_core.dir/tools/time_sync_session.cpp.o
+/usr/bin/ranlib libtime_sync_core.a
